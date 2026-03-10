@@ -1,0 +1,17 @@
+# Environment
+.env
+*.env.local
+
+# Node
+node_modules/
+dist/
+
+# Foundry
+reference/cache/
+reference/out/
+reference/broadcast/
+reference/lib/
+reference/typechain-types/
+
+# Build artifacts
+*.zip

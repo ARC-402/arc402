@@ -1,0 +1,19 @@
+{
+  "name": "@arc402/sdk",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "demo:insurance": "ts-node src/demos/demo-insurance.ts",
+    "demo:research": "ts-node src/demos/demo-research.ts",
+    "demo:multiagent": "ts-node src/demos/demo-multiagent.ts"
+  },
+  "dependencies": {
+    "ethers": "^6.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0",
+    "@types/node": "^20.0.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "network": "Base Sepolia",
+  "chainId": 84532,
+  "deployedAt": "2026-03-10",
+  "deployer": "0x59A32A792d0f25B0E0a4A4aFbFDf514b94B102fB",
+  "contracts": {
+    "PolicyEngine":          "0x6B89621c94a7105c3D8e0BD8Fb06814931CA2CB2",
+    "TrustRegistry":         "0xdA1D377991B2E580991B0DD381CdD635dd71aC39",
+    "IntentAttestation":     "0xbB5E1809D4a94D08Bf1143131312858143D018f1",
+    "SettlementCoordinator": "0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460"
+  },
+  "note": "Canonical deployment. Users deploy ARC402Wallet pointing to these addresses."
+}
