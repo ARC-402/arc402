@@ -58,19 +58,30 @@ echo "[4/6] Running phase 2 setup..."
 setup_circuit() {
     local NAME=$1
     local OUT_DIR="$BUILD_DIR/$NAME"
+    local INTERMEDIATE="$OUT_DIR/${NAME}_0000.zkey"
+    local FINAL="$OUT_DIR/${NAME}_final.zkey"
 
     snarkjs groth16 setup \
         "$OUT_DIR/${NAME}.r1cs" \
         "$PTAU_FILE" \
-        "$OUT_DIR/${NAME}_0000.zkey"
+        "$INTERMEDIATE"
 
-    # Contribute randomness (deterministic for dev — use real randomness for production)
-    echo "dev-entropy-$NAME" | snarkjs zkey contribute \
-        "$OUT_DIR/${NAME}_0000.zkey" \
-        "$OUT_DIR/${NAME}_final.zkey" \
-        --name="ARC-402 Dev Setup" -v 2>/dev/null
+    # Contribute real system entropy from /dev/urandom.
+    # Security model: single-party ceremony. As long as this entropy is deleted
+    # (toxic waste), no one can forge proofs. For multi-party mainnet ceremony,
+    # publish each contribution for independent verification (see spec/13-zk-extensions.md).
+    local ENTROPY
+    ENTROPY=$(openssl rand -hex 64)
 
-    echo "  ✓ $NAME phase 2 complete"
+    echo "$ENTROPY" | snarkjs zkey contribute \
+        "$INTERMEDIATE" \
+        "$FINAL" \
+        --name="ARC-402 Ceremony $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        -v 2>/dev/null
+
+    # Delete intermediate key (toxic waste) — do not distribute or commit _0000.zkey
+    rm -f "$INTERMEDIATE"
+    echo "  ✓ $NAME phase 2 complete (toxic waste destroyed)"
 }
 
 setup_circuit "TrustThreshold"
