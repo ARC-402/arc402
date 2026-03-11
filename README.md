@@ -14,13 +14,13 @@ This works until it doesn't. And at scale, it doesn't.
 
 ## What ARC-402 Is
 
-ARC-402 is an open standard that defines five primitives missing from every current wallet architecture:
+ARC-402 is an open standard that defines five primitives missing from every current wallet architecture. In the current public narrative, canonical capability taxonomy is the primary discovery surface; softer trust and identity signals remain secondary and should not be overstated:
 
 | Primitive | What It Solves |
 |-----------|----------------|
 | **Policy Object** | Portable, declarative spending rules that travel with the wallet |
 | **Context Binding** | Spending authority shifts based on what the agent is *doing*, not just flat caps |
-| **Trust Primitive** | On-chain trust score that evolves with behaviour — autonomy compounds over time |
+| **Trust Primitive** | On-chain trust substrate that should be read alongside canonical capabilities and current protocol maturity — not as a standalone truth oracle |
 | **Intent Attestation** | Agent signs a statement explaining *why* before spending — stored on-chain |
 | **Multi-Agent Settlement** | Bilateral policy verification for agent-to-agent transactions |
 

@@ -21,12 +21,12 @@ This repository is strong enough to support controlled counterparties and audit-
 | `TrustRegistryV2` | v2 trust graph — capability-specific, counterparty-diverse, time-decayed |
 | `IntentAttestation` | Single-use intent proofs — every spend must be pre-attested |
 | `SettlementCoordinator` | Multi-agent bilateral settlement with ETH/ERC-20 support |
-| `AgentRegistry` | Agent discovery — capabilities, endpoints, endpoint stability, heartbeat-based operational metrics |
+| `AgentRegistry` | Agent directory and compatibility metadata — descriptive capabilities, endpoints, endpoint stability, and heartbeat-based operational metrics |
 | `ServiceAgreement` | Bilateral escrow agreements — propose/accept/deliver/review/remediation/dispute/release lifecycle |
 | `X402Interceptor` | HTTP 402 payment bridge — governed API pay-per-call |
 | `WalletFactory` | Deploy deterministic ARC402Wallets |
 | `ReputationOracle` | Social trust signals — trust-weighted ENDORSE/WARN/BLOCK with auto-WARN cooldown and window caps |
-| `SponsorshipAttestation` | Opt-in agency-agent association with optional verified / enterprise identity tiers |
+| `SponsorshipAttestation` | Opt-in agency-agent association with optional verified / enterprise identity tiers; informational unless a deployment adds stronger external verification rules |
 
 ### Security Features
 
@@ -42,6 +42,8 @@ This repository is strong enough to support controlled counterparties and audit-
 - **PolicyEngine self-registration** — wallets can only register themselves
 
 ### Trust Graph v2
+
+Canonical capability taxonomy should be the first filter for discovery and matching. Trust Graph v2 then helps rank or inspect counterparties within those canonical domains.
 
 - Capability-specific scores (top-5 on-chain, hash-keyed)
 - Counterparty diversity (halving table — can't farm with the same counterparty)
@@ -66,7 +68,8 @@ These signals are useful reputation inputs, but they should not yet be presented
 - Self-reported heartbeat submissions in `AgentRegistry`
 - Configurable heartbeat interval + grace period per agent
 - Lightweight rolling latency, uptime score, response score, and missed-heartbeat counters
-- On-chain primitives intended for future discovery scoring, not centralized monitoring
+- Informational for operators today; not a strong ranking-grade truth signal unless independently observed or externally anchored
+- Useful for liveness/context, not as a standalone trust guarantee
 
 Operational trust is informational. It is not yet an independently verified trust primitive for public ranking or legitimacy claims.
 

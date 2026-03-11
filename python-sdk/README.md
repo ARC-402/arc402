@@ -1,6 +1,6 @@
 # arc402
 
-ARC-402 is a transport-agnostic coordination layer for autonomous agents: governed wallets, escrow-backed service agreements, portable trust signals, optional sponsorship, and negotiated remediation.
+ARC-402 is a transport-agnostic coordination layer for autonomous agents: governed wallets, escrow-backed service agreements, canonical capability taxonomy for discovery, negotiated remediation, and trust/trust-adjacent signals with explicit maturity boundaries.
 
 This SDK documents the current contract surface for controlled deployments and closed pilots. It should not be read as a claim that public-market dispute legitimacy or manipulation-resistant reputation is already complete.
 
@@ -9,10 +9,10 @@ This Python SDK now covers both the original wallet flows and the current v0.2 p
 - trust registry v1/v2 reads
 - service agreements with remediation + dispute evidence flows
 - reputation oracle reads/interactions
-- sponsorship + identity tier attestations
-- capability taxonomy reads
+- sponsorship + identity tier attestations (informational unless externally strengthened by a deployment)
+- capability taxonomy reads for canonical discovery
 - governance multisig reads
-- heartbeat / operational trust reads through the agent registry
+- heartbeat / operational trust reads through the agent registry (informational today, not strong ranking-grade truth)
 
 > Launch-scope note: this SDK documents the current public/closed-pilot contract surface. Experimental ZK/privacy work is intentionally out of the default integration path and should be treated as roadmap-only until re-audited.
 
@@ -114,7 +114,7 @@ await agreement.resolve_dispute_detailed(
 )
 ```
 
-## Reputation + sponsorship + identity tier
+## Reputation + sponsorship + identity tier (secondary signals)
 
 ```python
 from arc402 import IdentityTier, ReputationOracleClient, SignalType, SponsorshipAttestationClient
@@ -141,7 +141,7 @@ print(sponsorship.get_attestation(attestation_id))
 print(sponsorship.get_highest_tier("0xAgent..."))
 ```
 
-## Capability taxonomy + governance + operational trust
+## Capability taxonomy + governance + operational context
 
 ```python
 from arc402 import ARC402GovernanceClient, AgentRegistryClient, CapabilityRegistryClient, Trust
@@ -164,6 +164,12 @@ print(governance.get_transaction(0))
 
 The SDK only wraps methods that exist in the current reference contracts.
 
+Discovery guidance for current public integrations:
+- use canonical capabilities from `CapabilityRegistry` as the primary matching surface
+- treat free-text capability strings in `AgentRegistry` as compatibility metadata only
+- treat sponsorship / identity tiers as informational unless your deployment independently verifies them
+- treat heartbeat / operational trust as liveness context, not ranking-grade truth
+
 That means:
 - negotiated remediation is supported through `request_revision`, `respond_to_revision`, transcript-chain helpers, and remediation/dispute read models
 - evidence anchoring and partial-resolution outcomes are supported through the current `ServiceAgreement` contract
@@ -178,6 +184,10 @@ Not yet wrapped as first-class high-level Python workflows unless/until they exi
 - automated machine-checkable dispute resolution engines
 - human review marketplace orchestration
 - richer delivery schema typing beyond the current hash-anchored agreement surface
+
+Also note:
+- reputation and heartbeat data should currently be treated as useful inputs, not final truth guarantees
+- this README describes the current contract/API surface, not open-public readiness
 - experimental ZK/privacy extensions (kept out of the default public-launch SDK path)
 
 ## Links

@@ -1,6 +1,6 @@
 # @arc402/sdk
 
-Typed TypeScript SDK for the current ARC-402 network workflow: discovery, off-chain negotiation payloads, escrowed hiring, delivery verification, remediation, disputes, reputation signals, sponsorship, capability taxonomy, governance reads, and operational trust reads.
+Typed TypeScript SDK for the current ARC-402 network workflow: discovery, off-chain negotiation payloads, escrowed hiring, delivery verification, remediation, disputes, reputation signals, sponsorship, canonical capability taxonomy, governance reads, and operational-context reads.
 
 This package tracks the current contract surface for closed pilots and controlled integrations. It does not, by itself, imply open-public dispute legitimacy or manipulation-resistant public reputation.
 
@@ -19,7 +19,7 @@ npm install @arc402/sdk ethers
 - `SponsorshipAttestationClient`
 - `CapabilityRegistryClient`
 - `GovernanceClient`
-- heartbeat / operational trust reads on `AgentRegistry`
+- heartbeat / operational trust reads on `AgentRegistry` (informational today, not strong ranking-grade truth)
 - negotiation message helpers for Spec 14 payloads
 
 ## Quick start
@@ -46,7 +46,13 @@ const capability = new CapabilityRegistryClient(process.env.CAPABILITY_REGISTRY!
 const reputation = new ReputationOracleClient(process.env.REPUTATION_ORACLE!, provider);
 
 const agents = await registry.listAgents(20);
-const legalAgents = agents.filter((agent) => agent.capabilities.includes("legal.patent-analysis.us.v1"));
+const enrichedAgents = await Promise.all(agents.map(async (agent) => ({
+  ...agent,
+  canonicalCapabilities: await capability.getCapabilities(agent.wallet),
+})));
+const legalAgents = enrichedAgents.filter((agent) =>
+  agent.canonicalCapabilities.includes("legal.patent-analysis.us.v1")
+);
 
 const negotiation = createNegotiationProposal({
   from: await signer.getAddress(),
@@ -124,7 +130,7 @@ const dispute = await agreement.getDisputeCase(agreementId);
 console.log({ remediation, dispute });
 ```
 
-## Sponsorship + governance + operational trust
+## Sponsorship + governance + operational context
 
 ```ts
 import {

@@ -9,7 +9,7 @@
 
 ## Abstract
 
-`ServiceAgreement` is an on-chain, escrow-backed contract between two ARC-402 agent wallets that formalises a unit of work. The client wallet locks payment in escrow when proposing the agreement. The provider wallet accepts, delivers, and claims escrow on fulfillment. If either party disputes the outcome, escrow remains locked pending resolution. The full lifecycle — propose, accept, fulfill, dispute, resolve — is recorded on-chain, creating an auditable work trail that feeds back into both parties' trust scores. ServiceAgreement is the mechanism by which agents transact with each other under contractual guarantees rather than informal API calls.
+`ServiceAgreement` is an on-chain, escrow-backed contract between two ARC-402 agent wallets that formalises a unit of work. The client wallet locks payment in escrow when proposing the agreement. The provider wallet accepts, commits delivery, and then enters verification / remediation / dispute flow before final release in the public path. A legacy `fulfill()` path remains ABI-compatible for explicitly trusted legacy integrations, but it is not the recommended public lifecycle. The full lifecycle — propose, accept, deliver, review, remediate, dispute, resolve — is recorded on-chain, creating an auditable work trail that feeds back into both parties' trust context. ServiceAgreement is the mechanism by which agents transact with each other under contractual guarantees rather than informal API calls.
 
 ---
 
@@ -64,7 +64,7 @@ struct Agreement {
 
 **`client`** — The ARC-402 wallet that proposes and pays. Set to `msg.sender` at proposal time and immutable thereafter.
 
-**`provider`** — The ARC-402 wallet that will deliver the service. The client selects the provider from a prior AgentRegistry discovery query. The provider is invited — they accept or ignore the proposal.
+**`provider`** — The ARC-402 wallet that will deliver the service. The client selects the provider from a prior discovery flow that SHOULD prefer canonical capability verification via `CapabilityRegistry`, with `AgentRegistry` acting as the directory and compatibility layer. The provider is invited — they accept or ignore the proposal.
 
 **`serviceType`** — Mirrors the `serviceType` field in `AgentInfo`. Provides a consistent taxonomy between the registry and the agreement layer. Clients SHOULD use the same value they found in the registry.
 

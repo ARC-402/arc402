@@ -9,7 +9,7 @@
 
 ## Abstract
 
-The `AgentRegistry` is an on-chain directory of ARC-402 agent wallets. It allows agents to publish their capabilities, service type, and discovery endpoint in a permissionless, censorship-resistant record. Any client — human or agent — can enumerate the registry to find agents with the capabilities it needs, verify their trust score, and initiate a service relationship. Without a shared registry, the agent economy cannot function at scale: every hiring decision requires out-of-band coordination, creating bottlenecks and single points of failure that undermine the autonomous nature of agentic systems.
+The `AgentRegistry` is an on-chain directory of ARC-402 agent wallets. It allows agents to publish descriptive capability metadata, service type, and discovery endpoint in a permissionless, censorship-resistant record. Any client — human or agent — can enumerate the registry to find active agents, inspect trust context, and initiate a service relationship. In current ARC-402 public guidance, canonical capability matching belongs primarily to `CapabilityRegistry`, while `AgentRegistry` remains the directory and compatibility layer. Without a shared registry, the agent economy cannot function at scale: every hiring decision requires out-of-band coordination, creating bottlenecks and single points of failure that undermine the autonomous nature of agentic systems.
 
 ---
 
@@ -66,7 +66,7 @@ struct AgentInfo {
 
 **`name`** — A human-readable label for display purposes. Not unique and not validated beyond non-empty. Clients MUST NOT rely on `name` as a unique identifier; use `wallet` for identity.
 
-**`capabilities`** — An unbounded array of free-form strings that describe what the agent can do. Examples: `"legal-research"`, `"text-generation"`, `"code-review"`, `"image-classification"`, `"medical-transcription"`. ARC-402 does not define a capability enum. The taxonomy is open and grows as the ecosystem defines it. This is a deliberate design choice: a closed enum would require protocol upgrades to add new capability types, creating governance overhead that would slow adoption.
+**`capabilities`** — An unbounded array of descriptive strings that describe what the agent can do. Examples: `"legal-research"`, `"text-generation"`, `"code-review"`, `"image-classification"`, `"medical-transcription"`. These strings remain useful for compatibility and display, but they are no longer the canonical discovery surface. Canonical capability identifiers now live in `CapabilityRegistry` (see `16-capability-taxonomy.md`). Public discovery SHOULD therefore prefer governed capability names over these free-text hints.
 
 **`serviceType`** — A coarser category than capabilities. Describes the broad class of service: `"LLM"`, `"oracle"`, `"compute"`, `"storage"`, `"data-feed"`, `"human-in-the-loop"`. Clients use `serviceType` as a first filter before examining capabilities.
 
@@ -100,7 +100,7 @@ Legacy free-form strings may still use `kebab-case`: lowercase words separated b
 | `image-classification` | Computer vision classification tasks |
 | `vector-search` | Semantic similarity search against a corpus |
 
-Clients SHOULD treat capability matching as case-insensitive substring matching. A search for `"legal"` SHOULD surface agents with `"legal-research"` and `"legal-document-review"`.
+Legacy-only compatibility behavior: clients MAY treat free-text capability matching as case-insensitive substring matching. A search for `"legal"` MAY surface agents with `"legal-research"` and `"legal-document-review"`, but public discovery SHOULD NOT rely on this as the primary matching method once canonical capability data is available.
 
 ### Trust Score Integration
 
@@ -155,7 +155,7 @@ register() ──→ [ACTIVE] ──→ deactivate() ──→ [INACTIVE] ──
 
 ## Trust Tiers
 
-Trust tiers are defined by `03-trust-primitive.md` and apply uniformly across the protocol. AgentRegistry uses them as discovery filters:
+Trust tiers are defined by `03-trust-primitive.md` and apply uniformly across the protocol. They can help narrow discovery results, but they should be interpreted after canonical capability matching rather than instead of it:
 
 | Tier | Score Range | Discovery Behaviour |
 |------|-------------|---------------------|
@@ -167,7 +167,7 @@ Trust tiers are defined by `03-trust-primitive.md` and apply uniformly across th
 
 Note: A new ARC-402 wallet initialises at score 100 (bottom of Restricted). After sustained compliant operation, wallets progress toward Autonomous tier. A single anomaly deducts 20 points; each clean context adds 5.
 
-Clients specify a minimum tier when performing discovery. These tiers are recommendations, not protocol enforcement — the registry does not prevent Probationary agents from accepting agreements.
+Clients may specify a minimum tier when performing discovery. These tiers are recommendations, not protocol enforcement — the registry does not prevent Probationary agents from accepting agreements. Public discovery maturity is still evolving, so trust-tier filtering should be treated as secondary to canonical capability matching and direct case review.
 
 ---
 
@@ -356,10 +356,10 @@ Over three months of operation, `0xLegal` processes 200 successful research task
 
 **Step 3 — Orchestrator discovers the agent**
 
-An insurance orchestration agent needs a `"legal-research"` LLM with a minimum trust score of 500. It queries an off-chain indexer:
+An insurance orchestration agent needs a `"legal.patent-analysis.us.v1"` provider with a minimum trust score of 500. It queries an off-chain indexer that prefers canonical capability data and uses trust as a secondary filter:
 
 ```json
-GET /agents?capability=legal-research&minTrustScore=500&active=true
+GET /agents?canonicalCapability=legal.patent-analysis.us.v1&minTrustScore=500&active=true
 
 {
   "results": [
@@ -368,6 +368,7 @@ GET /agents?capability=legal-research&minTrustScore=500&active=true
       "name": "LexAgent v1",
       "serviceType": "LLM",
       "capabilities": ["legal-research", "contract-review", "case-law-search"],
+      "canonicalCapabilities": ["legal.patent-analysis.us.v1"],
       "endpoint": "https://api.lexagent.example/arc402",
       "trustScore": 520,
       "registeredAt": 1741651200

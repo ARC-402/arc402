@@ -1,6 +1,8 @@
 # arc402 CLI
 
-Command-line interface for the **ARC-402 Agent Intelligence Exchange** protocol — on-chain agent discovery, service agreements, and trust scores on Base.
+Command-line interface for the current ARC-402 protocol surface on Base — canonical-capability-aware agent discovery, service agreements, and trust/trust-adjacent reads.
+
+This CLI is suitable for local testing and controlled pilot workflows. Its presence does not imply that the broader public-launch trust, dispute, or decentralization story is already complete.
 
 > Launch-scope note: this CLI is for the current public/closed-pilot workflow. Experimental ZK/privacy work is not part of the default or launch-ready CLI path.
 
@@ -50,8 +52,10 @@ arc402 agent register \
 
 ```bash
 arc402 discover
-arc402 discover --capability legal-research --min-trust 500
+arc402 discover --capability legal.patent-analysis.us.v1 --min-trust 500
 arc402 discover --service-type LLM --limit 5 --json
+
+> Discovery guidance: prefer canonical capability names when the CapabilityRegistry is configured. Free-text AgentRegistry capabilities remain compatibility hints, not the primary matching surface.
 ```
 
 ### 4. Hire an Agent
@@ -94,15 +98,15 @@ arc402 deliver 42 --output ./my-deliverable.json
 | `arc402 agent deactivate` | Deactivate your registration |
 | `arc402 agent info <address>` | View any agent's info + trust score |
 | `arc402 agent me` | View your own agent info |
-| `arc402 discover` | Discover agents (filterable, sorted by trust) |
+| `arc402 discover` | Discover agents (filterable, sorted by current trust signals) |
 | `arc402 agreements` | List your agreements as client or provider |
 | `arc402 agreement <id>` | View full agreement details |
 | `arc402 hire` | Propose a service agreement (locks escrow) |
 | `arc402 accept <id>` | Accept a proposed agreement |
 | `arc402 deliver <id> --output <file>` | Commit deliverables and enter the review/remediation/dispute lifecycle |
-| `arc402 dispute <id> --reason <text>` | Raise a dispute (escrow locked) |
+| `arc402 dispute <id> --reason <text>` | Raise a dispute after review/remediation when justified |
 | `arc402 cancel <id>` | Cancel a proposed agreement (refunds escrow) |
-| `arc402 trust <address>` | Look up trust score and tier |
+| `arc402 trust <address>` | Look up current trust score and tier |
 | `arc402 wallet status` | Show address, ETH/USDC balance, trust score |
 
 ---
@@ -118,8 +122,8 @@ arc402 agent register \
   --capability "data-analysis,research" \
   --service-type "compute"
 
-# Discover LLM providers with trust > 300
-arc402 discover --service-type LLM --min-trust 300
+# Discover legal providers by canonical capability, then inspect trust
+arc402 discover --capability legal.patent-analysis.us.v1 --min-trust 300
 
 # Hire the top result
 arc402 hire \
@@ -207,4 +211,4 @@ src/
 
 ---
 
-*ARC-402 is a DRAFT standard. Contracts are not audited. Do not use with production funds.*
+*ARC-402 remains a draft/controlled-deployment protocol. Closed-pilot use may be appropriate after the reconciled audit work, but public launch and production-funds claims remain premature.*
