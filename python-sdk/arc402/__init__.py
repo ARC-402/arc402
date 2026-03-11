@@ -1,7 +1,8 @@
 """ARC-402: Agentic Wallet Standard — governed wallets for autonomous agents."""
 
 from .agent import AgentInfo, AgentRegistryClient
-from .agreement import Agreement, AgreementStatus, ServiceAgreementClient
+from .agreement import ServiceAgreementClient
+from .capability import CapabilityRegistryClient
 from .context import ContextBinding as Context
 from .exceptions import (
     ARC402Error,
@@ -13,11 +14,39 @@ from .exceptions import (
     TransactionFailed,
     TrustInsufficient,
 )
+from .governance import ARC402GovernanceClient
 from .intent import IntentAttestation as Intent
 from .policy import PolicyClient as Policy
+from .reputation import ReputationOracleClient
 from .settlement import MultiAgentSettlement as Settlement
+from .sponsorship import SponsorshipAttestationClient
 from .trust import TrustClient as Trust
-from .types import AttestationRecord, PolicyConfig, ProposalStatus, TrustScore
+from .types import (
+    Agreement,
+    AgreementStatus,
+    AttestationRecord,
+    CapabilitySlot,
+    DisputeCase,
+    DisputeEvidence,
+    DisputeOutcome,
+    EvidenceType,
+    GovernanceTransaction,
+    IdentityTier,
+    OperationalMetrics,
+    PolicyConfig,
+    ProviderResponseType,
+    RemediationCase,
+    RemediationFeedback,
+    RemediationResponse,
+    ReputationSignal,
+    ReputationSummary,
+    RootConfig,
+    SettlementProposal,
+    SignalType,
+    SponsorshipAttestationRecord,
+    TrustProfile,
+    TrustScore,
+)
 from .wallet import ARC402Wallet
 
 __all__ = [
@@ -27,19 +56,37 @@ __all__ = [
     "Trust",
     "Intent",
     "Settlement",
-    # Agent Registry
     "AgentRegistryClient",
     "AgentInfo",
-    # Service Agreement
     "ServiceAgreementClient",
-    "Agreement",
-    "AgreementStatus",
-    # Types
+    "CapabilityRegistryClient",
+    "ARC402GovernanceClient",
+    "ReputationOracleClient",
+    "SponsorshipAttestationClient",
     "TrustScore",
+    "TrustProfile",
+    "CapabilitySlot",
     "AttestationRecord",
     "PolicyConfig",
-    "ProposalStatus",
-    # Exceptions
+    "SettlementProposal",
+    "Agreement",
+    "AgreementStatus",
+    "ProviderResponseType",
+    "DisputeOutcome",
+    "EvidenceType",
+    "RemediationCase",
+    "RemediationFeedback",
+    "RemediationResponse",
+    "DisputeCase",
+    "DisputeEvidence",
+    "ReputationSignal",
+    "ReputationSummary",
+    "SignalType",
+    "SponsorshipAttestationRecord",
+    "IdentityTier",
+    "RootConfig",
+    "GovernanceTransaction",
+    "OperationalMetrics",
     "ARC402Error",
     "PolicyViolation",
     "TrustInsufficient",
@@ -50,4 +97,4 @@ __all__ = [
     "AttestationNotFound",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

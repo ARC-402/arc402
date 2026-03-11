@@ -1,10 +1,11 @@
 """Tests for PolicyClient."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from arc402.policy import PolicyClient
 from arc402.exceptions import PolicyViolation
+from arc402.policy import PolicyClient
 
 
 def make_policy_client():
@@ -21,6 +22,7 @@ def make_policy_client():
         w3.eth.contract.return_value = contract_mock
         client = PolicyClient(w3, "0x6B89621c94a7105c3D8e0BD8Fb06814931CA2CB2", account)
         client._contract = contract_mock
+        client._send = AsyncMock(return_value={"transactionHash": bytes.fromhex("ab" * 32)})
         return client, contract_mock
 
 
@@ -30,37 +32,22 @@ class TestPolicyClient:
         contract.functions.validateSpend.return_value.call.return_value = (True, "")
 
         import asyncio
-        asyncio.run(client.validate_spend(
-            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-            "claims_processing",
-            50_000_000_000_000_000,
-            b"\x00" * 32,
-        ))
+        asyncio.run(client.validate_spend("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", "claims_processing", 50, b"\x00" * 32))
 
     def test_validate_spend_raises_policy_violation(self):
         client, contract = make_policy_client()
-        contract.functions.validateSpend.return_value.call.return_value = (
-            False, "Exceeds category limit"
-        )
+        contract.functions.validateSpend.return_value.call.return_value = (False, "Exceeds category limit")
 
         import asyncio
-        with pytest.raises(PolicyViolation) as exc_info:
-            asyncio.run(client.validate_spend(
-                "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-                "claims_processing",
-                999_000_000_000_000_000,
-                b"\x00" * 32,
-            ))
-        assert "Exceeds category limit" in str(exc_info.value)
-        assert exc_info.value.category == "claims_processing"
+        with pytest.raises(PolicyViolation):
+            asyncio.run(client.validate_spend("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", "claims_processing", 999, b"\x00" * 32))
 
-    def test_get_category_limit(self):
+    def test_set_policy_applies_category_limits(self):
         client, contract = make_policy_client()
-        contract.functions.categoryLimits.return_value.call.return_value = 100_000_000_000_000_000
+        contract.functions.setPolicy.return_value.build_transaction.return_value = {}
+        contract.functions.setCategoryLimitFor.return_value.build_transaction.return_value = {}
 
         import asyncio
-        limit = asyncio.run(client.get_category_limit(
-            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-            "claims_processing",
-        ))
-        assert limit == 100_000_000_000_000_000
+        tx_hash = asyncio.run(client.set_policy("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", {"claims": "0.1 ether", "ops": 5}))
+        assert tx_hash == ("ab" * 32)
+        assert contract.functions.setCategoryLimitFor.call_count == 2

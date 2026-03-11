@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import IntEnum
 from typing import TYPE_CHECKING
 
 from web3 import Web3
 
 from .abis import ServiceAgreement_ABI
+from .types import (
+    Agreement,
+    DisputeCase,
+    DisputeEvidence,
+    DisputeOutcome,
+    EvidenceType,
+    ProviderResponseType,
+    RemediationCase,
+    RemediationFeedback,
+    RemediationResponse,
+)
 
 if TYPE_CHECKING:
     from web3.contract import Contract
@@ -17,71 +26,8 @@ if TYPE_CHECKING:
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
-class AgreementStatus(IntEnum):
-    PROPOSED = 0
-    ACCEPTED = 1
-    FULFILLED = 2
-    DISPUTED = 3
-    CANCELLED = 4
-
-
-@dataclass
-class Agreement:
-    id: int
-    client: str
-    provider: str
-    service_type: str
-    description: str
-    price: int
-    token: str          # zero address = ETH
-    deadline: int
-    deliverables_hash: str
-    status: AgreementStatus
-    created_at: int
-    resolved_at: int
-
-    @classmethod
-    def from_raw(cls, raw: tuple) -> "Agreement":
-        """Build from the tuple returned by getAgreement()."""
-        (
-            id_,
-            client,
-            provider,
-            service_type,
-            description,
-            price,
-            token,
-            deadline,
-            deliverables_hash,
-            status,
-            created_at,
-            resolved_at,
-        ) = raw
-        return cls(
-            id=id_,
-            client=client,
-            provider=provider,
-            service_type=service_type,
-            description=description,
-            price=price,
-            token=token,
-            deadline=deadline,
-            deliverables_hash=(
-                deliverables_hash.hex()
-                if isinstance(deliverables_hash, bytes)
-                else deliverables_hash
-            ),
-            status=AgreementStatus(status),
-            created_at=created_at,
-            resolved_at=resolved_at,
-        )
-
-
 class ServiceAgreementClient:
-    """Python wrapper for the ARC-402 ServiceAgreement contract.
-
-    ``account`` is optional — required only for write methods.
-    """
+    """Python wrapper for the ARC-402 ServiceAgreement contract."""
 
     def __init__(self, address: str, w3: Web3, account: "LocalAccount | None" = None):
         self._w3 = w3
@@ -90,8 +36,6 @@ class ServiceAgreementClient:
             address=Web3.to_checksum_address(address),
             abi=ServiceAgreement_ABI,
         )
-
-    # ─── Write methods ────────────────────────────────────────────────────────
 
     async def propose(
         self,
@@ -103,23 +47,8 @@ class ServiceAgreementClient:
         deadline: int,
         deliverables_hash: str,
     ) -> tuple[int, str]:
-        """Propose a new service agreement.
-
-        For ETH agreements pass ``token`` as the zero address and ensure
-        ``price`` matches the wei value sent.
-
-        Returns ``(agreement_id, tx_hash)``.
-        """
         self._require_account()
-
-        # Convert hex deliverables_hash string → bytes32
-        dh_bytes = (
-            bytes.fromhex(deliverables_hash.removeprefix("0x"))
-            if isinstance(deliverables_hash, str)
-            else deliverables_hash
-        )
-        dh_bytes = dh_bytes.ljust(32, b"\x00")[:32]
-
+        dh_bytes = self._to_bytes32(deliverables_hash)
         is_eth = token == ZERO_ADDRESS or token is None
         tx_params = self._tx_params()
         if is_eth:
@@ -136,142 +65,212 @@ class ServiceAgreementClient:
         ).build_transaction(tx_params)
 
         receipt = await self._send(tx)
-        tx_hash = receipt["transactionHash"].hex()
-
-        # Extract agreement ID from AgreementProposed event
-        agreement_id = self._extract_agreement_id(receipt)
-        return agreement_id, tx_hash
+        return self._extract_agreement_id(receipt), receipt["transactionHash"].hex()
 
     async def accept(self, agreement_id: int) -> str:
-        """Provider accepts a proposed agreement. Returns tx hash."""
-        self._require_account()
-        tx = self._contract.functions.accept(agreement_id).build_transaction(
-            self._tx_params()
-        )
-        receipt = await self._send(tx)
-        return receipt["transactionHash"].hex()
+        return await self._simple_write("accept", agreement_id)
 
     async def fulfill(self, agreement_id: int, actual_deliverables_hash: str) -> str:
-        """Provider fulfills an accepted agreement. Returns tx hash."""
-        self._require_account()
-        dh_bytes = (
-            bytes.fromhex(actual_deliverables_hash.removeprefix("0x"))
-            if isinstance(actual_deliverables_hash, str)
-            else actual_deliverables_hash
-        )
-        dh_bytes = dh_bytes.ljust(32, b"\x00")[:32]
+        return await self._simple_write("fulfill", agreement_id, self._to_bytes32(actual_deliverables_hash))
 
-        tx = self._contract.functions.fulfill(agreement_id, dh_bytes).build_transaction(
-            self._tx_params()
-        )
-        receipt = await self._send(tx)
-        return receipt["transactionHash"].hex()
+    async def commit_deliverable(self, agreement_id: int, deliverable_hash: str) -> str:
+        return await self._simple_write("commitDeliverable", agreement_id, self._to_bytes32(deliverable_hash))
+
+    async def verify_deliverable(self, agreement_id: int) -> str:
+        return await self._simple_write("verifyDeliverable", agreement_id)
+
+    async def auto_release(self, agreement_id: int) -> str:
+        return await self._simple_write("autoRelease", agreement_id)
 
     async def dispute(self, agreement_id: int, reason: str) -> str:
-        """Raise a dispute on an accepted agreement. Returns tx hash."""
-        self._require_account()
-        tx = self._contract.functions.dispute(agreement_id, reason).build_transaction(
-            self._tx_params()
+        return await self._simple_write("dispute", agreement_id, reason)
+
+    async def request_revision(
+        self,
+        agreement_id: int,
+        feedback_hash: str,
+        feedback_uri: str = "",
+        previous_transcript_hash: str | bytes | None = None,
+    ) -> str:
+        return await self._simple_write(
+            "requestRevision",
+            agreement_id,
+            self._to_bytes32(feedback_hash),
+            feedback_uri,
+            self._to_bytes32(previous_transcript_hash),
         )
-        receipt = await self._send(tx)
-        return receipt["transactionHash"].hex()
+
+    async def respond_to_revision(
+        self,
+        agreement_id: int,
+        response_type: ProviderResponseType,
+        proposed_provider_payout: int,
+        response_hash: str,
+        response_uri: str = "",
+        previous_transcript_hash: str | bytes | None = None,
+    ) -> str:
+        return await self._simple_write(
+            "respondToRevision",
+            agreement_id,
+            int(response_type),
+            proposed_provider_payout,
+            self._to_bytes32(response_hash),
+            response_uri,
+            self._to_bytes32(previous_transcript_hash),
+        )
+
+    async def propose_partial_settlement(
+        self,
+        agreement_id: int,
+        provider_payout: int,
+        response_hash: str,
+        response_uri: str = "",
+        previous_transcript_hash: str | bytes | None = None,
+    ) -> str:
+        return await self.respond_to_revision(
+            agreement_id=agreement_id,
+            response_type=ProviderResponseType.PARTIAL_SETTLEMENT,
+            proposed_provider_payout=provider_payout,
+            response_hash=response_hash,
+            response_uri=response_uri,
+            previous_transcript_hash=previous_transcript_hash,
+        )
+
+    async def request_human_review(
+        self,
+        agreement_id: int,
+        response_hash: str,
+        response_uri: str = "",
+        previous_transcript_hash: str | bytes | None = None,
+    ) -> str:
+        return await self.respond_to_revision(
+            agreement_id=agreement_id,
+            response_type=ProviderResponseType.REQUEST_HUMAN_REVIEW,
+            proposed_provider_payout=0,
+            response_hash=response_hash,
+            response_uri=response_uri,
+            previous_transcript_hash=previous_transcript_hash,
+        )
+
+    async def escalate_to_dispute(self, agreement_id: int, reason: str) -> str:
+        return await self._simple_write("escalateToDispute", agreement_id, reason)
+
+    async def submit_dispute_evidence(
+        self,
+        agreement_id: int,
+        evidence_type: EvidenceType,
+        evidence_hash: str,
+        evidence_uri: str = "",
+    ) -> str:
+        return await self._simple_write(
+            "submitDisputeEvidence",
+            agreement_id,
+            int(evidence_type),
+            self._to_bytes32(evidence_hash),
+            evidence_uri,
+        )
+
+    async def resolve_dispute_detailed(
+        self,
+        agreement_id: int,
+        outcome: DisputeOutcome,
+        provider_award: int,
+        client_award: int,
+    ) -> str:
+        return await self._simple_write(
+            "resolveDisputeDetailed",
+            agreement_id,
+            int(outcome),
+            provider_award,
+            client_award,
+        )
 
     async def cancel(self, agreement_id: int) -> str:
-        """Client cancels a proposed agreement and retrieves escrow. Returns tx hash."""
-        self._require_account()
-        tx = self._contract.functions.cancel(agreement_id).build_transaction(
-            self._tx_params()
-        )
-        receipt = await self._send(tx)
-        return receipt["transactionHash"].hex()
+        return await self._simple_write("cancel", agreement_id)
 
     async def expired_cancel(self, agreement_id: int) -> str:
-        """Client cancels an accepted agreement that has passed its deadline. Returns tx hash."""
-        self._require_account()
-        tx = self._contract.functions.expiredCancel(agreement_id).build_transaction(
-            self._tx_params()
-        )
-        receipt = await self._send(tx)
-        return receipt["transactionHash"].hex()
+        return await self._simple_write("expiredCancel", agreement_id)
 
-    # ─── Read methods ─────────────────────────────────────────────────────────
+    async def expired_dispute_refund(self, agreement_id: int) -> str:
+        return await self._simple_write("expiredDisputeRefund", agreement_id)
 
-    def get_agreement(self, id: int) -> Agreement:
-        """Return a full Agreement. Raises if not found."""
-        raw = self._contract.functions.getAgreement(id).call()
-        return Agreement.from_raw(raw)
+    def get_agreement(self, agreement_id: int) -> Agreement:
+        return Agreement.from_raw(self._contract.functions.getAgreement(agreement_id).call())
 
     def get_agreements_by_client(self, client: str) -> list[int]:
-        return list(
-            self._contract.functions.getAgreementsByClient(
-                Web3.to_checksum_address(client)
-            ).call()
-        )
+        return list(self._contract.functions.getAgreementsByClient(Web3.to_checksum_address(client)).call())
 
     def get_agreements_by_provider(self, provider: str) -> list[int]:
-        return list(
-            self._contract.functions.getAgreementsByProvider(
-                Web3.to_checksum_address(provider)
-            ).call()
-        )
+        return list(self._contract.functions.getAgreementsByProvider(Web3.to_checksum_address(provider)).call())
+
+    def get_remediation_case(self, agreement_id: int) -> RemediationCase:
+        return RemediationCase.from_raw(self._contract.functions.getRemediationCase(agreement_id).call())
+
+    def get_remediation_feedback(self, agreement_id: int, index: int) -> RemediationFeedback:
+        return RemediationFeedback.from_raw(self._contract.functions.getRemediationFeedback(agreement_id, index).call())
+
+    def get_remediation_response(self, agreement_id: int, index: int) -> RemediationResponse:
+        return RemediationResponse.from_raw(self._contract.functions.getRemediationResponse(agreement_id, index).call())
+
+    def get_dispute_case(self, agreement_id: int) -> DisputeCase:
+        return DisputeCase.from_raw(self._contract.functions.getDisputeCase(agreement_id).call())
+
+    def get_dispute_evidence(self, agreement_id: int, index: int) -> DisputeEvidence:
+        return DisputeEvidence.from_raw(self._contract.functions.getDisputeEvidence(agreement_id, index).call())
 
     def agreement_count(self) -> int:
         return self._contract.functions.agreementCount().call()
 
-    # ─── Utility ──────────────────────────────────────────────────────────────
-
-    def get_client_agreements(self, client: str) -> list[Agreement]:
-        """Return full Agreement objects for all agreements where *client* is the payer."""
-        ids = self.get_agreements_by_client(client)
-        agreements = []
-        for aid in ids:
+    def remediation_history(self, agreement_id: int) -> dict[str, list]:
+        case = self.get_remediation_case(agreement_id)
+        feedback = [self.get_remediation_feedback(agreement_id, i) for i in range(case.cycle_count)]
+        responses = []
+        for i in range(case.cycle_count):
             try:
-                agreements.append(self.get_agreement(aid))
+                responses.append(self.get_remediation_response(agreement_id, i))
             except Exception:
-                pass
-        return agreements
+                break
+        return {"case": case, "feedback": feedback, "responses": responses}
 
-    def get_provider_agreements(self, provider: str) -> list[Agreement]:
-        """Return full Agreement objects for all agreements where *provider* is the deliverer."""
-        ids = self.get_agreements_by_provider(provider)
-        agreements = []
-        for aid in ids:
-            try:
-                agreements.append(self.get_agreement(aid))
-            except Exception:
-                pass
-        return agreements
-
-    # ─── Internals ────────────────────────────────────────────────────────────
+    def dispute_evidence_list(self, agreement_id: int) -> list[DisputeEvidence]:
+        dispute = self.get_dispute_case(agreement_id)
+        return [self.get_dispute_evidence(agreement_id, i) for i in range(dispute.evidence_count)]
 
     def _extract_agreement_id(self, receipt: dict) -> int:
-        """Parse the AgreementProposed event to get the new agreement ID."""
         try:
             events = self._contract.events.AgreementProposed().process_receipt(receipt)
             if events:
                 return int(events[0]["args"]["id"])
         except Exception:
             pass
-
-        # Fallback: first indexed topic of the first log is the agreement ID
         for log in receipt.get("logs", []):
             topics = log.get("topics", [])
             if len(topics) >= 2:
                 return int.from_bytes(topics[1], "big")
         raise ValueError("ServiceAgreementClient: could not extract agreement ID from receipt")
 
+    async def _simple_write(self, fn_name: str, *args) -> str:
+        self._require_account()
+        fn = getattr(self._contract.functions, fn_name)(*args)
+        receipt = await self._send(fn.build_transaction(self._tx_params()))
+        return receipt["transactionHash"].hex()
+
     def _require_account(self) -> None:
         if self._account is None:
-            raise ValueError(
-                "ServiceAgreementClient: an account is required for write methods. "
-                "Pass account= when constructing the client."
-            )
+            raise ValueError("ServiceAgreementClient: an account is required for write methods. Pass account= when constructing the client.")
+
+    def _to_bytes32(self, value: str | bytes | None) -> bytes:
+        if value in (None, ""):
+            return b"\x00" * 32
+        if isinstance(value, bytes):
+            return value.ljust(32, b"\x00")[:32]
+        return bytes.fromhex(value.removeprefix("0x")).ljust(32, b"\x00")[:32]
 
     def _tx_params(self) -> dict:
         return {
             "from": self._account.address,
             "nonce": self._w3.eth.get_transaction_count(self._account.address),
-            "gas": 400_000,
+            "gas": 500_000,
             "gasPrice": self._w3.eth.gas_price,
             "chainId": self._w3.eth.chain_id,
         }

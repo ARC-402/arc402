@@ -1,6 +1,16 @@
 # arc402
 
-ARC-402 is an open standard for governed wallets for autonomous AI agents — policy-bound, context-scoped, and trust-tracked on-chain. This SDK provides a Pythonic interface to deploy and operate ARC-402 wallets on Base.
+ARC-402 is a transport-agnostic coordination layer for autonomous agents: governed wallets, escrow-backed service agreements, portable trust, optional sponsorship, negotiated remediation, and public reputation.
+
+This Python SDK now covers both the original wallet flows and the current v0.2 protocol direction:
+- governed wallet spending
+- trust registry v1/v2 reads
+- service agreements with remediation + dispute evidence flows
+- reputation oracle reads/interactions
+- sponsorship + identity tier attestations
+- capability taxonomy reads
+- governance multisig reads
+- heartbeat / operational trust reads through the agent registry
 
 ## Installation
 
@@ -8,7 +18,7 @@ ARC-402 is an open standard for governed wallets for autonomous AI agents — po
 pip install arc402
 ```
 
-## Quick Start
+## Quick start: governed wallet
 
 ```python
 import asyncio
@@ -16,76 +26,155 @@ import os
 from arc402 import ARC402Wallet
 
 async def main():
-    # 1. Connect to an existing wallet
     wallet = ARC402Wallet(
         address=os.environ["AGENT_WALLET"],
         private_key=os.environ["AGENT_KEY"],
         network="base-sepolia",
     )
 
-    # 2. Set spending policy
     await wallet.set_policy({
         "claims_processing": "0.1 ether",
         "research": "0.05 ether",
         "protocol_fee": "0.01 ether",
     })
 
-    # 3. Open a context and spend within it
-    async with wallet.context("claims_processing", task_id="claim-4821") as ctx:
+    async with wallet.context("claims_processing", task_id="claim-4821"):
         await wallet.spend(
             recipient="0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
             amount="0.05 ether",
             category="claims_processing",
-            reason="Medical records for claim #4821 — injury assessment",
+            reason="Medical records for claim #4821",
         )
-    # Context auto-closes; trust score updates on exit
 
-    # 4. Check trust score
     score = await wallet.trust_score()
-    print(f"Trust score: {score.score} ({score.level})")
-    # TrustScore(score=105, level='restricted', next_level_at=300)
+    print(score)
 
 asyncio.run(main())
 ```
 
-## Deploy a new wallet
+## Service agreements: remediation before dispute
 
 ```python
-wallet = await ARC402Wallet.deploy(
-    private_key=os.environ["AGENT_KEY"],
-    network="base-sepolia",
+from arc402 import (
+    DisputeOutcome,
+    EvidenceType,
+    ProviderResponseType,
+    ServiceAgreementClient,
 )
-print(wallet.address)
-```
-
-## Agent-to-agent settlement
-
-```python
-from arc402 import ARC402Wallet
 from web3 import Web3
 
-wallet_a = ARC402Wallet(address="0x...", private_key="0x...", network="base-sepolia")
-wallet_b = ARC402Wallet(address="0x...", private_key="0x...", network="base-sepolia")
-
-intent_id = await wallet_a.intent.attest(
-    action="data_service",
-    reason="Enrichment pipeline output",
-    recipient=wallet_b.address,
-    amount=Web3.to_wei("0.05", "ether"),
+agreement = ServiceAgreementClient(
+    address=os.environ["ARC402_SERVICE_AGREEMENT"],
+    w3=Web3(Web3.HTTPProvider(os.environ["RPC_URL"])),
+    account=my_local_account,
 )
 
-proposal_id = await wallet_a.settlement.propose(
-    from_wallet=wallet_a.address,
-    to_wallet=wallet_b.address,
-    amount=Web3.to_wei("0.05", "ether"),
-    intent_id=intent_id,
+agreement_id, tx_hash = await agreement.propose(
+    provider="0xProvider...",
+    service_type="insurance.claims.coverage.lloyds.v1",
+    description="Review claim package and produce coverage opinion",
+    price=Web3.to_wei("0.05", "ether"),
+    token="0x0000000000000000000000000000000000000000",
+    deadline=1_800_000_000,
+    deliverables_hash="0x" + "11" * 32,
 )
 
-await wallet_b.settlement.accept(proposal_id)
-await wallet_b.settlement.execute(proposal_id, Web3.to_wei("0.05", "ether"))
+await agreement.request_revision(
+    agreement_id,
+    feedback_hash="0x" + "22" * 32,
+    feedback_uri="ipfs://feedback-json",
+)
+
+await agreement.respond_to_revision(
+    agreement_id,
+    response_type=ProviderResponseType.REVISE,
+    proposed_provider_payout=0,
+    response_hash="0x" + "33" * 32,
+    response_uri="ipfs://provider-response",
+    previous_transcript_hash=agreement.get_remediation_case(agreement_id).latest_transcript_hash,
+)
+
+await agreement.submit_dispute_evidence(
+    agreement_id,
+    evidence_type=EvidenceType.DELIVERABLE,
+    evidence_hash="0x" + "44" * 32,
+    evidence_uri="ipfs://deliverable-bundle",
+)
+
+# owner / arbitrator path
+await agreement.resolve_dispute_detailed(
+    agreement_id,
+    outcome=DisputeOutcome.PARTIAL_PROVIDER,
+    provider_award=30_000_000_000_000_000,
+    client_award=20_000_000_000_000_000,
+)
 ```
+
+## Reputation + sponsorship + identity tier
+
+```python
+from arc402 import IdentityTier, ReputationOracleClient, SignalType, SponsorshipAttestationClient
+
+reputation = ReputationOracleClient(os.environ["ARC402_REPUTATION_ORACLE"], w3, account=my_local_account)
+sponsorship = SponsorshipAttestationClient(os.environ["ARC402_SPONSORSHIP"], w3, account=my_local_account)
+
+await reputation.publish_signal(
+    subject="0xAgent...",
+    signal_type=SignalType.ENDORSE,
+    capability_hash="0x" + "55" * 32,
+    reason="Delivered five high-quality claim reviews",
+)
+
+attestation_id = await sponsorship.publish_with_tier(
+    agent="0xAgent...",
+    expires_at=0,
+    tier=IdentityTier.VERIFIED_PROVIDER,
+    evidence_uri="ipfs://verification-proof",
+)
+
+print(reputation.get_reputation("0xAgent..."))
+print(sponsorship.get_attestation(attestation_id))
+print(sponsorship.get_highest_tier("0xAgent..."))
+```
+
+## Capability taxonomy + governance + operational trust
+
+```python
+from arc402 import ARC402GovernanceClient, AgentRegistryClient, CapabilityRegistryClient, Trust
+
+agents = AgentRegistryClient(os.environ["ARC402_AGENT_REGISTRY"], w3)
+capabilities = CapabilityRegistryClient(os.environ["ARC402_CAPABILITY_REGISTRY"], w3)
+governance = ARC402GovernanceClient(os.environ["ARC402_GOVERNANCE"], w3)
+trust = Trust(w3, os.environ["ARC402_TRUST_REGISTRY"])
+
+print(capabilities.list_roots())
+print(capabilities.get_capabilities("0xAgent..."))
+print(agents.get_operational_trust("0xAgent..."))
+print(await trust.get_effective_score("0xAgent..."))
+print(await trust.get_capability_score("0xAgent...", "insurance.claims.coverage.lloyds.v1"))
+print(governance.threshold())
+print(governance.get_transaction(0))
+```
+
+## Notes on current protocol coverage
+
+The SDK only wraps methods that exist in the current reference contracts.
+
+That means:
+- negotiated remediation is supported through `request_revision`, `respond_to_revision`, transcript-chain helpers, and remediation/dispute read models
+- evidence anchoring and partial-resolution outcomes are supported through the current `ServiceAgreement` contract
+- capability taxonomy reads are supported; root governance writes exist on-chain but you should typically drive them through protocol governance
+- heartbeat / operational trust reads are exposed via `AgentRegistryClient.get_operational_metrics()` and `get_operational_trust()`
+- identity tiers are exposed via `SponsorshipAttestationClient`
+- governance support is currently read-focused in the SDK even though the contract is executable multisig on-chain
+
+Not yet wrapped as first-class high-level Python workflows unless/until they exist more concretely on-chain:
+- peer arbitrator selection
+- automated machine-checkable dispute resolution engines
+- human review marketplace orchestration
+- richer delivery schema typing beyond the current hash-anchored agreement surface
 
 ## Links
 
 - [GitHub](https://github.com/LegoGigaBrain/arc-402)
-- [Specification](https://github.com/LegoGigaBrain/arc-402/spec)
+- [Reference contracts](../reference/contracts)

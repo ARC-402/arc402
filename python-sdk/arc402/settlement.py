@@ -9,7 +9,7 @@ from web3 import Web3
 
 from .abis import SettlementCoordinator_ABI
 from .exceptions import TransactionFailed
-from .types import ProposalStatus
+from .types import SettlementProposal
 
 if TYPE_CHECKING:
     from web3.contract import Contract
@@ -68,11 +68,11 @@ class MultiAgentSettlement:
         receipt = await self._send(tx)
         return receipt["transactionHash"].hex()
 
-    async def get_proposal(self, proposal_id: bytes) -> ProposalStatus:
+    async def get_proposal(self, proposal_id: bytes) -> SettlementProposal:
         from datetime import datetime
 
         raw = self._contract.functions.getProposal(proposal_id).call()
-        return ProposalStatus(
+        return SettlementProposal(
             proposal_id=proposal_id.hex(),
             from_wallet=raw[0],
             to_wallet=raw[1],

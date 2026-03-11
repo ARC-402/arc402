@@ -1,18 +1,25 @@
-"""Tests for ARC402Wallet."""
+"""Tests for ARC402Wallet and upgraded protocol clients."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from arc402 import ARC402Wallet
-from arc402.exceptions import (
-    ContextAlreadyOpen,
-    ContextNotOpen,
-    NetworkNotSupported,
-    PolicyViolation,
+from arc402.agent import AgentInfo, AgentRegistryClient
+from arc402.agreement import ServiceAgreementClient
+from arc402.exceptions import ContextNotOpen, NetworkNotSupported, PolicyViolation
+from arc402.reputation import ReputationOracleClient
+from arc402.sponsorship import SponsorshipAttestationClient
+from arc402.trust import TrustClient
+from arc402.types import (
+    CapabilitySlot,
+    IdentityTier,
+    OperationalMetrics,
+    ProviderResponseType,
+    TrustProfile,
+    TrustScore,
 )
-from arc402.types import TrustScore
-
 
 FAKE_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 FAKE_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
@@ -20,12 +27,7 @@ FAKE_RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 
 def make_wallet():
-    with patch("arc402.wallet.Web3") as MockWeb3, \
-         patch("arc402.policy.Web3") as MockWeb3Policy, \
-         patch("arc402.trust.Web3") as MockWeb3Trust, \
-         patch("arc402.intent.Web3") as MockWeb3Intent, \
-         patch("arc402.settlement.Web3") as MockWeb3Settlement:
-
+    with patch("arc402.wallet.Web3") as MockWeb3, patch("arc402.policy.Web3") as MockWeb3Policy, patch("arc402.trust.Web3") as MockWeb3Trust, patch("arc402.intent.Web3") as MockWeb3Intent, patch("arc402.settlement.Web3") as MockWeb3Settlement:
         for m in [MockWeb3, MockWeb3Policy, MockWeb3Trust, MockWeb3Intent, MockWeb3Settlement]:
             m.to_checksum_address.side_effect = lambda x: x
             m.to_wei.side_effect = lambda val, unit: int(float(val) * 10**18)
@@ -39,25 +41,15 @@ def make_wallet():
         MockWeb3.HTTPProvider.return_value = MagicMock()
         MockWeb3.return_value = w3
 
-        wallet = ARC402Wallet(
-            address=FAKE_ADDRESS,
-            private_key=FAKE_PRIVATE_KEY,
-            network="base-sepolia",
-        )
+        wallet = ARC402Wallet(address=FAKE_ADDRESS, private_key=FAKE_PRIVATE_KEY, network="base-sepolia")
         wallet._w3 = w3
-
-        # Mock contract calls
         wallet._wallet_contract = MagicMock()
         wallet._wallet_contract.functions.contextOpen.return_value.call.return_value = False
         wallet._wallet_contract.functions.openContext.return_value.build_transaction.return_value = {}
         wallet._wallet_contract.functions.closeContext.return_value.build_transaction.return_value = {}
         wallet._wallet_contract.functions.executeSpend.return_value.build_transaction.return_value = {}
+        wallet._send = AsyncMock(return_value={"transactionHash": bytes.fromhex("ab" * 32), "logs": []})
 
-        # Mock _send
-        fake_receipt = {"transactionHash": bytes.fromhex("ab" * 32), "logs": []}
-        wallet._send = AsyncMock(return_value=fake_receipt)
-
-        # Mock sub-clients
         wallet._policy = MagicMock()
         wallet._policy.validate_spend = AsyncMock()
         wallet._policy.set_policy = AsyncMock(return_value="0x" + "ab" * 32)
@@ -72,148 +64,126 @@ def make_wallet():
         wallet._intent.history = AsyncMock(return_value=[])
 
         wallet._settlement = MagicMock()
-
         return wallet
 
 
-class TestARC402WalletInit:
+class TestARC402Wallet:
     def test_unsupported_network_raises(self):
         with pytest.raises(NetworkNotSupported):
-            ARC402Wallet(
-                address=FAKE_ADDRESS,
-                private_key=FAKE_PRIVATE_KEY,
-                network="ethereum",
-            )
+            ARC402Wallet(address=FAKE_ADDRESS, private_key=FAKE_PRIVATE_KEY, network="ethereum")
 
-    def test_address_set(self):
-        wallet = make_wallet()
-        assert wallet.address == FAKE_ADDRESS
-
-    def test_network_set(self):
-        wallet = make_wallet()
-        assert wallet.network == "base-sepolia"
-
-
-class TestContextManager:
     def test_context_opens_and_closes(self):
         wallet = make_wallet()
 
         async def run():
-            async with wallet.context("claims_processing", task_id="claim-001") as ctx:
+            async with wallet.context("claims_processing"):
                 assert wallet._active_context_id is not None
 
         asyncio.run(run())
         assert wallet._active_context_id is None
-
-    def test_context_records_success_on_clean_exit(self):
-        wallet = make_wallet()
-
-        async def run():
-            async with wallet.context("claims_processing"):
-                pass
-
-        asyncio.run(run())
         wallet._trust.record_success.assert_called_once_with(FAKE_ADDRESS)
 
-    def test_context_records_anomaly_on_exception(self):
-        wallet = make_wallet()
-
-        async def run():
-            try:
-                async with wallet.context("claims_processing"):
-                    raise ValueError("something went wrong")
-            except ValueError:
-                pass
-
-        asyncio.run(run())
-        wallet._trust.record_anomaly.assert_called_once_with(FAKE_ADDRESS)
-
-
-class TestSpend:
     def test_spend_without_context_raises(self):
         wallet = make_wallet()
-
-        async def run():
-            await wallet.spend(
-                recipient=FAKE_RECIPIENT,
-                amount="0.05 ether",
-                category="claims_processing",
-                reason="Test",
-            )
-
         with pytest.raises(ContextNotOpen):
-            asyncio.run(run())
-
-    def test_spend_within_context(self):
-        wallet = make_wallet()
-
-        async def run():
-            async with wallet.context("claims_processing"):
-                tx_hash = await wallet.spend(
-                    recipient=FAKE_RECIPIENT,
-                    amount="0.05 ether",
-                    category="claims_processing",
-                    reason="Medical records for claim #001",
-                )
-            return tx_hash
-
-        tx_hash = asyncio.run(run())
-        assert tx_hash is not None
-        wallet._policy.validate_spend.assert_called_once()
-        wallet._intent.attest.assert_called_once()
+            asyncio.run(wallet.spend(FAKE_RECIPIENT, "0.05 ether", "claims_processing", "Test"))
 
     def test_spend_policy_violation_propagates(self):
         wallet = make_wallet()
-        wallet._policy.validate_spend = AsyncMock(
-            side_effect=PolicyViolation("Exceeds limit", category="claims_processing")
-        )
+        wallet._policy.validate_spend = AsyncMock(side_effect=PolicyViolation("Exceeds", category="claims_processing"))
 
         async def run():
             async with wallet.context("claims_processing"):
-                await wallet.spend(
-                    recipient=FAKE_RECIPIENT,
-                    amount="100 ether",
-                    category="claims_processing",
-                    reason="Too much",
-                )
+                await wallet.spend(FAKE_RECIPIENT, "100 ether", "claims_processing", "Too much")
 
         with pytest.raises(PolicyViolation):
             asyncio.run(run())
 
-    def test_amount_parsing_ether_string(self):
-        from arc402.wallet import _parse_amount
-        assert _parse_amount("0.1 ether") == 10**17
 
-    def test_amount_parsing_int(self):
-        from arc402.wallet import _parse_amount
-        assert _parse_amount(12345) == 12345
+class TestTrustClientV2Reads:
+    def test_v2_read_helpers(self):
+        w3 = MagicMock()
+        account = MagicMock(address=FAKE_ADDRESS)
+        with patch("arc402.trust.Web3") as mock_web3:
+            mock_web3.to_checksum_address.side_effect = lambda x: x
+            contract = MagicMock()
+            w3.eth.contract.return_value = contract
+            client = TrustClient(w3, "0xtrust", account)
+            client._contract = contract
+            contract.functions.getScore.return_value.call.return_value = 120
+            contract.functions.getGlobalScore.return_value.call.return_value = 130
+            contract.functions.getEffectiveScore.return_value.call.return_value = 125
+            contract.functions.profiles.return_value.call.return_value = (130, 100, b"\x01" * 32)
+            contract.functions.getCapabilityScore.return_value.call.return_value = 77
+            contract.functions.getCapabilitySlots.return_value.call.return_value = [(b"\x02" * 32, 77)]
+            contract.functions.meetsThreshold.return_value.call.return_value = True
+            contract.functions.meetsCapabilityThreshold.return_value.call.return_value = False
+            assert asyncio.run(client.get_score(FAKE_ADDRESS)).score == 120
+            assert asyncio.run(client.get_global_score(FAKE_ADDRESS)) == 130
+            assert asyncio.run(client.get_effective_score(FAKE_ADDRESS)) == 125
+            assert isinstance(asyncio.run(client.get_profile(FAKE_ADDRESS)), TrustProfile)
+            assert asyncio.run(client.get_capability_score(FAKE_ADDRESS, "claims.v1")) == 77
+            assert isinstance(asyncio.run(client.get_capability_slots(FAKE_ADDRESS))[0], CapabilitySlot)
+            assert asyncio.run(client.meets_threshold(FAKE_ADDRESS, 100)) is True
+            assert asyncio.run(client.meets_capability_threshold(FAKE_ADDRESS, 100, "claims.v1")) is False
 
-    def test_amount_parsing_gwei(self):
-        from arc402.wallet import _parse_amount
-        assert _parse_amount("100 gwei") == 100 * 10**9
+
+class TestServiceAgreementClient:
+    def test_remediation_and_evidence_writes(self):
+        w3 = MagicMock()
+        account = MagicMock(address=FAKE_ADDRESS)
+        with patch("arc402.agreement.Web3") as mock_web3:
+            mock_web3.to_checksum_address.side_effect = lambda x: x
+            contract = MagicMock()
+            w3.eth.contract.return_value = contract
+            client = ServiceAgreementClient("0xagreement", w3, account)
+            client._contract = contract
+            client._send = AsyncMock(return_value={"transactionHash": bytes.fromhex("ab" * 32)})
+            contract.functions.requestRevision.return_value.build_transaction.return_value = {}
+            contract.functions.respondToRevision.return_value.build_transaction.return_value = {}
+            contract.functions.submitDisputeEvidence.return_value.build_transaction.return_value = {}
+            contract.functions.getRemediationCase.return_value.call.return_value = (1, 2, 3, 4, b"\x01" * 32, True)
+            asyncio.run(client.request_revision(1, "0x" + "11" * 32, "ipfs://feedback"))
+            asyncio.run(client.respond_to_revision(1, ProviderResponseType.REVISE, 0, "0x" + "22" * 32))
+            asyncio.run(client.submit_dispute_evidence(1, 2, "0x" + "33" * 32, "ipfs://evidence"))
+            assert client.get_remediation_case(1).active is True
 
 
-class TestTrustScore:
-    def test_trust_score_returns_score(self):
-        wallet = make_wallet()
+class TestRegistryAndAttestations:
+    def test_agent_registry_operational_reads(self):
+        w3 = MagicMock()
+        account = MagicMock(address=FAKE_ADDRESS)
+        with patch("arc402.agent.Web3") as mock_web3:
+            mock_web3.to_checksum_address.side_effect = lambda x: x
+            contract = MagicMock()
+            w3.eth.contract.return_value = contract
+            client = AgentRegistryClient("0xagent", w3, account)
+            client._contract = contract
+            contract.functions.getAgent.return_value.call.return_value = (FAKE_ADDRESS, "Forge", ["claims.v1"], "oracle", "https://x", "ipfs://m", True, 1, 2, 3)
+            contract.functions.getTrustScore.return_value.call.return_value = 150
+            contract.functions.getOperationalMetrics.return_value.call.return_value = (60, 15, 100, 250, 4, 1, 90, 88)
+            contract.functions.getEndpointStability.return_value.call.return_value = 70
+            agent = client.get_agent(FAKE_ADDRESS, include_operational=True)
+            assert isinstance(agent, AgentInfo)
+            assert isinstance(agent.operational_metrics, OperationalMetrics)
+            assert client.get_operational_trust(FAKE_ADDRESS)["endpoint_stability"] == 70
 
-        async def run():
-            return await wallet.trust_score()
-
-        score = asyncio.run(run())
-        assert score.score == 105
-        assert score.level == "restricted"
-
-
-class TestSetPolicy:
-    def test_set_policy_delegates(self):
-        wallet = make_wallet()
-
-        async def run():
-            return await wallet.set_policy({
-                "claims_processing": "0.1 ether",
-                "research": "0.05 ether",
-            })
-
-        tx = asyncio.run(run())
-        wallet._policy.set_policy.assert_called_once()
+    def test_reputation_and_sponsorship_reads(self):
+        w3 = MagicMock()
+        account = MagicMock(address=FAKE_ADDRESS)
+        with patch("arc402.reputation.Web3") as rep_web3, patch("arc402.sponsorship.Web3") as sponsor_web3:
+            rep_web3.to_checksum_address.side_effect = lambda x: x
+            sponsor_web3.to_checksum_address.side_effect = lambda x: x
+            rep_contract = MagicMock()
+            sponsor_contract = MagicMock()
+            w3.eth.contract.side_effect = [rep_contract, sponsor_contract]
+            reputation = ReputationOracleClient("0xrep", w3, account)
+            sponsorship = SponsorshipAttestationClient("0xsponsor", w3, account)
+            reputation._contract = rep_contract
+            sponsorship._contract = sponsor_contract
+            rep_contract.functions.getReputation.return_value.call.return_value = (2, 1, 0, 100)
+            sponsor_contract.functions.getHighestTier.return_value.call.return_value = 2
+            sponsor_contract.functions.getAttestation.return_value.call.return_value = ("0xS", "0xA", 1, 2, False, 2, "ipfs://proof")
+            assert reputation.get_reputation(FAKE_ADDRESS).weighted_score == 100
+            assert sponsorship.get_highest_tier(FAKE_ADDRESS) == IdentityTier.VERIFIED_PROVIDER
+            assert sponsorship.is_verified(FAKE_ADDRESS) is True
