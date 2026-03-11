@@ -462,4 +462,30 @@ contract ARC402WalletTest is Test {
         vm.expectRevert("ARC402: invalid intent attestation");
         wallet.executeSpend(payable(recipient), 0.2 ether, "claims", ATTEST_ID);
     }
+
+    // ─── Fix 2: notFrozen on proposeMASSettlement ─────────────────────────────
+
+    /**
+     * @notice Fix 2 hardening: proposeMASSettlement must revert when the wallet is frozen.
+     *         Previously, the notFrozen modifier was missing, allowing a frozen wallet
+     *         to still initiate MAS settlement proposals.
+     */
+    function test_proposeMASSettlement_RevertsWhenFrozen() public {
+        address recipientWallet = address(0xC0FFEE);
+        uint256 amount = 0.1 ether;
+        bytes32 attestId = keccak256("mas-frozen-test");
+
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+
+        // Attest before freezing
+        wallet.attest(attestId, "settle_claim", "MAS frozen test", recipientWallet, amount, address(0), 0);
+
+        // Freeze the wallet
+        wallet.freeze("security incident");
+        assertTrue(wallet.frozen());
+
+        // proposeMASSettlement must revert because wallet is frozen
+        vm.expectRevert("ARC402: wallet frozen");
+        wallet.proposeMASSettlement(recipientWallet, amount, "claims", attestId);
+    }
 }

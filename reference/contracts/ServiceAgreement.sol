@@ -10,7 +10,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /**
  * @title ServiceAgreement
  * @notice Bilateral agent-to-agent service agreements with escrow for ARC-402
- * @dev Implements a state machine: PROPOSED → ACCEPTED → FULFILLED/DISPUTED/CANCELLED
+ * @dev Implements a state machine:
+ *      PROPOSED → ACCEPTED → FULFILLED / DISPUTED / CANCELLED
+ *      ACCEPTED → PENDING_VERIFICATION → FULFILLED / DISPUTED (two-step commit-reveal path)
+ *
  *      Escrow is held in this contract until released on fulfill, cancel, or dispute resolution.
  *      ETH agreements use msg.value; ERC-20 agreements use SafeERC20 transferFrom/transfer.
  *      Dispute resolution is centralised to the contract owner (intended to be a trusted
@@ -25,6 +28,12 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  *   T-04: Fee-on-transfer protection — prevented by the allowlist (T-03). The allowlist
  *         is the primary guard; only known-safe tokens (e.g. USDC) are approved. No
  *         balance-delta tracking is needed when token behaviour is controlled by allowlist.
+ *
+ * v2 additions:
+ *   Feature 1 — Minimum Trust Value: agreements below minimumTrustValue complete normally
+ *               but do NOT trigger trust score updates. Prevents 1-wei sybil farming.
+ *   Feature 2 — Commit-Reveal Delivery: provider commits deliverable hash (PENDING_VERIFICATION),
+ *               client has VERIFY_WINDOW to approve or dispute; after window anyone may autoRelease.
  *
  * STATUS: DRAFT — not audited, do not use in production
  */
@@ -43,15 +52,24 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     /// @notice ETH payment sentinel (address(0) means native ETH, not an ERC-20).
     address public constant ETH = address(0);
 
-    /// @notice Duration a dispute may remain unresolved before either party can
-    ///         trigger an auto-refund to the client (conservative default).
-    uint256 public constant DISPUTE_TIMEOUT = 30 days;
-
     /// @notice Allowlist of ERC-20 tokens (and ETH) accepted as payment.
     ///         ETH (address(0)) is allowed by default at construction.
     ///         Only known-safe tokens should be added — fee-on-transfer or
     ///         malicious tokens are prevented by keeping them off this list (T-03 / T-04).
     mapping(address => bool) public allowedTokens;
+
+    /// @notice Minimum agreement price (in wei) for trust score updates.
+    ///         0 = disabled (all agreements update trust regardless of price).
+    ///         Agreements with price < minimumTrustValue complete normally but skip trust updates.
+    ///         Purpose: prevent 1-wei sybil agreements from farming trust scores cheaply.
+    uint256 public minimumTrustValue;
+
+    /// @notice Duration of the client verification window in the commit-reveal path.
+    uint256 public constant VERIFY_WINDOW = 3 days;
+
+    /// @notice Duration a dispute may remain unresolved before either party can
+    ///         trigger an auto-refund to the client (conservative default).
+    uint256 public constant DISPUTE_TIMEOUT = 30 days;
 
     uint256 private _nextId;  // increments before use, so first ID = 1
 
@@ -86,6 +104,22 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     /// @notice Emitted when a TrustRegistry call fails. Trust update is best-effort;
     ///         a failing registry must never block escrow release.
     event TrustUpdateFailed(uint256 indexed agreementId, address indexed wallet, string context);
+
+    // ─── v2 Events ───────────────────────────────────────────────────────────
+
+    /// @notice Emitted when the minimum trust value threshold is updated.
+    event MinimumTrustValueUpdated(uint256 newValue);
+
+    /// @notice Emitted when a provider commits a deliverable hash (start of verify window).
+    event DeliverableCommitted(
+        uint256 indexed id,
+        address indexed provider,
+        bytes32 hash,
+        uint256 verifyWindowEnd
+    );
+
+    /// @notice Emitted when escrow is auto-released after the verify window expired.
+    event AutoReleased(uint256 indexed id, address indexed provider);
 
     // ─── Modifiers ───────────────────────────────────────────────────────────
 
@@ -130,6 +164,18 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     function disallowToken(address token) external onlyOwner {
         allowedTokens[token] = false;
         emit TokenDisallowed(token);
+    }
+
+    // ─── v2: Minimum Trust Value ──────────────────────────────────────────────
+
+    /// @notice Set the minimum agreement price required for trust score updates.
+    ///         Set to 0 to disable the threshold (all agreements update trust).
+    ///         Agreements below this value complete and release escrow normally
+    ///         but do not call recordSuccess() on the TrustRegistry.
+    /// @param value Minimum price in wei. 0 = disabled.
+    function setMinimumTrustValue(uint256 value) external onlyOwner {
+        minimumTrustValue = value;
+        emit MinimumTrustValueUpdated(value);
     }
 
     // ─── Core: Propose ───────────────────────────────────────────────────────
@@ -190,7 +236,9 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
             deliverablesHash: deliverablesHash,
             status:           Status.PROPOSED,
             createdAt:        block.timestamp,
-            resolvedAt:       0
+            resolvedAt:       0,
+            verifyWindowEnd:  0,
+            committedHash:    bytes32(0)
         });
 
         _byClient[msg.sender].push(agreementId);
@@ -222,14 +270,15 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         emit AgreementAccepted(agreementId, msg.sender);
     }
 
-    // ─── Core: Fulfill ───────────────────────────────────────────────────────
+    // ─── Core: Fulfill (immediate-release path) ───────────────────────────────
 
     /**
      * @inheritdoc IServiceAgreement
-     * @dev Releases escrow to provider. Must be called before the deadline.
+     * @dev Immediate-release path. Provider fulfills and claims escrow in one call.
+     *      For the two-step commit-reveal path, use commitDeliverable() + verifyDeliverable().
+     *      Must be called before the deadline.
      *      On success, automatically records a trust score increment for the provider
-     *      in the TrustRegistry (T-02). This ensures scores only rise through real
-     *      on-chain ServiceAgreement fulfillments, not arbitrary updater calls.
+     *      in the TrustRegistry (T-02), subject to minimumTrustValue threshold.
      */
     function fulfill(uint256 agreementId, bytes32 actualDeliverablesHash) external nonReentrant {
         Agreement storage ag = _get(agreementId);
@@ -237,31 +286,89 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         require(ag.status == Status.ACCEPTED,  "ServiceAgreement: not ACCEPTED");
         require(block.timestamp <= ag.deadline, "ServiceAgreement: past deadline");
 
-        ag.status      = Status.FULFILLED;
-        ag.resolvedAt  = block.timestamp;
+        ag.status           = Status.FULFILLED;
+        ag.resolvedAt       = block.timestamp;
         ag.deliverablesHash = actualDeliverablesHash;
 
         emit AgreementFulfilled(agreementId, msg.sender, actualDeliverablesHash);
 
         _releaseEscrow(ag.token, ag.provider, ag.price);
 
-        // T-02: Trust score auto-update — best-effort. A broken TrustRegistry must NOT
-        //       block escrow release. try/catch ensures funds always reach the provider.
-        if (trustRegistry != address(0)) {
-            try ITrustRegistry(trustRegistry).recordSuccess(ag.provider) {
-                // trust updated successfully
-            } catch {
-                emit TrustUpdateFailed(agreementId, ag.provider, "fulfill");
-            }
-        }
+        _updateTrust(agreementId, ag, true);
+    }
+
+    // ─── Core: Commit-Reveal Delivery (two-step path) ─────────────────────────
+
+    /**
+     * @inheritdoc IServiceAgreement
+     * @dev Provider commits deliverable hash. Moves ACCEPTED → PENDING_VERIFICATION.
+     *      Client has VERIFY_WINDOW seconds to call verifyDeliverable() or dispute().
+     *      If client does not act, anyone may call autoRelease() after VERIFY_WINDOW.
+     */
+    function commitDeliverable(uint256 agreementId, bytes32 deliverableHash) external nonReentrant {
+        Agreement storage ag = _get(agreementId);
+        require(msg.sender == ag.provider,    "ServiceAgreement: not provider");
+        require(ag.status == Status.ACCEPTED,  "ServiceAgreement: not ACCEPTED");
+        require(block.timestamp <= ag.deadline, "ServiceAgreement: past deadline");
+
+        ag.status          = Status.PENDING_VERIFICATION;
+        ag.committedHash   = deliverableHash;
+        ag.verifyWindowEnd = block.timestamp + VERIFY_WINDOW;
+        ag.deliverablesHash = deliverableHash; // keep for compatibility with fulfill path
+
+        emit DeliverableCommitted(agreementId, msg.sender, deliverableHash, ag.verifyWindowEnd);
+    }
+
+    /**
+     * @inheritdoc IServiceAgreement
+     * @dev Client explicitly approves delivery. Releases escrow to provider.
+     *      Trust score update is subject to minimumTrustValue threshold.
+     */
+    function verifyDeliverable(uint256 agreementId) external nonReentrant {
+        Agreement storage ag = _get(agreementId);
+        require(msg.sender == ag.client, "ServiceAgreement: not client");
+        require(ag.status == Status.PENDING_VERIFICATION, "ServiceAgreement: not PENDING_VERIFICATION");
+
+        ag.status     = Status.FULFILLED;
+        ag.resolvedAt = block.timestamp;
+
+        emit AgreementFulfilled(agreementId, ag.provider, ag.committedHash);
+
+        _releaseEscrow(ag.token, ag.provider, ag.price);
+
+        _updateTrust(agreementId, ag, true);
+    }
+
+    /**
+     * @inheritdoc IServiceAgreement
+     * @dev If client does not act within VERIFY_WINDOW after commitDeliverable(),
+     *      anyone (provider, third-party keeper, etc.) may trigger auto-release.
+     *      Trust score update is subject to minimumTrustValue threshold.
+     */
+    function autoRelease(uint256 agreementId) external nonReentrant {
+        Agreement storage ag = _get(agreementId);
+        require(ag.status == Status.PENDING_VERIFICATION, "ServiceAgreement: not PENDING_VERIFICATION");
+        require(block.timestamp > ag.verifyWindowEnd, "ServiceAgreement: verify window open");
+
+        ag.status     = Status.FULFILLED;
+        ag.resolvedAt = block.timestamp;
+
+        emit AgreementFulfilled(agreementId, ag.provider, ag.committedHash);
+        emit AutoReleased(agreementId, ag.provider);
+
+        _releaseEscrow(ag.token, ag.provider, ag.price);
+
+        _updateTrust(agreementId, ag, true);
     }
 
     // ─── Core: Dispute ───────────────────────────────────────────────────────
 
     /**
      * @inheritdoc IServiceAgreement
-     * @dev Either party may raise a dispute on an ACCEPTED agreement.
+     * @dev Either party may raise a dispute on an ACCEPTED or PENDING_VERIFICATION agreement.
      *      Escrow remains locked until resolveDispute().
+     *      The error message "not ACCEPTED" is preserved for backward compatibility even
+     *      though PENDING_VERIFICATION is also a valid state for dispute.
      */
     function dispute(uint256 agreementId, string calldata reason) external {
         require(bytes(reason).length <= 512, "ServiceAgreement: reason too long");
@@ -270,10 +377,12 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
             msg.sender == ag.client || msg.sender == ag.provider,
             "ServiceAgreement: not a party"
         );
-        require(ag.status == Status.ACCEPTED, "ServiceAgreement: not ACCEPTED");
+        require(
+            ag.status == Status.ACCEPTED || ag.status == Status.PENDING_VERIFICATION,
+            "ServiceAgreement: not ACCEPTED"
+        );
 
-        ag.status     = Status.DISPUTED;
-        ag.resolvedAt = block.timestamp; // records when the dispute was opened (timeout clock starts here)
+        ag.status = Status.DISPUTED;
 
         emit AgreementDisputed(agreementId, msg.sender, reason);
     }
@@ -329,6 +438,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
      * @dev T-02: Trust score auto-update on resolution.
      *      - Provider wins → recordSuccess (dispute was frivolous / provider delivered)
      *      - Client wins  → recordAnomaly  (provider failed to deliver)
+     *      Both paths respect minimumTrustValue for recordSuccess.
      */
     function resolveDispute(uint256 agreementId, bool favorProvider) external onlyOwner nonReentrant {
         Agreement storage ag = _get(agreementId);
@@ -341,25 +451,11 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         if (favorProvider) {
             ag.status = Status.FULFILLED;
             _releaseEscrow(ag.token, ag.provider, ag.price);
-            // T-02: provider vindicated — increment trust score (best-effort)
-            if (trustRegistry != address(0)) {
-                try ITrustRegistry(trustRegistry).recordSuccess(ag.provider) {
-                    // trust updated
-                } catch {
-                    emit TrustUpdateFailed(agreementId, ag.provider, "resolveDispute:success");
-                }
-            }
+            _updateTrust(agreementId, ag, true);
         } else {
             ag.status = Status.CANCELLED;
             _releaseEscrow(ag.token, ag.client, ag.price);
-            // T-02: provider failed — decrement trust score (best-effort)
-            if (trustRegistry != address(0)) {
-                try ITrustRegistry(trustRegistry).recordAnomaly(ag.provider) {
-                    // trust updated
-                } catch {
-                    emit TrustUpdateFailed(agreementId, ag.provider, "resolveDispute:anomaly");
-                }
-            }
+            _updateTrust(agreementId, ag, false);
         }
     }
 
@@ -431,6 +527,44 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
             require(ok, "ServiceAgreement: ETH transfer failed");
         } else {
             IERC20(token).safeTransfer(recipient, amount);
+        }
+    }
+
+    /**
+     * @notice Internal helper: update trust registry after an agreement resolves.
+     * @dev Best-effort — a broken TrustRegistry must NEVER block escrow release.
+     *      All calls are wrapped in try/catch and emit TrustUpdateFailed on error.
+     *
+     *      For success=true (provider delivered): calls recordSuccess(), subject to
+     *      minimumTrustValue — agreements below threshold skip the trust update to
+     *      prevent 1-wei sybil farming. Set minimumTrustValue=0 to disable threshold.
+     *
+     *      For success=false (provider failed — dispute resolved for client): calls
+     *      recordAnomaly() regardless of price (penalty always applies).
+     *
+     * @param agreementId Agreement ID (for event emission on failure)
+     * @param ag          Agreement storage reference (for price, provider)
+     * @param success     true = recordSuccess, false = recordAnomaly
+     */
+    function _updateTrust(uint256 agreementId, Agreement storage ag, bool success) internal {
+        if (trustRegistry == address(0)) return;
+
+        if (success) {
+            // Minimum trust value check — skip update for micro-agreements
+            if (minimumTrustValue != 0 && ag.price < minimumTrustValue) return;
+
+            try ITrustRegistry(trustRegistry).recordSuccess(ag.provider) {
+                // trust updated successfully
+            } catch {
+                emit TrustUpdateFailed(agreementId, ag.provider, "fulfill");
+            }
+        } else {
+            // Anomaly always applies regardless of price
+            try ITrustRegistry(trustRegistry).recordAnomaly(ag.provider) {
+                // trust updated successfully
+            } catch {
+                emit TrustUpdateFailed(agreementId, ag.provider, "resolveDispute:anomaly");
+            }
         }
     }
 

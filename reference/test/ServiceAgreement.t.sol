@@ -477,4 +477,45 @@ contract ServiceAgreementTrustLivenessTest is Test {
 
         assertEq(client.balance, clientBefore + PRICE);
     }
+
+    // ─── Fix 1: Dispute Timeout ───────────────────────────────────────────────
+
+    /**
+     * @notice Fix 1 hardening: after DISPUTE_TIMEOUT (30 days) from when the dispute
+     *         was opened, either party (or anyone) can call expiredDisputeRefund()
+     *         to release escrow back to the client — even if the owner is offline.
+     */
+    function test_DisputeTimeout_RefundsClient() public {
+        uint256 id = _proposeAndAccept();
+
+        // Client raises a dispute
+        vm.prank(client);
+        sa.dispute(id, "provider is unresponsive");
+
+        IServiceAgreement.Agreement memory ag = sa.getAgreement(id);
+        assertEq(uint8(ag.status), uint8(IServiceAgreement.Status.DISPUTED));
+        uint256 disputedAt = ag.resolvedAt; // dispute() now sets resolvedAt = block.timestamp
+
+        // Still within the 30-day window — must revert
+        vm.warp(disputedAt + 30 days);
+        vm.expectRevert("ServiceAgreement: dispute timeout not reached");
+        sa.expiredDisputeRefund(id);
+
+        // Advance past the 30-day timeout
+        vm.warp(disputedAt + 31 days);
+
+        uint256 clientBefore = client.balance;
+
+        // Anyone can trigger the refund (caller is a third party here)
+        address caller = address(0xCAFE);
+        vm.prank(caller);
+        sa.expiredDisputeRefund(id);
+
+        // Client receives the escrowed funds
+        assertEq(client.balance, clientBefore + PRICE);
+
+        // Agreement is now CANCELLED
+        ag = sa.getAgreement(id);
+        assertEq(uint8(ag.status), uint8(IServiceAgreement.Status.CANCELLED));
+    }
 }

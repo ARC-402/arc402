@@ -11,12 +11,29 @@ contract MockToken is ERC20 {
     }
 }
 
-// Helper: simulates a wallet that can call execute
+/**
+ * @dev Helper: simulates an ARC-402 wallet that calls propose() and execute() on its
+ *      own behalf (msg.sender == address(this) in both calls).
+ *
+ *      After Fix 3 (SC-AUTH), SettlementCoordinator.propose() requires
+ *      msg.sender == fromWallet, so the wallet must be the direct caller.
+ */
 contract MockWallet {
     SettlementCoordinator coordinator;
 
     constructor(address _coord) {
         coordinator = SettlementCoordinator(_coord);
+    }
+
+    /// @notice Wallet calls propose on its own behalf (msg.sender == address(this))
+    function callPropose(
+        address toWallet,
+        uint256 amount,
+        address token,
+        bytes32 intentId,
+        uint256 expiresAt
+    ) external returns (bytes32) {
+        return coordinator.propose(address(this), toWallet, amount, token, intentId, expiresAt);
     }
 
     function callExecute(bytes32 proposalId, uint256 amount) external payable {
@@ -41,10 +58,16 @@ contract SettlementCoordinatorTest is Test {
         vm.deal(toWallet, 0);
     }
 
+    // ─── Helper ──────────────────────────────────────────────────────────────
+
+    function _propose() internal returns (bytes32) {
+        return fromWallet.callPropose(toWallet, 1 ether, address(0), INTENT_ID, block.timestamp + 1 hours);
+    }
+
+    // ─── Existing Tests (updated to use callPropose) ──────────────────────────
+
     function test_propose() public {
-        bytes32 proposalId = coordinator.propose(
-            address(fromWallet), toWallet, 1 ether, address(0), INTENT_ID, block.timestamp + 1 hours
-        );
+        bytes32 proposalId = _propose();
         (address from, address to, uint256 amount,,,, SettlementCoordinator.ProposalStatus status,) = coordinator.getProposal(proposalId);
         assertEq(from, address(fromWallet));
         assertEq(to, toWallet);
@@ -53,9 +76,7 @@ contract SettlementCoordinatorTest is Test {
     }
 
     function test_accept() public {
-        bytes32 proposalId = coordinator.propose(
-            address(fromWallet), toWallet, 1 ether, address(0), INTENT_ID, block.timestamp + 1 hours
-        );
+        bytes32 proposalId = _propose();
         vm.prank(toWallet);
         coordinator.accept(proposalId);
         (,,,,,, SettlementCoordinator.ProposalStatus status,) = coordinator.getProposal(proposalId);
@@ -63,9 +84,7 @@ contract SettlementCoordinatorTest is Test {
     }
 
     function test_execute_fullFlow() public {
-        bytes32 proposalId = coordinator.propose(
-            address(fromWallet), toWallet, 1 ether, address(0), INTENT_ID, block.timestamp + 1 hours
-        );
+        bytes32 proposalId = _propose();
         vm.prank(toWallet);
         coordinator.accept(proposalId);
 
@@ -78,17 +97,13 @@ contract SettlementCoordinatorTest is Test {
     }
 
     function test_accept_notRecipient() public {
-        bytes32 proposalId = coordinator.propose(
-            address(fromWallet), toWallet, 1 ether, address(0), INTENT_ID, block.timestamp + 1 hours
-        );
+        bytes32 proposalId = _propose();
         vm.expectRevert("SettlementCoordinator: not recipient");
         coordinator.accept(proposalId);
     }
 
     function test_execute_wrongAmount() public {
-        bytes32 proposalId = coordinator.propose(
-            address(fromWallet), toWallet, 1 ether, address(0), INTENT_ID, block.timestamp + 1 hours
-        );
+        bytes32 proposalId = _propose();
         vm.prank(toWallet);
         coordinator.accept(proposalId);
         vm.expectRevert("SettlementCoordinator: wrong amount");
@@ -96,9 +111,7 @@ contract SettlementCoordinatorTest is Test {
     }
 
     function test_reject() public {
-        bytes32 proposalId = coordinator.propose(
-            address(fromWallet), toWallet, 1 ether, address(0), INTENT_ID, block.timestamp + 1 hours
-        );
+        bytes32 proposalId = _propose();
         vm.prank(toWallet);
         coordinator.reject(proposalId, "not authorized");
         (,,,,,, SettlementCoordinator.ProposalStatus status, string memory reason) = coordinator.getProposal(proposalId);
@@ -109,7 +122,7 @@ contract SettlementCoordinatorTest is Test {
     function test_execute_token_settlement() public {
         uint256 amount = 100 * 10**18;
 
-        // address(this) is the fromWallet for direct execution
+        // address(this) is the fromWallet for direct execution — msg.sender == address(this) so auth passes
         token.approve(address(coordinator), amount);
 
         bytes32 proposalId = coordinator.propose(
@@ -125,5 +138,28 @@ contract SettlementCoordinatorTest is Test {
 
         (,,,,,, SettlementCoordinator.ProposalStatus status,) = coordinator.getProposal(proposalId);
         assertEq(uint(status), uint(SettlementCoordinator.ProposalStatus.EXECUTED));
+    }
+
+    // ─── Fix 3: SC-AUTH — fromWallet auth on propose() ───────────────────────
+
+    /**
+     * @notice Fix 3 hardening: a third party cannot call propose() pretending to be
+     *         a different fromWallet address. msg.sender must equal fromWallet.
+     */
+    function test_SettlementCoordinator_RejectsWrongCaller() public {
+        address attacker = address(0xDEAD);
+        address victimWallet = address(0xABCD);
+
+        // Attacker tries to propose a settlement on behalf of victimWallet
+        vm.prank(attacker);
+        vm.expectRevert("SC: caller must be fromWallet");
+        coordinator.propose(
+            victimWallet,    // fromWallet  ≠ msg.sender (attacker)
+            toWallet,
+            1 ether,
+            address(0),
+            INTENT_ID,
+            block.timestamp + 1 hours
+        );
     }
 }

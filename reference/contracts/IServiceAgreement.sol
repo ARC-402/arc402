@@ -10,7 +10,7 @@ interface IServiceAgreement {
 
     // ─── Types ───────────────────────────────────────────────────────────────
 
-    enum Status { PROPOSED, ACCEPTED, FULFILLED, DISPUTED, CANCELLED }
+    enum Status { PROPOSED, ACCEPTED, PENDING_VERIFICATION, FULFILLED, DISPUTED, CANCELLED }
 
     struct Agreement {
         uint256 id;
@@ -25,6 +25,9 @@ interface IServiceAgreement {
         Status status;
         uint256 createdAt;
         uint256 resolvedAt;
+        // ─── v2 fields ───────────────────────────────────────────────────────
+        uint256 verifyWindowEnd;  // nonzero when in PENDING_VERIFICATION; 0 = no verify window
+        bytes32 committedHash;    // hash committed by provider via commitDeliverable()
     }
 
     // ─── Core Functions ──────────────────────────────────────────────────────
@@ -57,14 +60,37 @@ interface IServiceAgreement {
     function accept(uint256 agreementId) external;
 
     /**
-     * @notice Provider marks the agreement fulfilled and claims escrow
+     * @notice Provider marks the agreement fulfilled and claims escrow (immediate-release path)
      * @param agreementId The agreement to fulfill
      * @param actualDeliverablesHash keccak256 of what was actually delivered
      */
     function fulfill(uint256 agreementId, bytes32 actualDeliverablesHash) external;
 
     /**
-     * @notice Client or provider raises a dispute (escrow stays locked)
+     * @notice Provider commits deliverable hash, starting the verification window.
+     *         Moves status ACCEPTED → PENDING_VERIFICATION.
+     *         Client has VERIFY_WINDOW to approve or dispute; after that anyone may autoRelease.
+     * @param agreementId The agreement to commit
+     * @param deliverableHash keccak256 of the delivered work
+     */
+    function commitDeliverable(uint256 agreementId, bytes32 deliverableHash) external;
+
+    /**
+     * @notice Client approves delivery and releases escrow to provider.
+     *         Only callable while status is PENDING_VERIFICATION.
+     * @param agreementId The agreement to verify
+     */
+    function verifyDeliverable(uint256 agreementId) external;
+
+    /**
+     * @notice If client does not act within VERIFY_WINDOW, anyone may trigger auto-release.
+     * @param agreementId The agreement to auto-release
+     */
+    function autoRelease(uint256 agreementId) external;
+
+    /**
+     * @notice Client or provider raises a dispute (escrow stays locked).
+     *         Valid from ACCEPTED or PENDING_VERIFICATION status.
      * @param agreementId The agreement to dispute
      * @param reason Human/agent-readable reason
      */
