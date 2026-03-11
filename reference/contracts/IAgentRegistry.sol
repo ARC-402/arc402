@@ -20,6 +20,17 @@ interface IAgentRegistry {
         uint256 endpointChangeCount; // total number of endpoint changes since registration
     }
 
+    struct OperationalMetrics {
+        uint64 heartbeatInterval;
+        uint64 heartbeatGracePeriod;
+        uint64 lastHeartbeatAt;
+        uint64 rollingLatency;
+        uint32 heartbeatCount;
+        uint32 missedHeartbeatCount;
+        uint32 uptimeScore;
+        uint32 responseScore;
+    }
+
     function register(
         string calldata name,
         string[] calldata capabilities,
@@ -39,6 +50,8 @@ interface IAgentRegistry {
     function deactivate() external;
 
     function getAgent(address wallet) external view returns (AgentInfo memory);
+
+    function getOperationalMetrics(address wallet) external view returns (OperationalMetrics memory);
 
     function isRegistered(address wallet) external view returns (bool);
 

@@ -10,14 +10,6 @@ import "./ITrustRegistry.sol";
  *         of publication. This creates the marketplace immune system: bad actors accumulate
  *         weighted WARN signals that make them effectively unhireable, without any central authority.
  *
- * Signal sources:
- *   1. Auto-WARN: ServiceAgreement auto-publishes a WARN when a dispute resolves against the provider.
- *   2. Auto-ENDORSE: ServiceAgreement auto-publishes an ENDORSE after N consecutive successful deliveries.
- *   3. Manual: Any agent can publish a signal about any other agent (one signal per pair).
- *
- * Trust weighting: all scores are weighted by publisherTrustAtTime. A WARN from a trust-900 agent
- * carries 9x the weight of one from a trust-100 agent. This prevents review-bombing by low-trust Sybils.
- *
  * STATUS: DRAFT — not audited, do not use in production
  */
 contract ReputationOracle {
@@ -30,32 +22,34 @@ contract ReputationOracle {
         address publisher;
         address subject;
         SignalType signalType;
-        bytes32 capabilityHash; // keccak256(capability) or bytes32(0) for general signal
+        bytes32 capabilityHash;
         string reason;
-        uint256 publisherTrustAtTime; // snapshot of publisher trust at publication time
+        uint256 publisherTrustAtTime;
         uint256 timestamp;
-        bool autoPublished;     // true if emitted by ServiceAgreement, false if manual
+        bool autoPublished;
+    }
+
+    struct AutoWarnWindow {
+        uint64 windowStartedAt;
+        uint32 warnCount;
     }
 
     // ─── State ────────────────────────────────────────────────────────────────
 
     ITrustRegistry public immutable trustRegistry;
-
-    /// @notice Address of the ServiceAgreement contract allowed to auto-publish signals.
-    ///         Set at construction. address(0) disables auto-publishing.
     address public immutable serviceAgreement;
 
-    /// @notice subject → all signals published about them
-    mapping(address => Signal[]) private _signals;
-
-    /// @notice publisher → subject → already signaled (one signal per pair, manual only)
-    mapping(address => mapping(address => bool)) public hasSignaled;
-
-    /// @notice subject → consecutive successful delivery count (used for auto-endorse threshold)
-    mapping(address => uint256) public successStreak;
-
-    /// @notice Minimum consecutive successes before auto-ENDORSE is published.
     uint256 public constant ENDORSE_STREAK_THRESHOLD = 5;
+    uint256 public constant AUTO_WARN_COOLDOWN = 1 days;
+    uint256 public constant AUTO_WARN_WINDOW = 7 days;
+    uint256 public constant AUTO_WARN_MAX_PER_WINDOW = 3;
+
+    mapping(address => Signal[]) private _signals;
+    mapping(address => mapping(address => bool)) public hasManualSignaled;
+    mapping(address => mapping(address => bool)) public hasAutoSignaled;
+    mapping(address => uint256) public successStreak;
+    mapping(address => mapping(address => uint256)) public lastAutoWarnAt;
+    mapping(address => AutoWarnWindow) public autoWarnWindows;
 
     // ─── Events ──────────────────────────────────────────────────────────────
 
@@ -67,27 +61,23 @@ contract ReputationOracle {
         uint256 publisherTrustAtTime,
         bool autoPublished
     );
+    event AutoWarnSuppressed(
+        address indexed client,
+        address indexed provider,
+        bytes32 capabilityHash,
+        bytes32 reasonCode
+    );
 
     // ─── Constructor ─────────────────────────────────────────────────────────
 
     constructor(address _trustRegistry, address _serviceAgreement) {
         require(_trustRegistry != address(0), "ReputationOracle: zero trust registry");
         trustRegistry = ITrustRegistry(_trustRegistry);
-        serviceAgreement = _serviceAgreement; // may be address(0) to disable auto-publish
+        serviceAgreement = _serviceAgreement;
     }
 
     // ─── Manual Signal Publishing ─────────────────────────────────────────────
 
-    /**
-     * @notice Publish a trust signal about another agent.
-     * @dev One signal per publisher-subject pair. The signal is weighted by the publisher's
-     *      current trust score. To update a signal, the publisher would need a separate flow
-     *      (not implemented — keeps state simple at launch).
-     * @param subject The agent being signaled about.
-     * @param signalType ENDORSE, WARN, or BLOCK.
-     * @param capabilityHash keccak256(capability string) for capability-specific signal, or bytes32(0) for general.
-     * @param reason Human-readable reason (max 512 chars).
-     */
     function publishSignal(
         address subject,
         SignalType signalType,
@@ -97,7 +87,7 @@ contract ReputationOracle {
         require(subject != address(0), "ReputationOracle: zero subject");
         require(subject != msg.sender, "ReputationOracle: cannot signal self");
         require(bytes(reason).length <= 512, "ReputationOracle: reason too long");
-        require(!hasSignaled[msg.sender][subject], "ReputationOracle: already signaled");
+        require(!hasManualSignaled[msg.sender][subject], "ReputationOracle: already signaled");
 
         uint256 publisherTrust = _getTrust(msg.sender);
 
@@ -111,7 +101,7 @@ contract ReputationOracle {
             timestamp: block.timestamp,
             autoPublished: false
         }));
-        hasSignaled[msg.sender][subject] = true;
+        hasManualSignaled[msg.sender][subject] = true;
 
         emit SignalPublished(msg.sender, subject, signalType, capabilityHash, publisherTrust, false);
     }
@@ -119,31 +109,37 @@ contract ReputationOracle {
     // ─── Auto-Publishing (ServiceAgreement integration) ───────────────────────
 
     modifier onlyServiceAgreement() {
-        require(
-            msg.sender == serviceAgreement,
-            "ReputationOracle: caller not ServiceAgreement"
-        );
+        require(msg.sender == serviceAgreement, "ReputationOracle: caller not ServiceAgreement");
         _;
     }
 
-    /**
-     * @notice Auto-publish a WARN signal after a dispute resolves against the provider.
-     *         Called by ServiceAgreement.resolveDispute() when client wins.
-     * @param client The winning party (becomes the publisher of the WARN).
-     * @param provider The losing party (subject of the WARN).
-     * @param capabilityHash Capability the agreement was for.
-     */
     function autoWarn(
         address client,
         address provider,
         bytes32 capabilityHash
     ) external onlyServiceAgreement {
-        // Reset provider success streak on dispute loss
         successStreak[provider] = 0;
 
-        // Idempotent: if client already signaled this provider, don't double-warn.
-        // The trust weight of the existing signal still stands.
-        if (hasSignaled[client][provider]) return;
+        if (hasAutoSignaled[client][provider]) {
+            emit AutoWarnSuppressed(client, provider, capabilityHash, keccak256("ALREADY_SIGNALED"));
+            return;
+        }
+
+        if (lastAutoWarnAt[client][provider] != 0 && block.timestamp < lastAutoWarnAt[client][provider] + AUTO_WARN_COOLDOWN) {
+            emit AutoWarnSuppressed(client, provider, capabilityHash, keccak256("CLIENT_COOLDOWN"));
+            return;
+        }
+
+        AutoWarnWindow storage window = autoWarnWindows[provider];
+        if (window.windowStartedAt == 0 || block.timestamp >= uint256(window.windowStartedAt) + AUTO_WARN_WINDOW) {
+            window.windowStartedAt = uint64(block.timestamp);
+            window.warnCount = 0;
+        }
+
+        if (window.warnCount >= AUTO_WARN_MAX_PER_WINDOW) {
+            emit AutoWarnSuppressed(client, provider, capabilityHash, keccak256("WINDOW_LIMIT"));
+            return;
+        }
 
         uint256 clientTrust = _getTrust(client);
 
@@ -157,18 +153,13 @@ contract ReputationOracle {
             timestamp: block.timestamp,
             autoPublished: true
         }));
-        hasSignaled[client][provider] = true;
+        hasAutoSignaled[client][provider] = true;
+        lastAutoWarnAt[client][provider] = block.timestamp;
+        window.warnCount += 1;
 
         emit SignalPublished(client, provider, SignalType.WARN, capabilityHash, clientTrust, true);
     }
 
-    /**
-     * @notice Record a successful delivery. After ENDORSE_STREAK_THRESHOLD consecutive
-     *         successes with unique counterparties, auto-publish an ENDORSE from the client.
-     * @param client The paying party (becomes the publisher of any ENDORSE).
-     * @param provider The delivering party (subject of the ENDORSE).
-     * @param capabilityHash Capability the agreement was for.
-     */
     function autoRecordSuccess(
         address client,
         address provider,
@@ -176,9 +167,8 @@ contract ReputationOracle {
     ) external onlyServiceAgreement {
         successStreak[provider] += 1;
 
-        // Only auto-endorse at streak threshold and only if not already signaled
         if (successStreak[provider] < ENDORSE_STREAK_THRESHOLD) return;
-        if (hasSignaled[client][provider]) return;
+        if (hasAutoSignaled[client][provider]) return;
 
         uint256 clientTrust = _getTrust(client);
 
@@ -192,9 +182,7 @@ contract ReputationOracle {
             timestamp: block.timestamp,
             autoPublished: true
         }));
-        hasSignaled[client][provider] = true;
-
-        // Reset streak after endorsement to prevent infinite endorsement accumulation
+        hasAutoSignaled[client][provider] = true;
         successStreak[provider] = 0;
 
         emit SignalPublished(client, provider, SignalType.ENDORSE, capabilityHash, clientTrust, true);
@@ -202,13 +190,6 @@ contract ReputationOracle {
 
     // ─── Reputation Queries ───────────────────────────────────────────────────
 
-    /**
-     * @notice Get the aggregate trust-weighted reputation for a subject across all capabilities.
-     * @return endorsements Total number of ENDORSE signals.
-     * @return warnings Total number of WARN signals.
-     * @return blocks Total number of BLOCK signals.
-     * @return weightedScore Net trust-weighted score: sum(endorseTrust) - sum(warnTrust) - sum(blockTrust), floor 0.
-     */
     function getReputation(address subject) external view returns (
         uint256 endorsements,
         uint256 warnings,
@@ -236,10 +217,6 @@ contract ReputationOracle {
         weightedScore = positiveWeight > negativeWeight ? positiveWeight - negativeWeight : 0;
     }
 
-    /**
-     * @notice Get trust-weighted reputation for a specific capability.
-     * @dev Includes both general signals (capabilityHash == 0) and capability-specific ones.
-     */
     function getCapabilityReputation(address subject, bytes32 capabilityHash)
         external view returns (uint256 weightedScore)
     {
@@ -249,7 +226,6 @@ contract ReputationOracle {
 
         for (uint256 i = 0; i < sigs.length; i++) {
             Signal storage s = sigs[i];
-            // Include if: capability-specific match OR general signal (capabilityHash == 0)
             if (s.capabilityHash != capabilityHash && s.capabilityHash != bytes32(0)) continue;
 
             if (s.signalType == SignalType.ENDORSE) {
@@ -262,16 +238,10 @@ contract ReputationOracle {
         weightedScore = positiveWeight > negativeWeight ? positiveWeight - negativeWeight : 0;
     }
 
-    /**
-     * @notice Returns the total number of signals about a subject.
-     */
     function getSignalCount(address subject) external view returns (uint256) {
         return _signals[subject].length;
     }
 
-    /**
-     * @notice Returns a specific signal by index.
-     */
     function getSignal(address subject, uint256 index) external view returns (Signal memory) {
         require(index < _signals[subject].length, "ReputationOracle: out of bounds");
         return _signals[subject][index];

@@ -17,7 +17,12 @@ contract AgentRegistry is IAgentRegistry {
 
     ITrustRegistry public immutable trustRegistry;
 
+    uint64 public constant DEFAULT_HEARTBEAT_INTERVAL = 1 hours;
+    uint64 public constant DEFAULT_HEARTBEAT_GRACE_PERIOD = 15 minutes;
+    uint32 public constant MAX_SCORE = 100;
+
     mapping(address => AgentInfo) private _agents;
+    mapping(address => OperationalMetrics) private _operationalMetrics;
     mapping(address => bool) private _registered;
 
     address[] private _agentList;
@@ -30,6 +35,15 @@ contract AgentRegistry is IAgentRegistry {
     event AgentReactivated(address indexed wallet);
     /// @notice Emitted whenever an agent changes their endpoint.
     event EndpointChanged(address indexed wallet, string oldEndpoint, string newEndpoint, uint256 changeCount);
+    event HeartbeatSubmitted(
+        address indexed wallet,
+        uint256 timestamp,
+        uint256 latency,
+        uint256 heartbeatCount,
+        uint256 uptimeScore,
+        uint256 responseScore
+    );
+    event HeartbeatPolicyUpdated(address indexed wallet, uint256 interval, uint256 gracePeriod);
 
     // ─── Constructor ─────────────────────────────────────────────────────────
 
@@ -74,10 +88,15 @@ contract AgentRegistry is IAgentRegistry {
         info.registeredAt = block.timestamp;
         info.endpointChangedAt = 0;
         info.endpointChangeCount = 0;
-        // copy calldata string[] → storage element by element (compiler limitation)
         for (uint256 i = 0; i < capabilities.length; i++) {
             info.capabilities.push(capabilities[i]);
         }
+
+        OperationalMetrics storage ops = _operationalMetrics[msg.sender];
+        ops.heartbeatInterval = DEFAULT_HEARTBEAT_INTERVAL;
+        ops.heartbeatGracePeriod = DEFAULT_HEARTBEAT_GRACE_PERIOD;
+        ops.uptimeScore = MAX_SCORE;
+        ops.responseScore = MAX_SCORE;
 
         emit AgentRegistered(msg.sender, name, serviceType, block.timestamp);
     }
@@ -109,7 +128,6 @@ contract AgentRegistry is IAgentRegistry {
         info.serviceType = serviceType;
         info.metadataURI = metadataURI;
 
-        // Detect endpoint changes — track for reputation/stability scoring
         if (keccak256(bytes(endpoint)) != keccak256(bytes(info.endpoint))) {
             string memory oldEndpoint = info.endpoint;
             info.endpoint = endpoint;
@@ -118,7 +136,6 @@ contract AgentRegistry is IAgentRegistry {
             emit EndpointChanged(msg.sender, oldEndpoint, endpoint, info.endpointChangeCount);
         }
 
-        // replace capabilities: clear then push
         delete info.capabilities;
         for (uint256 i = 0; i < capabilities.length; i++) {
             info.capabilities.push(capabilities[i]);
@@ -149,6 +166,52 @@ contract AgentRegistry is IAgentRegistry {
         emit AgentReactivated(msg.sender);
     }
 
+    /**
+     * @notice Agent self-reports a heartbeat and rolling latency sample.
+     * @dev This is intentionally lightweight: it stores only coarse rolling metrics,
+     *      enough for future discovery weighting without introducing centralized monitors.
+     */
+    function submitHeartbeat(uint32 latencyMs) external {
+        require(_registered[msg.sender], "AgentRegistry: not registered");
+        require(_agents[msg.sender].active, "AgentRegistry: agent not active");
+
+        OperationalMetrics storage ops = _operationalMetrics[msg.sender];
+        _applyMissedHeartbeats(ops);
+
+        if (ops.lastHeartbeatAt == 0) {
+            ops.rollingLatency = latencyMs;
+        } else {
+            ops.rollingLatency = uint64((uint256(ops.rollingLatency) * 3 + latencyMs) / 4);
+        }
+
+        ops.lastHeartbeatAt = uint64(block.timestamp);
+        ops.heartbeatCount += 1;
+        ops.uptimeScore = _increaseScore(ops.uptimeScore, 2);
+        ops.responseScore = _latencyToScore(ops.rollingLatency);
+
+        emit HeartbeatSubmitted(
+            msg.sender,
+            block.timestamp,
+            latencyMs,
+            ops.heartbeatCount,
+            ops.uptimeScore,
+            ops.responseScore
+        );
+    }
+
+    function setHeartbeatPolicy(uint64 interval, uint64 gracePeriod) external {
+        require(_registered[msg.sender], "AgentRegistry: not registered");
+        require(_agents[msg.sender].active, "AgentRegistry: agent not active");
+        require(interval >= 5 minutes && interval <= 7 days, "AgentRegistry: invalid interval");
+        require(gracePeriod <= interval, "AgentRegistry: grace exceeds interval");
+
+        OperationalMetrics storage ops = _operationalMetrics[msg.sender];
+        ops.heartbeatInterval = interval;
+        ops.heartbeatGracePeriod = gracePeriod;
+
+        emit HeartbeatPolicyUpdated(msg.sender, interval, gracePeriod);
+    }
+
     // ─── Queries ─────────────────────────────────────────────────────────────
 
     /**
@@ -157,6 +220,22 @@ contract AgentRegistry is IAgentRegistry {
     function getAgent(address wallet) external view override returns (AgentInfo memory) {
         require(_registered[wallet], "AgentRegistry: not registered");
         return _agents[wallet];
+    }
+
+    function getOperationalMetrics(address wallet) external view override returns (OperationalMetrics memory) {
+        require(_registered[wallet], "AgentRegistry: not registered");
+
+        OperationalMetrics memory ops = _operationalMetrics[wallet];
+        if (ops.lastHeartbeatAt == 0) return ops;
+
+        uint256 missed = _missedHeartbeats(ops, block.timestamp);
+        if (missed > 0) {
+            ops.missedHeartbeatCount += uint32(missed);
+            uint256 penalty = missed * 10;
+            ops.uptimeScore = uint32(penalty >= ops.uptimeScore ? 0 : ops.uptimeScore - penalty);
+        }
+        ops.responseScore = _latencyToScore(ops.rollingLatency);
+        return ops;
     }
 
     /**
@@ -195,17 +274,6 @@ contract AgentRegistry is IAgentRegistry {
 
     /**
      * @notice Returns the endpoint stability score for an agent (0–100).
-     *         100 = endpoint stable > 90 days with 0 changes.
-     *         Decays based on recency of changes and total change count.
-     *         Used by off-chain agents to apply trust multipliers during discovery.
-     *
-     *         Formula:
-     *         - Never changed: 100
-     *         - Changed, days since last change ≥ 90: 70 (stable after recovery)
-     *         - Changed, 30 ≤ days < 90: 50
-     *         - Changed, 7 ≤ days < 30: 30
-     *         - Changed < 7 days ago: 10
-     *         - Changed multiple times recently (< 30 days): halved per additional change
      */
     function getEndpointStability(address wallet) external view returns (uint256 score) {
         require(_registered[wallet], "AgentRegistry: not registered");
@@ -223,8 +291,6 @@ contract AgentRegistry is IAgentRegistry {
             score = 10;
         }
 
-        // Penalize repeated changes: halve score for each change beyond the first,
-        // but floor at 5 to avoid zero scores from arithmetic.
         uint256 extra = info.endpointChangeCount > 1 ? info.endpointChangeCount - 1 : 0;
         for (uint256 i = 0; i < extra && score > 5; i++) {
             score = score / 2;
@@ -246,5 +312,41 @@ contract AgentRegistry is IAgentRegistry {
     function getAgentAtIndex(uint256 index) external view returns (address) {
         require(index < _agentList.length, "AgentRegistry: index out of bounds");
         return _agentList[index];
+    }
+
+    // ─── Internal ─────────────────────────────────────────────────────────────
+
+    function _applyMissedHeartbeats(OperationalMetrics storage ops) internal {
+        if (ops.lastHeartbeatAt == 0) return;
+
+        uint256 missed = _missedHeartbeats(ops, block.timestamp);
+        if (missed == 0) return;
+
+        ops.missedHeartbeatCount += uint32(missed);
+        uint256 penalty = missed * 10;
+        ops.uptimeScore = uint32(penalty >= ops.uptimeScore ? 0 : ops.uptimeScore - penalty);
+    }
+
+    function _missedHeartbeats(OperationalMetrics memory ops, uint256 timestamp) internal pure returns (uint256) {
+        uint256 allowedGap = uint256(ops.heartbeatInterval) + uint256(ops.heartbeatGracePeriod);
+        if (ops.lastHeartbeatAt == 0 || allowedGap == 0 || timestamp <= ops.lastHeartbeatAt + allowedGap) {
+            return 0;
+        }
+
+        return (timestamp - ops.lastHeartbeatAt - allowedGap) / ops.heartbeatInterval + 1;
+    }
+
+    function _latencyToScore(uint256 latencyMs) internal pure returns (uint32) {
+        if (latencyMs == 0 || latencyMs <= 250) return 100;
+        if (latencyMs <= 500) return 90;
+        if (latencyMs <= 1000) return 75;
+        if (latencyMs <= 2000) return 60;
+        if (latencyMs <= 5000) return 40;
+        return 20;
+    }
+
+    function _increaseScore(uint32 current, uint32 amount) internal pure returns (uint32) {
+        uint256 next = uint256(current) + amount;
+        return uint32(next > MAX_SCORE ? MAX_SCORE : next);
     }
 }
