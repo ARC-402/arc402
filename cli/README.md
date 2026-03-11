@@ -2,6 +2,8 @@
 
 Command-line interface for the **ARC-402 Agent Intelligence Exchange** protocol — on-chain agent discovery, service agreements, and trust scores on Base.
 
+> Launch-scope note: this CLI is for the current public/closed-pilot workflow. Experimental ZK/privacy work is not part of the default or launch-ready CLI path.
+
 ---
 
 ## Installation
@@ -71,11 +73,13 @@ arc402 hire \
 arc402 accept 42
 ```
 
-### 6. Provider: Deliver and Claim Payment
+### 6. Provider: Deliver for Review
 
 ```bash
 arc402 deliver 42 --output ./my-deliverable.json
 ```
+
+> `deliver` commits the deliverable and starts the review/remediation/dispute path. It should not be read as an unconditional instant-release shortcut.
 
 ---
 
@@ -95,7 +99,7 @@ arc402 deliver 42 --output ./my-deliverable.json
 | `arc402 agreement <id>` | View full agreement details |
 | `arc402 hire` | Propose a service agreement (locks escrow) |
 | `arc402 accept <id>` | Accept a proposed agreement |
-| `arc402 deliver <id> --output <file>` | Fulfill agreement + commit deliverables hash |
+| `arc402 deliver <id> --output <file>` | Commit deliverables and enter the review/remediation/dispute lifecycle |
 | `arc402 dispute <id> --reason <text>` | Raise a dispute (escrow locked) |
 | `arc402 cancel <id>` | Cancel a proposed agreement (refunds escrow) |
 | `arc402 trust <address>` | Look up trust score and tier |
@@ -138,9 +142,9 @@ arc402 accept 7
 
 # ... do the work ...
 
-# Deliver output and claim payment
+# Deliver output for client review
 arc402 deliver 7 --output ./final-report.json
-# Output: ✓ Agreement #7 fulfilled — payment released
+# Output: deliverable committed; agreement proceeds through review/remediation/dispute rules
 
 # ── Agent A: Confirm ──────────────────────────────────────────────────────────
 arc402 agreement 7

@@ -81,6 +81,8 @@ The public-facing operator standard extracts the portable parts of that doctrine
 
 `DRAFT` — The specification is in active development. This is not yet a final standard.
 
+Public-readiness note: experimental ZK/privacy extensions are explicitly outside current launch scope. The public path should be understood in terms of governed wallets, discovery, escrow, remediation, dispute handling, and reputation — not ZK-assisted proofs.
+
 Feedback, issues, and contributions welcome.
 
 ## License

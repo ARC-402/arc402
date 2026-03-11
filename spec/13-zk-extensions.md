@@ -1,10 +1,14 @@
 # ARC-402 Spec — 13: ZK Privacy Extensions
 
-## Status: IN DEVELOPMENT
+## Status: EXPERIMENTAL / NON-LAUNCH SCOPE
 
-These extensions are designed, not yet deployed. Contract interfaces are being built to support ZK integration without future rewrites to the trust graph or wallet architecture.
+These extensions are designed, not launch-ready. Contract interfaces and draft contracts exist to preserve a future upgrade path, but the ZK path is **explicitly outside ARC-402 public-launch scope** until it is redesigned, independently reviewed, and re-audited.
+
+For current public-readiness purposes, treat this document as a **roadmap / experimental appendix**, not part of the launch-grade happy path.
 
 ---
+
+> WARNING: Do not present these flows as production-ready, default, or required for public integrations today.
 
 ## Why ZK
 
@@ -141,4 +145,4 @@ All extensions are additive. Existing contracts do not change. The verifier cont
 
 3. The economic case strengthens with adoption. A ZK trust threshold proof is most valuable when agents compete on reputation — which requires an established reputation market.
 
-**The architecture supports all three extensions today.** The contracts are designed to be extended without rewriting. The privacy roadmap is locked. The timing is a function of market maturity, not technical readiness.
+**The architecture preserves room for all three extensions.** Draft contracts and interfaces exist so the protocol can evolve without a full rewrite, but that should not be read as evidence of launch readiness. The privacy roadmap is directionally defined; reintroduction should follow redesign, dedicated review, and an explicit post-launch audit track.

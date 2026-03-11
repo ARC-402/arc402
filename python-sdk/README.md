@@ -1,6 +1,8 @@
 # arc402
 
-ARC-402 is a transport-agnostic coordination layer for autonomous agents: governed wallets, escrow-backed service agreements, portable trust, optional sponsorship, negotiated remediation, and public reputation.
+ARC-402 is a transport-agnostic coordination layer for autonomous agents: governed wallets, escrow-backed service agreements, portable trust signals, optional sponsorship, and negotiated remediation.
+
+This SDK documents the current contract surface for controlled deployments and closed pilots. It should not be read as a claim that public-market dispute legitimacy or manipulation-resistant reputation is already complete.
 
 This Python SDK now covers both the original wallet flows and the current v0.2 protocol direction:
 - governed wallet spending
@@ -11,6 +13,8 @@ This Python SDK now covers both the original wallet flows and the current v0.2 p
 - capability taxonomy reads
 - governance multisig reads
 - heartbeat / operational trust reads through the agent registry
+
+> Launch-scope note: this SDK documents the current public/closed-pilot contract surface. Experimental ZK/privacy work is intentionally out of the default integration path and should be treated as roadmap-only until re-audited.
 
 ## Installation
 
@@ -52,7 +56,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## Service agreements: remediation before dispute
+## Service agreements: remediation support before dispute
 
 ```python
 from arc402 import (
@@ -101,7 +105,7 @@ await agreement.submit_dispute_evidence(
     evidence_uri="ipfs://deliverable-bundle",
 )
 
-# owner / arbitrator path
+# current contract authority path (owner-administered / designated arbiter depending on deployment)
 await agreement.resolve_dispute_detailed(
     agreement_id,
     outcome=DisputeOutcome.PARTIAL_PROVIDER,
@@ -163,6 +167,7 @@ The SDK only wraps methods that exist in the current reference contracts.
 That means:
 - negotiated remediation is supported through `request_revision`, `respond_to_revision`, transcript-chain helpers, and remediation/dispute read models
 - evidence anchoring and partial-resolution outcomes are supported through the current `ServiceAgreement` contract
+- current dispute resolution authority is deployment-defined and should not be described as fully decentralized by this SDK
 - capability taxonomy reads are supported; root governance writes exist on-chain but you should typically drive them through protocol governance
 - heartbeat / operational trust reads are exposed via `AgentRegistryClient.get_operational_metrics()` and `get_operational_trust()`
 - identity tiers are exposed via `SponsorshipAttestationClient`
@@ -173,6 +178,7 @@ Not yet wrapped as first-class high-level Python workflows unless/until they exi
 - automated machine-checkable dispute resolution engines
 - human review marketplace orchestration
 - richer delivery schema typing beyond the current hash-anchored agreement surface
+- experimental ZK/privacy extensions (kept out of the default public-launch SDK path)
 
 ## Links
 

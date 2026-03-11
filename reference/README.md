@@ -1,12 +1,14 @@
 # ARC-402 Reference Implementation
 
-**ARC-402: Agent Resource Control** — the economic operating system for autonomous agents.
+**ARC-402: Agent Resource Control** — governed coordination and escrow infrastructure for autonomous agents.
 
-> STATUS: Pre-audit. Not for production use.
+> STATUS: Closed-pilot candidate after audit reconciliation. Not ready for open public launch or production funds.
 
 ## What's Here
 
-The complete on-chain implementation of the ARC-402 protocol. 242 tests. 0 failures.
+The current on-chain reference implementation of ARC-402. 242 tests. 0 failures.
+
+This repository is strong enough to support controlled counterparties and audit-driven iteration. It should not yet be described as an open public market rail or institutionally mature dispute system.
 
 ### Contracts
 
@@ -20,7 +22,7 @@ The complete on-chain implementation of the ARC-402 protocol. 242 tests. 0 failu
 | `IntentAttestation` | Single-use intent proofs — every spend must be pre-attested |
 | `SettlementCoordinator` | Multi-agent bilateral settlement with ETH/ERC-20 support |
 | `AgentRegistry` | Agent discovery — capabilities, endpoints, endpoint stability, heartbeat-based operational metrics |
-| `ServiceAgreement` | Bilateral escrow agreements — commit-reveal delivery, dispute resolution |
+| `ServiceAgreement` | Bilateral escrow agreements — propose/accept/deliver/review/remediation/dispute/release lifecycle |
 | `X402Interceptor` | HTTP 402 payment bridge — governed API pay-per-call |
 | `WalletFactory` | Deploy deterministic ARC402Wallets |
 | `ReputationOracle` | Social trust signals — trust-weighted ENDORSE/WARN/BLOCK with auto-WARN cooldown and window caps |
@@ -34,7 +36,8 @@ The complete on-chain implementation of the ARC-402 protocol. 242 tests. 0 failu
 - **Ownable2Step** — two-step ownership transfer on ServiceAgreement (F-24)
 - **Dispute timeout** — 30-day auto-refund if arbiter is offline
 - **Minimum trust value** — blocks 1-wei sybil farming
-- **Commit-reveal delivery** — provider commits hash, client verifies, auto-release after 3 days
+- **Default delivery lifecycle** — provider commits deliverable, client verifies or enters remediation/dispute, auto-release after 3 days if client is silent
+- **Legacy fulfill gated off by default** — immediate release remains ABI-compatible only for explicitly trusted legacy providers, not as the preferred public path
 - **fromWallet auth** — SettlementCoordinator requires caller == fromWallet
 - **PolicyEngine self-registration** — wallets can only register themselves
 
@@ -56,12 +59,16 @@ The complete on-chain implementation of the ARC-402 protocol. 242 tests. 0 failu
 - Trust-weighted scoring (publisher trust at time of signal)
 - One signal per publisher-subject pair
 
+These signals are useful reputation inputs, but they should not yet be presented as a fully manipulation-resistant public truth system.
+
 ### Operational Trust
 
 - Self-reported heartbeat submissions in `AgentRegistry`
 - Configurable heartbeat interval + grace period per agent
 - Lightweight rolling latency, uptime score, response score, and missed-heartbeat counters
 - On-chain primitives intended for future discovery scoring, not centralized monitoring
+
+Operational trust is informational. It is not yet an independently verified trust primitive for public ranking or legitimacy claims.
 
 ## Build & Test
 
@@ -108,12 +115,13 @@ Full protocol spec in `../spec/`:
 - `10-reputation-oracle.md` — social trust layer
 - `11-sponsorship-attestation.md` — opt-in agency associations and optional identity tiers
 - `12-privacy-model.md` — what's public, what's private
-- `13-zk-extensions.md` — ZK proofs (in development)
+- `13-zk-extensions.md` — ZK proofs (experimental roadmap, non-launch scope)
 
 ## Audit Status
 
 Multi-auditor reconciliation complete (2026-03-11):
 - 88 raw findings → 34 unique → PASS WITH CONDITIONS
-- All code findings resolved
+- Codebase assessed as closed-pilot viable, not open-public ready
+- Remaining gate is institutional/public-launch maturity, not just code correctness
 - Operational gate: hardware wallet / Gnosis Safe (pending)
-- Delta audit scheduled before mainnet deployment
+- Delta audit scheduled before broader deployment
