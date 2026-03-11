@@ -31,6 +31,19 @@ contract ARC402Wallet {
     bool public contextOpen;
     uint256 public contextOpenedAt;
 
+    // ─── Circuit Breaker State ────────────────────────────────────────────────
+
+    bool public frozen;
+    uint256 public frozenAt;
+    address public frozenBy;
+
+    // ─── Velocity Limit State ─────────────────────────────────────────────────
+
+    uint256 public spendingWindowStart;
+    uint256 public spendingInWindow;
+    uint256 public constant SPEND_WINDOW = 1 days;
+    uint256 public velocityLimit; // 0 = disabled
+
     // ─── Events ──────────────────────────────────────────────────────────────
 
     event RegistryUpdated(address oldRegistry, address newRegistry);
@@ -41,6 +54,9 @@ contract ARC402Wallet {
     event TokenSpendExecuted(address indexed token, address indexed recipient, uint256 amount, string category, bytes32 attestationId);
     event PolicyUpdated(bytes32 newPolicyId);
     event SettlementProposed(address indexed recipientWallet, uint256 amount, bytes32 attestationId);
+    event WalletFrozen(address indexed by, string reason, uint256 timestamp);
+    event WalletUnfrozen(address indexed by, uint256 timestamp);
+    event VelocityLimitUpdated(uint256 newLimit);
 
     // ─── Modifiers ───────────────────────────────────────────────────────────
 
@@ -51,6 +67,11 @@ contract ARC402Wallet {
 
     modifier requireOpenContext() {
         require(contextOpen, "ARC402: no active context");
+        _;
+    }
+
+    modifier notFrozen() {
+        require(!frozen, "ARC402: wallet frozen");
         _;
     }
 
@@ -69,6 +90,27 @@ contract ARC402Wallet {
         address old = address(registry);
         registry = ARC402Registry(newRegistry);
         emit RegistryUpdated(old, newRegistry);
+    }
+
+    // ─── Circuit Breaker ──────────────────────────────────────────────────────
+
+    function freeze(string calldata reason) external onlyOwner {
+        require(!frozen, "ARC402: already frozen");
+        frozen = true;
+        frozenAt = block.timestamp;
+        frozenBy = msg.sender;
+        emit WalletFrozen(msg.sender, reason, block.timestamp);
+    }
+
+    function unfreeze() external onlyOwner {
+        require(frozen, "ARC402: not frozen");
+        frozen = false;
+        emit WalletUnfrozen(msg.sender, block.timestamp);
+    }
+
+    function setVelocityLimit(uint256 limit) external onlyOwner {
+        velocityLimit = limit;
+        emit VelocityLimitUpdated(limit);
     }
 
     // ─── Internal Contract Accessors ─────────────────────────────────────────
@@ -112,7 +154,7 @@ contract ARC402Wallet {
         uint256 amount,
         string calldata category,
         bytes32 attestationId
-    ) external onlyOwner requireOpenContext {
+    ) external onlyOwner requireOpenContext notFrozen {
         require(recipient != address(0), "ARC402: zero address recipient");
 
         // 1. Verify intent attestation exists and is valid
@@ -136,7 +178,22 @@ contract ARC402Wallet {
             revert(reason);
         }
 
-        // 3. Execute transfer (emit before external call per CEI pattern)
+        // 3. Rolling window velocity check
+        if (block.timestamp > spendingWindowStart + SPEND_WINDOW) {
+            spendingWindowStart = block.timestamp;
+            spendingInWindow = 0;
+        }
+        spendingInWindow += amount;
+        if (velocityLimit > 0 && spendingInWindow > velocityLimit) {
+            // Freeze persists (no revert here); current spend is silently blocked.
+            // All subsequent calls will fail at the notFrozen modifier.
+            frozen = true;
+            frozenAt = block.timestamp;
+            emit WalletFrozen(address(this), "velocity limit exceeded", block.timestamp);
+            return;
+        }
+
+        // 4. Execute transfer (emit before external call per CEI pattern)
         emit SpendExecuted(recipient, amount, category, attestationId);
         (bool success,) = recipient.call{value: amount}("");
         require(success, "ARC402: transfer failed");
@@ -158,7 +215,7 @@ contract ARC402Wallet {
         uint256 amount,
         string calldata category,
         bytes32 attestationId
-    ) external onlyOwner requireOpenContext {
+    ) external onlyOwner requireOpenContext notFrozen {
         require(recipient != address(0), "ARC402: zero address recipient");
         require(token != address(0), "ARC402: zero token address");
 
@@ -175,10 +232,25 @@ contract ARC402Wallet {
             revert(reason);
         }
 
-        // 3. Emit BEFORE transfer (CEI pattern)
+        // 3. Rolling window velocity check
+        if (block.timestamp > spendingWindowStart + SPEND_WINDOW) {
+            spendingWindowStart = block.timestamp;
+            spendingInWindow = 0;
+        }
+        spendingInWindow += amount;
+        if (velocityLimit > 0 && spendingInWindow > velocityLimit) {
+            // Freeze persists (no revert here); current spend is silently blocked.
+            // All subsequent calls will fail at the notFrozen modifier.
+            frozen = true;
+            frozenAt = block.timestamp;
+            emit WalletFrozen(address(this), "velocity limit exceeded", block.timestamp);
+            return;
+        }
+
+        // 4. Emit BEFORE transfer (CEI pattern)
         emit TokenSpendExecuted(token, recipient, amount, category, attestationId);
 
-        // 4. Execute ERC-20 transfer
+        // 5. Execute ERC-20 transfer
         IERC20(token).safeTransfer(recipient, amount);
     }
 

@@ -55,6 +55,6 @@ contract DeployServiceAgreement is Script {
         console.log("\n=== ServiceAgreement DEPLOYMENT COMPLETE ===");
         console.log("The deployer is the initial dispute arbiter.");
         console.log("Transfer ownership via transferOwnership() (Ownable2Step on TrustRegistry).");
-        console.log("Only ServiceAgreement can update trust scores — farming vector closed.");
+        console.log(unicode"Only ServiceAgreement can update trust scores \u2014 farming vector closed.");
     }
 }

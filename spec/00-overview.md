@@ -47,6 +47,8 @@ ARC-402 solves all three.
 
 6. **Composability, not replacement.** ARC-402 extends existing standards. Implementors do not choose between x402 and ARC-402. They use both.
 
+7. **Safety is recoverable.** The wallet owner retains the ability to freeze spending at any time. Autonomous operation is not irreversible — it is governed autonomy, not unchecked autonomy.
+
 ---
 
 ## Relationship to Existing Standards

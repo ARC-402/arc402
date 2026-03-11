@@ -217,6 +217,124 @@ contract ARC402WalletTest is Test {
         wallet.setRegistry(address(reg2));
     }
 
+    // ─── Circuit Breaker Tests ────────────────────────────────────────────────
+
+    function test_Freeze_BlocksSpend() public {
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+        vm.prank(address(wallet));
+        intentAttestation.attest(ATTEST_ID, "pay_provider", "Payment", recipient, 0.1 ether, address(0));
+
+        wallet.freeze("manual emergency stop");
+
+        vm.expectRevert("ARC402: wallet frozen");
+        wallet.executeSpend(payable(recipient), 0.1 ether, "claims", ATTEST_ID);
+    }
+
+    function test_Unfreeze_RestoresSpend() public {
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+        vm.prank(address(wallet));
+        intentAttestation.attest(ATTEST_ID, "pay_provider", "Payment", recipient, 0.1 ether, address(0));
+
+        wallet.freeze("manual freeze");
+        wallet.unfreeze();
+
+        uint256 balanceBefore = recipient.balance;
+        wallet.executeSpend(payable(recipient), 0.1 ether, "claims", ATTEST_ID);
+        assertEq(recipient.balance - balanceBefore, 0.1 ether);
+    }
+
+    function test_VelocityLimit_AutoFreeze() public {
+        // Raise policy limit to allow 0.6 ETH transactions
+        vm.prank(address(wallet));
+        policyEngine.setCategoryLimit("claims", 2 ether);
+
+        wallet.setVelocityLimit(1 ether);
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+
+        bytes32 attest1 = keccak256("intent-vel-1");
+        bytes32 attest2 = keccak256("intent-vel-2");
+
+        // First spend: 0.6 ETH — fine
+        vm.prank(address(wallet));
+        intentAttestation.attest(attest1, "pay", "Payment 1", recipient, 0.6 ether, address(0));
+        wallet.executeSpend(payable(recipient), 0.6 ether, "claims", attest1);
+        assertFalse(wallet.frozen());
+
+        // Second spend: 0.6 ETH — total 1.2 ETH > 1 ETH limit.
+        // EVM note: auto-freeze sets frozen=true and returns (no revert) so the state
+        // change persists. The transfer is silently blocked; wallet is now frozen.
+        vm.prank(address(wallet));
+        intentAttestation.attest(attest2, "pay", "Payment 2", recipient, 0.6 ether, address(0));
+        uint256 balBefore = recipient.balance;
+        wallet.executeSpend(payable(recipient), 0.6 ether, "claims", attest2); // no revert, no transfer
+        assertEq(recipient.balance, balBefore); // no ETH was sent
+        assertTrue(wallet.frozen()); // wallet is now frozen
+    }
+
+    function test_VelocityLimit_ResetsAfterWindow() public {
+        // Raise policy limit
+        vm.prank(address(wallet));
+        policyEngine.setCategoryLimit("claims", 2 ether);
+
+        wallet.setVelocityLimit(1 ether);
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+
+        bytes32 attest1 = keccak256("intent-window-1");
+        bytes32 attest2 = keccak256("intent-window-2");
+
+        // First spend: 0.9 ETH (within limit)
+        vm.prank(address(wallet));
+        intentAttestation.attest(attest1, "pay", "Payment 1", recipient, 0.9 ether, address(0));
+        wallet.executeSpend(payable(recipient), 0.9 ether, "claims", attest1);
+
+        // Warp 25 hours — new window
+        vm.warp(block.timestamp + 25 hours);
+
+        // Second spend: 0.9 ETH — window reset, should succeed
+        vm.prank(address(wallet));
+        intentAttestation.attest(attest2, "pay", "Payment 2", recipient, 0.9 ether, address(0));
+        uint256 balanceBefore = recipient.balance;
+        wallet.executeSpend(payable(recipient), 0.9 ether, "claims", attest2);
+        assertEq(recipient.balance - balanceBefore, 0.9 ether);
+        assertFalse(wallet.frozen());
+    }
+
+    function test_RevertFreeze_NotOwner() public {
+        vm.prank(address(0xDEAD));
+        vm.expectRevert("ARC402: not owner");
+        wallet.freeze("unauthorized attempt");
+    }
+
+    function test_RevertSpend_WhenFrozen() public {
+        // Trigger auto-freeze via velocity limit, then confirm subsequent spend reverts.
+        vm.prank(address(wallet));
+        policyEngine.setCategoryLimit("claims", 2 ether);
+
+        wallet.setVelocityLimit(1 ether);
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+
+        bytes32 attest1 = keccak256("intent-frozen-1");
+        bytes32 attest2 = keccak256("intent-frozen-2");
+        bytes32 attest3 = keccak256("intent-frozen-3");
+
+        // 0.6 ETH: fine
+        vm.prank(address(wallet));
+        intentAttestation.attest(attest1, "pay", "P1", recipient, 0.6 ether, address(0));
+        wallet.executeSpend(payable(recipient), 0.6 ether, "claims", attest1);
+
+        // 0.6 ETH: velocity exceeded → freezes, no transfer (no revert — state persists)
+        vm.prank(address(wallet));
+        intentAttestation.attest(attest2, "pay", "P2", recipient, 0.6 ether, address(0));
+        wallet.executeSpend(payable(recipient), 0.6 ether, "claims", attest2);
+        assertTrue(wallet.frozen()); // auto-frozen
+
+        // Wallet is now frozen — further spend must revert
+        vm.prank(address(wallet));
+        intentAttestation.attest(attest3, "pay", "P3", recipient, 0.1 ether, address(0));
+        vm.expectRevert("ARC402: wallet frozen");
+        wallet.executeSpend(payable(recipient), 0.1 ether, "claims", attest3);
+    }
+
     function test_walletUsesNewRegistry() public {
         // Deploy fresh infrastructure for v2
         PolicyEngine pe2 = new PolicyEngine();
