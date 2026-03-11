@@ -84,6 +84,8 @@ arc402 deliver 42 --output ./my-deliverable.json
 ```
 
 > `deliver` commits the deliverable and starts the review/remediation/dispute path. Normal quality disputes should enter remediation first; `dispute --direct` is reserved for hard non-delivery, hard deadline breach, clearly invalid/fraudulent deliverables, or safety-critical violations.
+>
+> Current dispute flow is layered in operator doctrine, but the on-chain resolution authority in the current contract remains owner-administered / deployment-defined. Treat peer arbitration and richer human backstop routing as workflow or roadmap posture unless your deployment has explicitly added and documented that authority layer.
 
 ---
 
