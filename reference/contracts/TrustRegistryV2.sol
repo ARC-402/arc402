@@ -22,7 +22,7 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
  *
  * @dev Uses Ownable2Step to require two-step ownership transfer (prevents phishing hijack).
  */
-contract TrustRegistryV2 is ITrustRegistryV2, Ownable2Step {
+contract TrustRegistryV2 is ITrustRegistryV2, ITrustRegistry, Ownable2Step {
 
     // ─── Constants ───────────────────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ contract TrustRegistryV2 is ITrustRegistryV2, Ownable2Step {
     // ─── Write ───────────────────────────────────────────────────────────────
 
     /// @inheritdoc ITrustRegistryV2
-    function initWallet(address wallet) external {
+    function initWallet(address wallet) external override(ITrustRegistry, ITrustRegistryV2) {
         _ensureInitialized(wallet);
     }
 
@@ -112,7 +112,7 @@ contract TrustRegistryV2 is ITrustRegistryV2, Ownable2Step {
         address counterparty,
         string calldata capability,
         uint256 agreementValueWei
-    ) external onlyUpdater {
+    ) external override(ITrustRegistry, ITrustRegistryV2) onlyUpdater {
         // Minimum agreement value gate — silent skip, no revert
         if (minimumAgreementValue > 0 && agreementValueWei < minimumAgreementValue) return;
 
@@ -158,7 +158,7 @@ contract TrustRegistryV2 is ITrustRegistryV2, Ownable2Step {
         address counterparty,
         string calldata capability,
         uint256 agreementValueWei
-    ) external onlyUpdater {
+    ) external override(ITrustRegistry, ITrustRegistryV2) onlyUpdater {
         // Minimum agreement value gate
         if (minimumAgreementValue > 0 && agreementValueWei < minimumAgreementValue) return;
 
@@ -188,8 +188,13 @@ contract TrustRegistryV2 is ITrustRegistryV2, Ownable2Step {
     // ─── Read ────────────────────────────────────────────────────────────────
 
     /// @inheritdoc ITrustRegistryV2
-    function getGlobalScore(address wallet) external view returns (uint256) {
+    function getGlobalScore(address wallet) public view returns (uint256) {
         return profiles[wallet].globalScore;
+    }
+
+    /// @inheritdoc ITrustRegistry
+    function getScore(address wallet) external view override(ITrustRegistry, ITrustRegistryV2) returns (uint256) {
+        return getGlobalScore(wallet);
     }
 
     /// @inheritdoc ITrustRegistryV2

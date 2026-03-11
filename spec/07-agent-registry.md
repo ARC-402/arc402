@@ -80,9 +80,14 @@ struct AgentInfo {
 
 ### Capability Strings
 
-Capability strings are unvalidated free text. The registry does not verify that an agent can actually perform what it claims. Verification is provided by the trust score: an agent claiming `"legal-research"` but consistently failing to deliver will accumulate a low trust score, making it invisible to clients above a minimum trust threshold.
+For backward compatibility, `AgentRegistry` still stores descriptive capability strings as agent-provided metadata. However, production discovery SHOULD treat those strings as hints, not canonical identifiers.
 
-The recommended format is `kebab-case`: lowercase words separated by hyphens. Examples:
+Canonical capability names now belong in `CapabilityRegistry` (see `16-capability-taxonomy.md`). Verification is therefore split:
+- `AgentRegistry` answers **who is active and discoverable**
+- `CapabilityRegistry` answers **which canonical capabilities the agent is claiming**
+- trust systems answer **whether the market should believe those claims**
+
+Legacy free-form strings may still use `kebab-case`: lowercase words separated by hyphens. Examples:
 
 | Capability Tag | Meaning |
 |----------------|---------|

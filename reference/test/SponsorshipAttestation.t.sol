@@ -19,6 +19,7 @@ contract SponsorshipAttestationTest is Test {
 
         assertTrue(sa.isActive(id));
         assertEq(sa.getActiveAttestation(sponsor, agent1), id);
+        assertEq(uint8(sa.getHighestTier(agent1)), uint8(SponsorshipAttestation.IdentityTier.SPONSORED));
     }
 
     function test_Publish_WithExpiry() public {
@@ -29,6 +30,21 @@ contract SponsorshipAttestationTest is Test {
         vm.warp(block.timestamp + 31 days);
         assertFalse(sa.isActive(id));
         assertEq(sa.getActiveAttestation(sponsor, agent1), bytes32(0));
+    }
+
+    function test_PublishWithTier_Works() public {
+        vm.prank(sponsor);
+        bytes32 id = sa.publishWithTier(
+            agent1,
+            0,
+            SponsorshipAttestation.IdentityTier.ENTERPRISE_PROVIDER,
+            "ipfs://enterprise-proof"
+        );
+
+        SponsorshipAttestation.Attestation memory att = sa.getAttestation(id);
+        assertEq(uint8(att.tier), uint8(SponsorshipAttestation.IdentityTier.ENTERPRISE_PROVIDER));
+        assertEq(att.evidenceURI, "ipfs://enterprise-proof");
+        assertEq(uint8(sa.getHighestTier(agent1)), uint8(SponsorshipAttestation.IdentityTier.ENTERPRISE_PROVIDER));
     }
 
     function test_CannotSelfAttest() public {
@@ -65,7 +81,6 @@ contract SponsorshipAttestationTest is Test {
         vm.prank(sponsor);
         sa.revoke(id1);
 
-        // After revoke, can publish again
         vm.prank(sponsor);
         bytes32 id2 = sa.publish(agent1, 0);
 
@@ -104,9 +119,10 @@ contract SponsorshipAttestationTest is Test {
         vm.prank(sponsor);
         sa.publish(agent1, 0);
         vm.prank(sponsor2);
-        sa.publish(agent1, 0);
+        sa.publishWithTier(agent1, 0, SponsorshipAttestation.IdentityTier.VERIFIED_PROVIDER, "ipfs://verified");
 
         bytes32[] memory attestations = sa.getAgentAttestations(agent1);
         assertEq(attestations.length, 2);
+        assertEq(uint8(sa.getHighestTier(agent1)), uint8(SponsorshipAttestation.IdentityTier.VERIFIED_PROVIDER));
     }
 }

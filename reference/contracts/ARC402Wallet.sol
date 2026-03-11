@@ -121,6 +121,7 @@ contract ARC402Wallet {
      */
     function proposeRegistryUpdate(address newRegistry) external onlyOwner {
         require(newRegistry != address(0), "ARC402: zero registry");
+        require(pendingRegistry == address(0), "ARC402: upgrade already pending - cancel first");
         pendingRegistry = newRegistry;
         registryUpdateUnlockAt = block.timestamp + REGISTRY_TIMELOCK;
         emit RegistryUpdateProposed(newRegistry, registryUpdateUnlockAt);

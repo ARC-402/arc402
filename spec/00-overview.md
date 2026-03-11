@@ -70,3 +70,5 @@ ARC-402 solves all three.
 - [Primitive 4: Intent Attestation](./04-intent-attestation.md)
 - [Primitive 5: Multi-Agent Settlement](./05-multi-agent-settlement.md)
 - [Relationship to Existing Standards](./06-existing-standards.md)
+- [Intelligence Layer 10: Capability Taxonomy Registry](./16-capability-taxonomy.md)
+- [Intelligence Layer 11: Governance](./17-governance.md)

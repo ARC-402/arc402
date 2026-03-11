@@ -69,7 +69,12 @@ contract TrustRegistry is ITrustRegistry, Ownable2Step {
         return scores[wallet];
     }
 
-    function recordSuccess(address wallet) external onlyUpdater {
+    function recordSuccess(
+        address wallet,
+        address /*counterparty*/,
+        string calldata /*capability*/,
+        uint256 /*agreementValueWei*/
+    ) external onlyUpdater {
         if (!initialized[wallet]) {
             initialized[wallet] = true;
             scores[wallet] = INITIAL_SCORE;
@@ -80,7 +85,12 @@ contract TrustRegistry is ITrustRegistry, Ownable2Step {
         emit ScoreUpdated(wallet, oldScore, newScore, "success");
     }
 
-    function recordAnomaly(address wallet) external onlyUpdater {
+    function recordAnomaly(
+        address wallet,
+        address /*counterparty*/,
+        string calldata /*capability*/,
+        uint256 /*agreementValueWei*/
+    ) external onlyUpdater {
         if (!initialized[wallet]) {
             initialized[wallet] = true;
             scores[wallet] = INITIAL_SCORE;
@@ -90,6 +100,7 @@ contract TrustRegistry is ITrustRegistry, Ownable2Step {
         scores[wallet] = newScore;
         emit ScoreUpdated(wallet, oldScore, newScore, "anomaly");
     }
+
 
     function getTrustLevel(address wallet) external view returns (string memory) {
         uint256 score = scores[wallet];
