@@ -22,6 +22,7 @@ contract IntentAttestation is IIntentAttestation {
 
     mapping(bytes32 => Attestation) private attestations;
     mapping(bytes32 => bool) private exists;
+    mapping(bytes32 => bool) public used;
 
     event AttestationCreated(
         bytes32 indexed attestationId,
@@ -31,6 +32,8 @@ contract IntentAttestation is IIntentAttestation {
         uint256 amount,
         address token
     );
+
+    event AttestationConsumed(bytes32 indexed attestationId, address indexed wallet);
 
     function attest(
         bytes32 attestationId,
@@ -55,8 +58,28 @@ contract IntentAttestation is IIntentAttestation {
         emit AttestationCreated(attestationId, msg.sender, action, recipient, amount, token);
     }
 
-    function verify(bytes32 attestationId, address wallet) external view returns (bool) {
-        return exists[attestationId] && attestations[attestationId].wallet == wallet;
+    function verify(
+        bytes32 attestationId,
+        address wallet,
+        address recipient,
+        uint256 amount,
+        address token
+    ) external view returns (bool) {
+        if (!exists[attestationId]) return false;
+        if (used[attestationId]) return false;
+        Attestation storage a = attestations[attestationId];
+        return a.wallet == wallet &&
+               a.recipient == recipient &&
+               a.amount == amount &&
+               a.token == token;
+    }
+
+    function consume(bytes32 attestationId) external {
+        require(exists[attestationId], "IA: not found");
+        require(!used[attestationId], "IA: already used");
+        require(attestations[attestationId].wallet == msg.sender, "IA: not wallet");
+        used[attestationId] = true;
+        emit AttestationConsumed(attestationId, msg.sender);
     }
 
     function getAttestation(bytes32 attestationId) external view returns (

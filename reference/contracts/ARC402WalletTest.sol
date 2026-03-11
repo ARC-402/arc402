@@ -12,9 +12,10 @@ interface IIntentAttestationFull {
         string calldata action,
         string calldata reason,
         address         recipient,
-        uint256         amount
+        uint256         amount,
+        address         token
     ) external;
-    function verify(bytes32 attestationId, address wallet) external view returns (bool);
+    function verify(bytes32 attestationId, address wallet, address recipient, uint256 amount, address token) external view returns (bool);
 }
 
 /**
@@ -98,11 +99,12 @@ contract ARC402WalletTest {
         string calldata action,
         string calldata reason,
         address         recipient,
-        uint256         amount
+        uint256         amount,
+        address         token
     ) external onlyOwner {
         // Use the extended interface so Solidity generates correct ABI-encoded calldata
         IIntentAttestationFull(address(intentAttestation)).attest(
-            id, action, reason, recipient, amount
+            id, action, reason, recipient, amount, token
         );
     }
 
@@ -116,13 +118,14 @@ contract ARC402WalletTest {
     ) external onlyOwner requireOpenContext {
         require(recipient != address(0), "ARC402: zero address");
         require(
-            intentAttestation.verify(attestationId, address(this)),
+            intentAttestation.verify(attestationId, address(this), recipient, amount, address(0)),
             "ARC402: invalid intent attestation"
         );
         (bool valid, string memory reason) = policyEngine.validateSpend(
             address(this), category, amount, activeContextId
         );
         require(valid, reason);
+        intentAttestation.consume(attestationId);
         emit SpendExecuted(recipient, amount, category, attestationId);
         (bool success,) = recipient.call{value: amount}("");
         require(success, "ARC402: transfer failed");
@@ -137,13 +140,14 @@ contract ARC402WalletTest {
         bytes32      attestationId
     ) external onlyOwner requireOpenContext {
         require(
-            intentAttestation.verify(attestationId, address(this)),
+            intentAttestation.verify(attestationId, address(this), recipientWallet, amount, address(0)),
             "ARC402: invalid attestation"
         );
         (bool valid, string memory reason) = policyEngine.validateSpend(
             address(this), category, amount, activeContextId
         );
         require(valid, reason);
+        intentAttestation.consume(attestationId);
         emit SettlementProposed(recipientWallet, amount, attestationId);
     }
 

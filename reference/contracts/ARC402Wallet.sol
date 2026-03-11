@@ -5,6 +5,7 @@ import "./IPolicyEngine.sol";
 import "./ITrustRegistry.sol";
 import "./IIntentAttestation.sol";
 import "./ARC402Registry.sol";
+import "./SettlementCoordinator.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -157,6 +158,35 @@ contract ARC402Wallet {
         return IIntentAttestation(registry.intentAttestation());
     }
 
+    function _settlementCoordinator() internal view returns (SettlementCoordinator) {
+        return SettlementCoordinator(registry.settlementCoordinator());
+    }
+
+    // ─── Intent Attestation ───────────────────────────────────────────────────
+
+    /**
+     * @notice Create an intent attestation on behalf of this wallet.
+     *         Must be called before executeSpend/executeTokenSpend.
+     * @param attestationId Unique ID for this attestation
+     * @param action Human-readable action type (e.g. "pay_api", "settle_claim")
+     * @param reason Reason for the spend
+     * @param recipient Intended recipient address
+     * @param amount Intended spend amount
+     * @param token Token address (address(0) for ETH, token address for ERC-20)
+     * @return attestationId The ID passed in (for convenience)
+     */
+    function attest(
+        bytes32 attestationId,
+        string calldata action,
+        string calldata reason,
+        address recipient,
+        uint256 amount,
+        address token
+    ) external onlyOwner returns (bytes32) {
+        _intentAttestation().attest(attestationId, action, reason, recipient, amount, token);
+        return attestationId;
+    }
+
     // ─── Context Management ──────────────────────────────────────────────────
 
     function openContext(bytes32 contextId, string calldata taskType) external onlyOwner {
@@ -174,7 +204,7 @@ contract ARC402Wallet {
         activeTaskType = "";
         contextOpen = false;
         emit ContextClosed(closedContextId, block.timestamp);
-        _trustRegistry().recordSuccess(address(this));
+        // Trust updates via ServiceAgreement.fulfill() only — see spec/03-trust-primitive.md
     }
 
     // ─── ETH Spend Execution ─────────────────────────────────────────────────
@@ -187,9 +217,9 @@ contract ARC402Wallet {
     ) external onlyOwner requireOpenContext notFrozen {
         require(recipient != address(0), "ARC402: zero address recipient");
 
-        // 1. Verify intent attestation exists and is valid
+        // 1. Verify intent attestation exists and matches spend parameters
         require(
-            _intentAttestation().verify(attestationId, address(this)),
+            _intentAttestation().verify(attestationId, address(this), recipient, amount, address(0)),
             "ARC402: invalid intent attestation"
         );
 
@@ -203,8 +233,7 @@ contract ARC402Wallet {
 
         if (!valid) {
             emit SpendRejected(recipient, amount, reason);
-            // slither-disable-next-line reentrancy-events
-            _trustRegistry().recordAnomaly(address(this));
+            // Trust updates via ServiceAgreement.fulfill() only — see spec/03-trust-primitive.md
             revert(reason);
         }
 
@@ -223,7 +252,8 @@ contract ARC402Wallet {
             return;
         }
 
-        // 4. Execute transfer (emit before external call per CEI pattern)
+        // 4. Consume attestation (single-use) then execute transfer (CEI pattern)
+        _intentAttestation().consume(attestationId);
         emit SpendExecuted(recipient, amount, category, attestationId);
         (bool success,) = recipient.call{value: amount}("");
         require(success, "ARC402: transfer failed");
@@ -249,8 +279,11 @@ contract ARC402Wallet {
         require(recipient != address(0), "ARC402: zero address recipient");
         require(token != address(0), "ARC402: zero token address");
 
-        // 1. Verify intent attestation
-        require(_intentAttestation().verify(attestationId, address(this)), "ARC402: invalid attestation");
+        // 1. Verify intent attestation exists and matches spend parameters
+        require(
+            _intentAttestation().verify(attestationId, address(this), recipient, amount, token),
+            "ARC402: invalid attestation"
+        );
 
         // 2. Validate policy
         (bool valid, string memory reason) = _policyEngine().validateSpend(
@@ -258,7 +291,7 @@ contract ARC402Wallet {
         );
         if (!valid) {
             emit SpendRejected(recipient, amount, reason);
-            _trustRegistry().recordAnomaly(address(this));
+            // Trust updates via ServiceAgreement.fulfill() only — see spec/03-trust-primitive.md
             revert(reason);
         }
 
@@ -277,7 +310,8 @@ contract ARC402Wallet {
             return;
         }
 
-        // 4. Emit BEFORE transfer (CEI pattern)
+        // 4. Consume attestation (single-use), emit, then transfer (CEI pattern)
+        _intentAttestation().consume(attestationId);
         emit TokenSpendExecuted(token, recipient, amount, category, attestationId);
 
         // 5. Execute ERC-20 transfer
@@ -293,7 +327,7 @@ contract ARC402Wallet {
         bytes32 attestationId
     ) external onlyOwner requireOpenContext {
         require(
-            _intentAttestation().verify(attestationId, address(this)),
+            _intentAttestation().verify(attestationId, address(this), recipientWallet, amount, address(0)),
             "ARC402: invalid intent attestation"
         );
         (bool valid, string memory reason) = _policyEngine().validateSpend(
@@ -303,7 +337,16 @@ contract ARC402Wallet {
             activeContextId
         );
         require(valid, reason);
+        _intentAttestation().consume(attestationId);
         emit SettlementProposed(recipientWallet, amount, attestationId);
+        _settlementCoordinator().propose(
+            address(this),
+            recipientWallet,
+            amount,
+            address(0),
+            attestationId,
+            block.timestamp + 1 days
+        );
     }
 
     // ─── Policy Management ───────────────────────────────────────────────────

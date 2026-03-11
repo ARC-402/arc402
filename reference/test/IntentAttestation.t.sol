@@ -13,16 +13,16 @@ contract IntentAttestationTest is Test {
 
     function test_attest_and_verify() public {
         attestor.attest(ID, "pay_provider", "Test payment", address(0x999), 0.1 ether, address(0));
-        assertTrue(attestor.verify(ID, address(this)));
+        assertTrue(attestor.verify(ID, address(this), address(0x999), 0.1 ether, address(0)));
     }
 
     function test_verify_wrongWallet() public {
         attestor.attest(ID, "pay_provider", "Test payment", address(0x999), 0.1 ether, address(0));
-        assertFalse(attestor.verify(ID, address(0x1234)));
+        assertFalse(attestor.verify(ID, address(0x1234), address(0x999), 0.1 ether, address(0)));
     }
 
     function test_verify_nonexistentAttestation() public {
-        assertFalse(attestor.verify(bytes32(0), address(this)));
+        assertFalse(attestor.verify(bytes32(0), address(this), address(0), 0, address(0)));
     }
 
     function test_immutability_cannotReattest() public {

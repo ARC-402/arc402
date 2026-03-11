@@ -93,25 +93,23 @@ contract ARC402WalletTest is Test {
         // Open context
         wallet.openContext(CONTEXT_ID, "claims_processing");
 
-        // Create attestation from wallet
-        vm.prank(address(wallet));
-        intentAttestation.attest(ATTEST_ID, "pay_provider", "Payment for claim #1", recipient, 0.1 ether, address(0));
+        // Create attestation from wallet (owner calls wallet, wallet calls intentAttestation)
+        wallet.attest(ATTEST_ID, "pay_provider", "Payment for claim #1", recipient, 0.1 ether, address(0));
 
         // Execute spend
         uint256 balanceBefore = recipient.balance;
         wallet.executeSpend(payable(recipient), 0.1 ether, "claims", ATTEST_ID);
         assertEq(recipient.balance - balanceBefore, 0.1 ether);
 
-        // Close context - trust score should increase
+        // Close context — trust updates via ServiceAgreement.fulfill() only, not from wallet
         uint256 scoreBefore = wallet.getTrustScore();
         wallet.closeContext();
         uint256 scoreAfter = wallet.getTrustScore();
-        assertEq(scoreAfter, scoreBefore + 5);
+        assertEq(scoreAfter, scoreBefore); // score unchanged; no trust update from context lifecycle
     }
 
     function test_executeSpend_noContext() public {
-        vm.prank(address(wallet));
-        intentAttestation.attest(ATTEST_ID, "pay", "Test", recipient, 0.1 ether, address(0));
+        wallet.attest(ATTEST_ID, "pay", "Test", recipient, 0.1 ether, address(0));
         vm.expectRevert("ARC402: no active context");
         wallet.executeSpend(payable(recipient), 0.1 ether, "claims", ATTEST_ID);
     }
@@ -124,8 +122,7 @@ contract ARC402WalletTest is Test {
 
     function test_executeSpend_policyViolation() public {
         wallet.openContext(CONTEXT_ID, "claims_processing");
-        vm.prank(address(wallet));
-        intentAttestation.attest(ATTEST_ID, "pay", "Test", recipient, 1 ether, address(0));
+        wallet.attest(ATTEST_ID, "pay", "Test", recipient, 1 ether, address(0));
         vm.expectRevert("PolicyEngine: amount exceeds category limit");
         wallet.executeSpend(payable(recipient), 1 ether, "claims", ATTEST_ID);
     }
@@ -145,8 +142,7 @@ contract ARC402WalletTest is Test {
         wallet.openContext(CONTEXT_ID, "api_payment");
 
         // Create attestation from wallet (with USDC token address)
-        vm.prank(address(wallet));
-        intentAttestation.attest(ATTEST_ID, "api_call", "x402 payment for API access", recipient, paymentAmount, address(usdc));
+        wallet.attest(ATTEST_ID, "api_call", "x402 payment for API access", recipient, paymentAmount, address(usdc));
 
         // Execute token spend
         uint256 balanceBefore = usdc.balanceOf(recipient);
@@ -160,8 +156,7 @@ contract ARC402WalletTest is Test {
 
         wallet.openContext(CONTEXT_ID, "api_payment");
 
-        vm.prank(address(wallet));
-        intentAttestation.attest(ATTEST_ID, "api_call", "x402 payment", recipient, tooMuch, address(usdc));
+        wallet.attest(ATTEST_ID, "api_call", "x402 payment", recipient, tooMuch, address(usdc));
 
         vm.expectRevert("PolicyEngine: amount exceeds category limit");
         wallet.executeTokenSpend(address(usdc), recipient, tooMuch, "api_call", ATTEST_ID);
@@ -174,8 +169,7 @@ contract ARC402WalletTest is Test {
     }
 
     function test_executeTokenSpend_noContext() public {
-        vm.prank(address(wallet));
-        intentAttestation.attest(ATTEST_ID, "api_call", "test", recipient, 1_000_000, address(usdc));
+        wallet.attest(ATTEST_ID, "api_call", "test", recipient, 1_000_000, address(usdc));
         vm.expectRevert("ARC402: no active context");
         wallet.executeTokenSpend(address(usdc), recipient, 1_000_000, "api_call", ATTEST_ID);
     }
@@ -221,8 +215,7 @@ contract ARC402WalletTest is Test {
 
     function test_Freeze_BlocksSpend() public {
         wallet.openContext(CONTEXT_ID, "claims_processing");
-        vm.prank(address(wallet));
-        intentAttestation.attest(ATTEST_ID, "pay_provider", "Payment", recipient, 0.1 ether, address(0));
+        wallet.attest(ATTEST_ID, "pay_provider", "Payment", recipient, 0.1 ether, address(0));
 
         wallet.freeze("manual emergency stop");
 
@@ -232,8 +225,7 @@ contract ARC402WalletTest is Test {
 
     function test_Unfreeze_RestoresSpend() public {
         wallet.openContext(CONTEXT_ID, "claims_processing");
-        vm.prank(address(wallet));
-        intentAttestation.attest(ATTEST_ID, "pay_provider", "Payment", recipient, 0.1 ether, address(0));
+        wallet.attest(ATTEST_ID, "pay_provider", "Payment", recipient, 0.1 ether, address(0));
 
         wallet.freeze("manual freeze");
         wallet.unfreeze();
@@ -255,16 +247,14 @@ contract ARC402WalletTest is Test {
         bytes32 attest2 = keccak256("intent-vel-2");
 
         // First spend: 0.6 ETH — fine
-        vm.prank(address(wallet));
-        intentAttestation.attest(attest1, "pay", "Payment 1", recipient, 0.6 ether, address(0));
+        wallet.attest(attest1, "pay", "Payment 1", recipient, 0.6 ether, address(0));
         wallet.executeSpend(payable(recipient), 0.6 ether, "claims", attest1);
         assertFalse(wallet.frozen());
 
         // Second spend: 0.6 ETH — total 1.2 ETH > 1 ETH limit.
         // EVM note: auto-freeze sets frozen=true and returns (no revert) so the state
         // change persists. The transfer is silently blocked; wallet is now frozen.
-        vm.prank(address(wallet));
-        intentAttestation.attest(attest2, "pay", "Payment 2", recipient, 0.6 ether, address(0));
+        wallet.attest(attest2, "pay", "Payment 2", recipient, 0.6 ether, address(0));
         uint256 balBefore = recipient.balance;
         wallet.executeSpend(payable(recipient), 0.6 ether, "claims", attest2); // no revert, no transfer
         assertEq(recipient.balance, balBefore); // no ETH was sent
@@ -283,16 +273,14 @@ contract ARC402WalletTest is Test {
         bytes32 attest2 = keccak256("intent-window-2");
 
         // First spend: 0.9 ETH (within limit)
-        vm.prank(address(wallet));
-        intentAttestation.attest(attest1, "pay", "Payment 1", recipient, 0.9 ether, address(0));
+        wallet.attest(attest1, "pay", "Payment 1", recipient, 0.9 ether, address(0));
         wallet.executeSpend(payable(recipient), 0.9 ether, "claims", attest1);
 
         // Warp 25 hours — new window
         vm.warp(block.timestamp + 25 hours);
 
         // Second spend: 0.9 ETH — window reset, should succeed
-        vm.prank(address(wallet));
-        intentAttestation.attest(attest2, "pay", "Payment 2", recipient, 0.9 ether, address(0));
+        wallet.attest(attest2, "pay", "Payment 2", recipient, 0.9 ether, address(0));
         uint256 balanceBefore = recipient.balance;
         wallet.executeSpend(payable(recipient), 0.9 ether, "claims", attest2);
         assertEq(recipient.balance - balanceBefore, 0.9 ether);
@@ -318,21 +306,71 @@ contract ARC402WalletTest is Test {
         bytes32 attest3 = keccak256("intent-frozen-3");
 
         // 0.6 ETH: fine
-        vm.prank(address(wallet));
-        intentAttestation.attest(attest1, "pay", "P1", recipient, 0.6 ether, address(0));
+        wallet.attest(attest1, "pay", "P1", recipient, 0.6 ether, address(0));
         wallet.executeSpend(payable(recipient), 0.6 ether, "claims", attest1);
 
         // 0.6 ETH: velocity exceeded → freezes, no transfer (no revert — state persists)
-        vm.prank(address(wallet));
-        intentAttestation.attest(attest2, "pay", "P2", recipient, 0.6 ether, address(0));
+        wallet.attest(attest2, "pay", "P2", recipient, 0.6 ether, address(0));
         wallet.executeSpend(payable(recipient), 0.6 ether, "claims", attest2);
         assertTrue(wallet.frozen()); // auto-frozen
 
-        // Wallet is now frozen — further spend must revert
-        vm.prank(address(wallet));
-        intentAttestation.attest(attest3, "pay", "P3", recipient, 0.1 ether, address(0));
+        // Wallet is now frozen — further spend must revert (wallet.attest is not gated by notFrozen)
+        wallet.attest(attest3, "pay", "P3", recipient, 0.1 ether, address(0));
         vm.expectRevert("ARC402: wallet frozen");
         wallet.executeSpend(payable(recipient), 0.1 ether, "claims", attest3);
+    }
+
+    // ─── Multi-Agent Settlement Tests ─────────────────────────────────────────
+
+    function test_proposeMASSettlement_CallsCoordinator() public {
+        address recipientWallet = address(0xC0FFEE);
+        uint256 amount = 0.1 ether;
+        bytes32 attestId = keccak256("mas-intent-1");
+
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+
+        // Attest
+        wallet.attest(attestId, "settle_claim", "MAS settlement test", recipientWallet, amount, address(0));
+
+        // Set policy limit high enough
+        vm.prank(address(wallet));
+        policyEngine.setCategoryLimit("claims", 1 ether);
+
+        // Propose MAS settlement — should emit event AND create a coordinator proposal
+        vm.recordLogs();
+        wallet.proposeMASSettlement(recipientWallet, amount, "claims", attestId);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        // Find ProposalCreated log from SettlementCoordinator
+        bytes32 proposalCreatedTopic = keccak256("ProposalCreated(bytes32,address,address,uint256,address)");
+        bool found = false;
+        bytes32 proposalId;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == proposalCreatedTopic) {
+                found = true;
+                proposalId = logs[i].topics[1]; // indexed proposalId
+                break;
+            }
+        }
+        assertTrue(found, "ProposalCreated event not emitted by SettlementCoordinator");
+
+        // Verify proposal state in SettlementCoordinator
+        (
+            address fromWallet,
+            address toWallet,
+            uint256 propAmount,
+            address token,
+            bytes32 intentId,
+            ,
+            SettlementCoordinator.ProposalStatus status,
+        ) = settlementCoordinator.getProposal(proposalId);
+
+        assertEq(fromWallet, address(wallet));
+        assertEq(toWallet, recipientWallet);
+        assertEq(propAmount, amount);
+        assertEq(token, address(0)); // ETH settlement
+        assertEq(intentId, attestId);
+        assertEq(uint256(status), uint256(SettlementCoordinator.ProposalStatus.PENDING));
     }
 
     function test_walletUsesNewRegistry() public {
@@ -364,12 +402,64 @@ contract ARC402WalletTest is Test {
         vm.prank(address(wallet));
         pe2.setCategoryLimit("claims", 1 ether);
 
-        // Attest and spend using new infrastructure
+        // Attest and spend using new infrastructure (wallet.attest() routes through ia2 via new registry)
         wallet.openContext(CONTEXT_ID, "test");
-        vm.prank(address(wallet));
-        ia2.attest(ATTEST_ID, "pay", "test", recipient, 0.5 ether, address(0));
+        wallet.attest(ATTEST_ID, "pay", "test", recipient, 0.5 ether, address(0));
         uint256 before = recipient.balance;
         wallet.executeSpend(payable(recipient), 0.5 ether, "claims", ATTEST_ID);
         assertEq(recipient.balance - before, 0.5 ether);
+    }
+
+    // ─── New Security Tests ───────────────────────────────────────────────────
+
+    function test_Wallet_Attest_CreatesValidAttestation() public {
+        // Verify that wallet.attest() + wallet.executeSpend() works end-to-end
+        // (the primary fix: wallet is msg.sender when calling intentAttestation.attest)
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+
+        bytes32 id = wallet.attest(ATTEST_ID, "pay_provider", "Valid flow", recipient, 0.1 ether, address(0));
+        assertEq(id, ATTEST_ID);
+
+        uint256 balanceBefore = recipient.balance;
+        wallet.executeSpend(payable(recipient), 0.1 ether, "claims", ATTEST_ID);
+        assertEq(recipient.balance - balanceBefore, 0.1 ether);
+    }
+
+    function test_Attestation_CannotReplay() public {
+        // Use attestation once — second spend with same ID must revert
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+        wallet.attest(ATTEST_ID, "pay_provider", "Single use", recipient, 0.1 ether, address(0));
+
+        wallet.executeSpend(payable(recipient), 0.1 ether, "claims", ATTEST_ID);
+
+        // Attestation is now consumed — replay must fail
+        vm.expectRevert("ARC402: invalid intent attestation");
+        wallet.executeSpend(payable(recipient), 0.1 ether, "claims", ATTEST_ID);
+    }
+
+    function test_Attestation_WrongRecipient_Fails() public {
+        // Attest for alice, attempt spend to bob — must revert
+        address alice = address(0xA11CE);
+        address bob = address(0xB0B);
+
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+        // Attest for alice
+        wallet.attest(ATTEST_ID, "pay_provider", "To alice", alice, 0.1 ether, address(0));
+
+        // Fund wallet has enough ETH; policy limit is fine
+        vm.deal(address(wallet), 10 ether);
+
+        // Attempt spend to bob — verify should fail (wrong recipient)
+        vm.expectRevert("ARC402: invalid intent attestation");
+        wallet.executeSpend(payable(bob), 0.1 ether, "claims", ATTEST_ID);
+    }
+
+    function test_Attestation_WrongAmount_Fails() public {
+        // Attest for 0.1 ETH, attempt spend of 0.2 ETH — must revert
+        wallet.openContext(CONTEXT_ID, "claims_processing");
+        wallet.attest(ATTEST_ID, "pay_provider", "0.1 ether only", recipient, 0.1 ether, address(0));
+
+        vm.expectRevert("ARC402: invalid intent attestation");
+        wallet.executeSpend(payable(recipient), 0.2 ether, "claims", ATTEST_ID);
     }
 }
