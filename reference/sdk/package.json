@@ -1,9 +1,15 @@
 {
   "name": "@arc402/sdk",
   "version": "0.1.0",
+  "description": "ARC-402 Agentic Wallet Standard — TypeScript SDK",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": "https://github.com/LegoGigaBrain/arc-402",
+  "license": "MIT",
+  "keywords": ["arc402", "web3", "agents", "wallet", "governance", "blockchain"],
   "scripts": {
     "build": "tsc",
+    "test": "jest",
     "demo:insurance": "ts-node src/demos/demo-insurance.ts",
     "demo:research": "ts-node src/demos/demo-research.ts",
     "demo:multiagent": "ts-node src/demos/demo-multiagent.ts"

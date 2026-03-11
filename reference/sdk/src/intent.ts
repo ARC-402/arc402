@@ -37,7 +37,7 @@ export class IntentAttestationClient {
   }
 
   async get(attestationId: string): Promise<Intent> {
-    const [id, , action, reason, recipient, amount] =
+    const [id, wallet, action, reason, recipient, amount, timestamp] =
       await this.contract.getAttestation(attestationId);
     return {
       attestationId: id,
@@ -45,6 +45,8 @@ export class IntentAttestationClient {
       reason,
       recipient,
       amount: BigInt(amount),
+      wallet,
+      timestamp: Number(timestamp),
     };
   }
 }

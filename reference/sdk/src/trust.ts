@@ -22,6 +22,7 @@ export class TrustClient {
     return {
       score: numScore,
       level: this.getTrustLevel(numScore),
+      nextLevelAt: this.getNextLevelAt(numScore),
     };
   }
 
@@ -31,6 +32,14 @@ export class TrustClient {
     if (score < 600) return "standard";
     if (score < 800) return "elevated";
     return "autonomous";
+  }
+
+  getNextLevelAt(score: number): number {
+    if (score < 100) return 100;
+    if (score < 300) return 300;
+    if (score < 600) return 600;
+    if (score < 800) return 800;
+    return 0;
   }
 
   async init(walletAddress: string): Promise<void> {

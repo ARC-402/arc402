@@ -2,44 +2,31 @@
 pragma solidity ^0.8.24;
 
 import "./ARC402Wallet.sol";
+import "./ARC402Registry.sol";
 import "./ITrustRegistry.sol";
 
 /**
  * @title ARC402WalletFactory
- * @notice Deploys ARC402Wallets pre-wired to the canonical infrastructure.
+ * @notice Deploys ARC402Wallets pre-wired to the canonical infrastructure via a registry.
  *         Users call createWallet() instead of deploying manually.
  */
 contract WalletFactory {
-    address public immutable policyEngine;
-    address public immutable trustRegistry;
-    address public immutable intentAttestation;
-    address public immutable settlementCoordinator;
+    address public immutable registry;
 
     mapping(address => address[]) public ownerWallets;
     address[] public allWallets;
 
     event WalletCreated(address indexed owner, address indexed walletAddress);
 
-    constructor(
-        address _policyEngine,
-        address _trustRegistry,
-        address _intentAttestation,
-        address _settlementCoordinator
-    ) {
-        policyEngine = _policyEngine;
-        trustRegistry = _trustRegistry;
-        intentAttestation = _intentAttestation;
-        settlementCoordinator = _settlementCoordinator;
+    constructor(address _registry) {
+        registry = _registry;
     }
 
     function createWallet() external returns (address) {
-        ARC402Wallet wallet = new ARC402Wallet(
-            policyEngine,
-            trustRegistry,
-            intentAttestation
-        );
+        ARC402Wallet wallet = new ARC402Wallet(registry);
         // ARC402Wallet constructor already calls initWallet; this is idempotent
-        ITrustRegistry(trustRegistry).initWallet(address(wallet));
+        ARC402Registry reg = ARC402Registry(registry);
+        ITrustRegistry(reg.trustRegistry()).initWallet(address(wallet));
 
         ownerWallets[msg.sender].push(address(wallet));
         allWallets.push(address(wallet));

@@ -1,0 +1,94 @@
+"""Contract ABIs for ARC-402 protocol contracts."""
+
+ARC402Wallet_ABI = [
+    {"type": "constructor", "inputs": [{"name": "_policyEngine", "type": "address", "internalType": "address"}, {"name": "_trustRegistry", "type": "address", "internalType": "address"}, {"name": "_intentAttestation", "type": "address", "internalType": "address"}], "stateMutability": "nonpayable"},
+    {"type": "receive", "stateMutability": "payable"},
+    {"type": "function", "name": "activeContextId", "inputs": [], "outputs": [{"name": "", "type": "bytes32", "internalType": "bytes32"}], "stateMutability": "view"},
+    {"type": "function", "name": "activePolicyId", "inputs": [], "outputs": [{"name": "", "type": "bytes32", "internalType": "bytes32"}], "stateMutability": "view"},
+    {"type": "function", "name": "activeTaskType", "inputs": [], "outputs": [{"name": "", "type": "string", "internalType": "string"}], "stateMutability": "view"},
+    {"type": "function", "name": "closeContext", "inputs": [], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "contextOpen", "inputs": [], "outputs": [{"name": "", "type": "bool", "internalType": "bool"}], "stateMutability": "view"},
+    {"type": "function", "name": "contextOpenedAt", "inputs": [], "outputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "executeSpend", "inputs": [{"name": "recipient", "type": "address", "internalType": "address payable"}, {"name": "amount", "type": "uint256", "internalType": "uint256"}, {"name": "category", "type": "string", "internalType": "string"}, {"name": "attestationId", "type": "bytes32", "internalType": "bytes32"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "getActiveContext", "inputs": [], "outputs": [{"name": "", "type": "bytes32", "internalType": "bytes32"}, {"name": "", "type": "string", "internalType": "string"}, {"name": "", "type": "uint256", "internalType": "uint256"}, {"name": "", "type": "bool", "internalType": "bool"}], "stateMutability": "view"},
+    {"type": "function", "name": "getTrustScore", "inputs": [], "outputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "intentAttestation", "inputs": [], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "function", "name": "openContext", "inputs": [{"name": "contextId", "type": "bytes32", "internalType": "bytes32"}, {"name": "taskType", "type": "string", "internalType": "string"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "policyEngine", "inputs": [], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "function", "name": "trustRegistry", "inputs": [], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "event", "name": "ContextClosed", "inputs": [{"name": "contextId", "type": "bytes32", "indexed": True, "internalType": "bytes32"}], "anonymous": False},
+    {"type": "event", "name": "ContextOpened", "inputs": [{"name": "contextId", "type": "bytes32", "indexed": True, "internalType": "bytes32"}, {"name": "taskType", "type": "string", "indexed": False, "internalType": "string"}], "anonymous": False},
+    {"type": "event", "name": "SpendExecuted", "inputs": [{"name": "recipient", "type": "address", "indexed": True, "internalType": "address payable"}, {"name": "amount", "type": "uint256", "indexed": False, "internalType": "uint256"}, {"name": "category", "type": "string", "indexed": False, "internalType": "string"}], "anonymous": False},
+]
+
+PolicyEngine_ABI = [
+    {"type": "function", "name": "categoryLimits", "inputs": [{"name": "", "type": "address", "internalType": "address"}, {"name": "", "type": "string", "internalType": "string"}], "outputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "getPolicy", "inputs": [{"name": "wallet", "type": "address", "internalType": "address"}], "outputs": [{"name": "", "type": "bytes32", "internalType": "bytes32"}, {"name": "", "type": "bytes", "internalType": "bytes"}], "stateMutability": "view"},
+    {"type": "function", "name": "registerWallet", "inputs": [{"name": "wallet", "type": "address", "internalType": "address"}, {"name": "owner", "type": "address", "internalType": "address"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "setCategoryLimit", "inputs": [{"name": "category", "type": "string", "internalType": "string"}, {"name": "limitPerTx", "type": "uint256", "internalType": "uint256"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "setCategoryLimitFor", "inputs": [{"name": "wallet", "type": "address", "internalType": "address"}, {"name": "category", "type": "string", "internalType": "string"}, {"name": "limitPerTx", "type": "uint256", "internalType": "uint256"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "setPolicy", "inputs": [{"name": "policyHash", "type": "bytes32", "internalType": "bytes32"}, {"name": "policyData", "type": "bytes", "internalType": "bytes"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "validateSpend", "inputs": [{"name": "wallet", "type": "address", "internalType": "address"}, {"name": "category", "type": "string", "internalType": "string"}, {"name": "amount", "type": "uint256", "internalType": "uint256"}, {"name": "", "type": "bytes32", "internalType": "bytes32"}], "outputs": [{"name": "valid", "type": "bool", "internalType": "bool"}, {"name": "reason", "type": "string", "internalType": "string"}], "stateMutability": "view"},
+    {"type": "function", "name": "walletOwners", "inputs": [{"name": "", "type": "address", "internalType": "address"}], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "event", "name": "CategoryLimitSet", "inputs": [{"name": "wallet", "type": "address", "indexed": True, "internalType": "address"}, {"name": "category", "type": "string", "indexed": False, "internalType": "string"}, {"name": "limitPerTx", "type": "uint256", "indexed": False, "internalType": "uint256"}], "anonymous": False},
+    {"type": "event", "name": "PolicySet", "inputs": [{"name": "wallet", "type": "address", "indexed": True, "internalType": "address"}, {"name": "policyHash", "type": "bytes32", "indexed": False, "internalType": "bytes32"}], "anonymous": False},
+]
+
+TrustRegistry_ABI = [
+    {"type": "constructor", "inputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "DECREMENT", "inputs": [], "outputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "INCREMENT", "inputs": [], "outputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "INITIAL_SCORE", "inputs": [], "outputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "MAX_SCORE", "inputs": [], "outputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "addUpdater", "inputs": [{"name": "updater", "type": "address", "internalType": "address"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "getScore", "inputs": [{"name": "wallet", "type": "address", "internalType": "address"}], "outputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "getTrustLevel", "inputs": [{"name": "wallet", "type": "address", "internalType": "address"}], "outputs": [{"name": "", "type": "string", "internalType": "string"}], "stateMutability": "view"},
+    {"type": "function", "name": "initWallet", "inputs": [{"name": "wallet", "type": "address", "internalType": "address"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "isAuthorizedUpdater", "inputs": [{"name": "", "type": "address", "internalType": "address"}], "outputs": [{"name": "", "type": "bool", "internalType": "bool"}], "stateMutability": "view"},
+    {"type": "function", "name": "owner", "inputs": [], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "function", "name": "recordAnomaly", "inputs": [{"name": "wallet", "type": "address", "internalType": "address"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "recordSuccess", "inputs": [{"name": "wallet", "type": "address", "internalType": "address"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "removeUpdater", "inputs": [{"name": "updater", "type": "address", "internalType": "address"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "renounceOwnership", "inputs": [], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "transferOwnership", "inputs": [{"name": "newOwner", "type": "address", "internalType": "address"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "event", "name": "OwnershipTransferred", "inputs": [{"name": "oldOwner", "type": "address", "indexed": True, "internalType": "address"}, {"name": "newOwner", "type": "address", "indexed": True, "internalType": "address"}], "anonymous": False},
+    {"type": "event", "name": "ScoreUpdated", "inputs": [{"name": "wallet", "type": "address", "indexed": True, "internalType": "address"}, {"name": "oldScore", "type": "uint256", "indexed": False, "internalType": "uint256"}, {"name": "newScore", "type": "uint256", "indexed": False, "internalType": "uint256"}, {"name": "reason", "type": "string", "indexed": False, "internalType": "string"}], "anonymous": False},
+    {"type": "event", "name": "UpdaterAdded", "inputs": [{"name": "updater", "type": "address", "indexed": True, "internalType": "address"}], "anonymous": False},
+    {"type": "event", "name": "UpdaterRemoved", "inputs": [{"name": "updater", "type": "address", "indexed": True, "internalType": "address"}], "anonymous": False},
+    {"type": "event", "name": "WalletInitialized", "inputs": [{"name": "wallet", "type": "address", "indexed": True, "internalType": "address"}, {"name": "score", "type": "uint256", "indexed": False, "internalType": "uint256"}], "anonymous": False},
+]
+
+IntentAttestation_ABI = [
+    {"type": "function", "name": "attest", "inputs": [{"name": "attestationId", "type": "bytes32", "internalType": "bytes32"}, {"name": "action", "type": "string", "internalType": "string"}, {"name": "reason", "type": "string", "internalType": "string"}, {"name": "recipient", "type": "address", "internalType": "address"}, {"name": "amount", "type": "uint256", "internalType": "uint256"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "getAttestation", "inputs": [{"name": "attestationId", "type": "bytes32", "internalType": "bytes32"}], "outputs": [{"name": "id", "type": "bytes32", "internalType": "bytes32"}, {"name": "wallet", "type": "address", "internalType": "address"}, {"name": "action", "type": "string", "internalType": "string"}, {"name": "reason", "type": "string", "internalType": "string"}, {"name": "recipient", "type": "address", "internalType": "address"}, {"name": "amount", "type": "uint256", "internalType": "uint256"}, {"name": "timestamp", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "verify", "inputs": [{"name": "attestationId", "type": "bytes32", "internalType": "bytes32"}, {"name": "wallet", "type": "address", "internalType": "address"}], "outputs": [{"name": "", "type": "bool", "internalType": "bool"}], "stateMutability": "view"},
+    {"type": "event", "name": "AttestationCreated", "inputs": [{"name": "attestationId", "type": "bytes32", "indexed": True, "internalType": "bytes32"}, {"name": "wallet", "type": "address", "indexed": True, "internalType": "address"}, {"name": "action", "type": "string", "indexed": False, "internalType": "string"}, {"name": "recipient", "type": "address", "indexed": False, "internalType": "address"}, {"name": "amount", "type": "uint256", "indexed": False, "internalType": "uint256"}], "anonymous": False},
+]
+
+SettlementCoordinator_ABI = [
+    {"type": "function", "name": "accept", "inputs": [{"name": "proposalId", "type": "bytes32", "internalType": "bytes32"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "checkExpiry", "inputs": [{"name": "proposalId", "type": "bytes32", "internalType": "bytes32"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "execute", "inputs": [{"name": "proposalId", "type": "bytes32", "internalType": "bytes32"}], "outputs": [], "stateMutability": "payable"},
+    {"type": "function", "name": "getProposal", "inputs": [{"name": "proposalId", "type": "bytes32", "internalType": "bytes32"}], "outputs": [{"name": "fromWallet", "type": "address", "internalType": "address"}, {"name": "toWallet", "type": "address", "internalType": "address"}, {"name": "amount", "type": "uint256", "internalType": "uint256"}, {"name": "intentId", "type": "bytes32", "internalType": "bytes32"}, {"name": "expiresAt", "type": "uint256", "internalType": "uint256"}, {"name": "status", "type": "uint8", "internalType": "enum SettlementCoordinator.ProposalStatus"}, {"name": "rejectionReason", "type": "string", "internalType": "string"}], "stateMutability": "view"},
+    {"type": "function", "name": "propose", "inputs": [{"name": "fromWallet", "type": "address", "internalType": "address"}, {"name": "toWallet", "type": "address", "internalType": "address"}, {"name": "amount", "type": "uint256", "internalType": "uint256"}, {"name": "intentId", "type": "bytes32", "internalType": "bytes32"}, {"name": "expiresAt", "type": "uint256", "internalType": "uint256"}], "outputs": [{"name": "proposalId", "type": "bytes32", "internalType": "bytes32"}], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "reject", "inputs": [{"name": "proposalId", "type": "bytes32", "internalType": "bytes32"}, {"name": "reason", "type": "string", "internalType": "string"}], "outputs": [], "stateMutability": "nonpayable"},
+    {"type": "event", "name": "ProposalAccepted", "inputs": [{"name": "proposalId", "type": "bytes32", "indexed": True, "internalType": "bytes32"}], "anonymous": False},
+    {"type": "event", "name": "ProposalCreated", "inputs": [{"name": "proposalId", "type": "bytes32", "indexed": True, "internalType": "bytes32"}, {"name": "from", "type": "address", "indexed": True, "internalType": "address"}, {"name": "to", "type": "address", "indexed": True, "internalType": "address"}, {"name": "amount", "type": "uint256", "indexed": False, "internalType": "uint256"}], "anonymous": False},
+    {"type": "event", "name": "ProposalExecuted", "inputs": [{"name": "proposalId", "type": "bytes32", "indexed": True, "internalType": "bytes32"}, {"name": "amount", "type": "uint256", "indexed": False, "internalType": "uint256"}], "anonymous": False},
+    {"type": "event", "name": "ProposalExpired", "inputs": [{"name": "proposalId", "type": "bytes32", "indexed": True, "internalType": "bytes32"}], "anonymous": False},
+    {"type": "event", "name": "ProposalRejected", "inputs": [{"name": "proposalId", "type": "bytes32", "indexed": True, "internalType": "bytes32"}, {"name": "reason", "type": "string", "indexed": False, "internalType": "string"}], "anonymous": False},
+]
+
+WalletFactory_ABI = [
+    {"type": "constructor", "inputs": [{"name": "_policyEngine", "type": "address", "internalType": "address"}, {"name": "_trustRegistry", "type": "address", "internalType": "address"}, {"name": "_intentAttestation", "type": "address", "internalType": "address"}, {"name": "_settlementCoordinator", "type": "address", "internalType": "address"}], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "allWallets", "inputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "function", "name": "createWallet", "inputs": [], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "nonpayable"},
+    {"type": "function", "name": "getWallets", "inputs": [{"name": "owner", "type": "address", "internalType": "address"}], "outputs": [{"name": "", "type": "address[]", "internalType": "address[]"}], "stateMutability": "view"},
+    {"type": "function", "name": "intentAttestation", "inputs": [], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "function", "name": "ownerWallets", "inputs": [{"name": "", "type": "address", "internalType": "address"}, {"name": "", "type": "uint256", "internalType": "uint256"}], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "function", "name": "policyEngine", "inputs": [], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "function", "name": "settlementCoordinator", "inputs": [], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "function", "name": "totalWallets", "inputs": [], "outputs": [{"name": "", "type": "uint256", "internalType": "uint256"}], "stateMutability": "view"},
+    {"type": "function", "name": "trustRegistry", "inputs": [], "outputs": [{"name": "", "type": "address", "internalType": "address"}], "stateMutability": "view"},
+    {"type": "event", "name": "WalletCreated", "inputs": [{"name": "owner", "type": "address", "indexed": True, "internalType": "address"}, {"name": "walletAddress", "type": "address", "indexed": True, "internalType": "address"}], "anonymous": False},
+]

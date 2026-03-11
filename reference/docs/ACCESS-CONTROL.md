@@ -18,8 +18,9 @@ This key deployed the canonical infrastructure (PolicyEngine, TrustRegistry, Int
 | `TrustRegistry` | Protocol deployer wallet | Can add/remove updaters |
 | `IntentAttestation` | No owner | Permissionless — any wallet attests |
 | `SettlementCoordinator` | No owner | Permissionless — wallets propose/accept |
+| `ARC402Registry` | Protocol deployer wallet | Can update infrastructure addresses |
 | `WalletFactory` | No owner | Immutable after deployment |
-| `ARC402Wallet` (each) | The deploying EOA or factory | Controls context, spending, policy |
+| `ARC402Wallet` (each) | The deploying EOA or factory | Controls context, spending, policy, registry |
 
 ---
 
@@ -52,23 +53,40 @@ Updaters **cannot** initialize scores (that is open), query-only, or alter the u
 The following actions are **permanently impossible** after deployment:
 
 - Modify, delete, or overwrite an `IntentAttestation` — attestations are write-once
-- Change the `policyEngine`, `trustRegistry`, or `intentAttestation` references inside a deployed `ARC402Wallet` — they are immutable
+- Force a wallet to point at a new registry — only the wallet's own owner can call `setRegistry()`
 - Change the canonical addresses wired into `WalletFactory` — they are immutable
 - Exceed or bypass `PolicyEngine` category limits set by a wallet's owner — enforced on-chain
 - Alter another wallet's category limits without being that wallet's registered owner in `PolicyEngine`
 
 ---
 
-## Upgrade Path
+## Upgrade Path (Registry Governance)
 
-**These contracts are NOT upgradeable — this is a feature, not a bug.**
+ARC-402 uses a **opt-in registry pattern** for upgrades (Option 3).
 
-Immutability provides:
-- **Trustless auditability** — the code users audit is the code that runs, forever
-- **No rug vector** — no admin can swap in malicious logic after user adoption
-- **Intent integrity** — `IntentAttestation` records are permanent; no one can erase the WHY
+### How it works
 
-If the protocol evolves, a new set of canonical contracts will be deployed at new addresses. Wallet operators choose which canonical addresses to point their new wallets at. Old wallets continue operating against the old infrastructure indefinitely.
+1. **`ARC402Registry`** is a pointer contract holding the canonical addresses of all infrastructure contracts (`PolicyEngine`, `TrustRegistry`, `IntentAttestation`, `SettlementCoordinator`) and a human-readable version string.
+2. **`ARC402Wallet`** reads all infrastructure addresses from its registry at call-time — no addresses are hardcoded.
+3. When ARC-402 deploys new contract versions, it updates the registry (or deploys a new one).
+4. **Wallet owners** choose when to adopt upgrades by calling `wallet.setRegistry(newRegistryAddress)`.
+5. **Nobody else can force a wallet upgrade** — `setRegistry()` is protected by `onlyOwner`.
+
+### Governance roles
+
+| Actor | Can do |
+|---|---|
+| `ARC402Registry` owner (protocol deployer) | Update infrastructure addresses in the registry |
+| `ARC402Wallet` owner | Call `setRegistry()` to opt into a new registry |
+| Anyone else | Nothing — cannot modify registry or wallet pointers |
+
+### Properties
+
+- **Immutable by default** — a wallet never upgrades unless its owner acts
+- **Upgradeable by choice** — wallet owners can adopt new infrastructure at any time
+- **No forced migration** — old wallets continue operating against old infrastructure indefinitely
+- **Trustless auditability** — both old and new registries are inspectable on-chain
+- **Intent integrity** — `IntentAttestation` records are permanent regardless of registry version
 
 ---
 

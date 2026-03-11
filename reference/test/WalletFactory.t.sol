@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 import "forge-std/Test.sol";
 import "../contracts/WalletFactory.sol";
 import "../contracts/ARC402Wallet.sol";
+import "../contracts/ARC402Registry.sol";
 import "../contracts/PolicyEngine.sol";
 import "../contracts/TrustRegistry.sol";
 import "../contracts/IntentAttestation.sol";
@@ -13,6 +14,7 @@ contract WalletFactoryTest is Test {
     TrustRegistry trustRegistry;
     IntentAttestation intentAttestation;
     SettlementCoordinator settlementCoordinator;
+    ARC402Registry reg;
     WalletFactory factory;
 
     address alice = address(0xA11CE);
@@ -23,12 +25,15 @@ contract WalletFactoryTest is Test {
         intentAttestation = new IntentAttestation();
         settlementCoordinator = new SettlementCoordinator();
 
-        factory = new WalletFactory(
+        reg = new ARC402Registry(
             address(policyEngine),
             address(trustRegistry),
             address(intentAttestation),
-            address(settlementCoordinator)
+            address(settlementCoordinator),
+            "v1.0.0"
         );
+
+        factory = new WalletFactory(address(reg));
     }
 
     function test_createWallet() public {
@@ -77,8 +82,11 @@ contract WalletFactoryTest is Test {
         address walletAddr = factory.createWallet();
 
         ARC402Wallet wallet = ARC402Wallet(payable(walletAddr));
-        assertEq(address(wallet.policyEngine()), address(policyEngine));
-        assertEq(address(wallet.trustRegistry()), address(trustRegistry));
-        assertEq(address(wallet.intentAttestation()), address(intentAttestation));
+        // Wallet should point at the same registry the factory used
+        assertEq(address(wallet.registry()), address(reg));
+        // Registry addresses match canonical infrastructure
+        assertEq(wallet.registry().policyEngine(), address(policyEngine));
+        assertEq(wallet.registry().trustRegistry(), address(trustRegistry));
+        assertEq(wallet.registry().intentAttestation(), address(intentAttestation));
     }
 }

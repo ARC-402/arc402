@@ -45,6 +45,19 @@ const SETTLEMENT_COORDINATOR_ABI = [
   "function getProposal(bytes32 proposalId) external view returns (address fromWallet, address toWallet, uint256 amount, bytes32 intentId, uint256 expiresAt, uint8 status, string memory rejectionReason)",
 ]
 
+const WALLET_FACTORY_ABI = [
+  "function createWallet() external returns (address)",
+  "function getWallets(address owner) external view returns (address[])",
+  "function allWallets(uint256 index) external view returns (address)",
+  "function ownerWallets(address owner, uint256 index) external view returns (address)",
+  "function totalWallets() external view returns (uint256)",
+  "function policyEngine() external view returns (address)",
+  "function trustRegistry() external view returns (address)",
+  "function intentAttestation() external view returns (address)",
+  "function settlementCoordinator() external view returns (address)",
+  "event WalletCreated(address indexed owner, address indexed walletAddress)",
+]
+
 export function getPolicyEngine(address: string, runner: ContractRunner) {
   return new Contract(address, POLICY_ENGINE_ABI, runner)
 }
@@ -65,10 +78,15 @@ export function getSettlementCoordinator(address: string, runner: ContractRunner
   return new Contract(address, SETTLEMENT_COORDINATOR_ABI, runner)
 }
 
+export function getWalletFactory(address: string, runner: ContractRunner) {
+  return new Contract(address, WALLET_FACTORY_ABI, runner)
+}
+
 export {
   POLICY_ENGINE_ABI,
   TRUST_REGISTRY_ABI,
   INTENT_ATTESTATION_ABI,
   ARC402_WALLET_ABI,
   SETTLEMENT_COORDINATOR_ABI,
+  WALLET_FACTORY_ABI,
 }

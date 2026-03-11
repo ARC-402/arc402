@@ -1,26 +1,40 @@
 /**
  * ARC-402 TypeScript SDK
- * Reference implementation — DRAFT
  *
- * Exports:
- *   - ARC402Wallet: wallet client with policy, context, trust, intent
- *   - PolicyObject: policy schema and validation
- *   - ContextBinding: context lifecycle management
- *   - TrustPrimitive: trust score queries
- *   - IntentAttestation: attestation creation and signing
- *   - MultiAgentSettlement: bilateral settlement protocol
+ * @packageDocumentation
  */
 
-export { ARC402Wallet } from './wallet'
-export { PolicyObject, PolicyValidator } from './policy'
-export { ContextBinding } from './context'
-export { TrustPrimitive } from './trust'
-export { IntentAttestation } from './intent'
-export { MultiAgentSettlement } from './settlement'
+// Main client
+export { ARC402WalletClient, ARC402Wallet, ContextBinding } from "./wallet";
 
+// Sub-clients
+export { PolicyClient, PolicyObject, PolicyValidator } from "./policy";
+export { TrustClient, TrustPrimitive } from "./trust";
+export { IntentAttestationClient, IntentAttestation } from "./intent";
+export { SettlementClient, MultiAgentSettlement } from "./settlement";
+
+// Contract helpers
+export {
+  getPolicyEngine,
+  getTrustRegistry,
+  getIntentAttestation,
+  getARC402Wallet,
+  getSettlementCoordinator,
+  getWalletFactory,
+  POLICY_ENGINE_ABI,
+  TRUST_REGISTRY_ABI,
+  INTENT_ATTESTATION_ABI,
+  ARC402_WALLET_ABI,
+  SETTLEMENT_COORDINATOR_ABI,
+  WALLET_FACTORY_ABI,
+} from "./contracts";
+
+// Types & constants
+export { NETWORKS } from "./types";
 export type {
   Policy,
   PolicyCategory,
+  CategoryLimit,
   EscalationConfig,
   Context,
   TrustScore,
@@ -31,4 +45,5 @@ export type {
   AcceptanceProof,
   RejectionProof,
   RejectionCode,
-} from './types'
+  ContractAddresses,
+} from "./types";

@@ -1,6 +1,6 @@
 export interface Policy {
   walletAddress: string;
-  policyHash: string;
+  policyHash?: string;
   categories: Record<string, CategoryLimit>;
 }
 
@@ -29,6 +29,7 @@ export interface Context {
 export interface TrustScore {
   score: number;
   level: "probationary" | "restricted" | "standard" | "elevated" | "autonomous";
+  nextLevelAt: number;
 }
 
 export interface TrustThreshold {
@@ -45,6 +46,8 @@ export interface Intent {
   reason: string;
   recipient: string;
   amount: bigint;
+  wallet: string;
+  timestamp: number;
 }
 
 export interface Attestation {
@@ -92,5 +95,31 @@ export interface ContractAddresses {
   trustRegistry: string;
   intentAttestation: string;
   settlementCoordinator: string;
-  wallet?: string;
+  walletFactory?: string;
 }
+
+export const NETWORKS: Record<
+  string,
+  { chainId: number; rpc: string; contracts: ContractAddresses }
+> = {
+  "base-sepolia": {
+    chainId: 84532,
+    rpc: "https://sepolia.base.org",
+    contracts: {
+      policyEngine:          "0x6B89621c94a7105c3D8e0BD8Fb06814931CA2CB2",
+      trustRegistry:         "0xdA1D377991B2E580991B0DD381CdD635dd71aC39",
+      intentAttestation:     "0xbB5E1809D4a94D08Bf1143131312858143D018f1",
+      settlementCoordinator: "0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460",
+    },
+  },
+  "base": {
+    chainId: 8453,
+    rpc: "https://mainnet.base.org",
+    contracts: {
+      policyEngine:          "0x0000000000000000000000000000000000000000",
+      trustRegistry:         "0x0000000000000000000000000000000000000000",
+      intentAttestation:     "0x0000000000000000000000000000000000000000",
+      settlementCoordinator: "0x0000000000000000000000000000000000000000",
+    },
+  },
+};
