@@ -24,7 +24,7 @@ contract WalletFactory {
     }
 
     function createWallet() external returns (address) {
-        ARC402Wallet wallet = new ARC402Wallet(registry);
+        ARC402Wallet wallet = new ARC402Wallet(registry, msg.sender);
         // ARC402Wallet constructor already calls initWallet; this is idempotent
         ARC402Registry reg = ARC402Registry(registry);
         ITrustRegistry(reg.trustRegistry()).initWallet(address(wallet));

@@ -46,7 +46,7 @@ contract ARC402WalletTest is Test {
             "v1.0.0"
         );
 
-        wallet = new ARC402Wallet(address(reg));
+        wallet = new ARC402Wallet(address(reg), address(this));
 
         // Add wallet as trusted updater
         trustRegistry.addUpdater(address(wallet));

@@ -77,6 +77,13 @@ contract WalletFactoryTest is Test {
         assertEq(factory.totalWallets(), 2);
     }
 
+    function test_createWallet_OwnerIsUser() public {
+        vm.prank(alice);
+        address walletAddr = factory.createWallet();
+        ARC402Wallet wallet = ARC402Wallet(payable(walletAddr));
+        assertEq(wallet.owner(), alice, "Wallet owner must be user, not factory");
+    }
+
     function test_walletPointsToCanonical() public {
         vm.prank(alice);
         address walletAddr = factory.createWallet();

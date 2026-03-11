@@ -77,8 +77,9 @@ contract ARC402Wallet {
 
     // ─── Constructor ─────────────────────────────────────────────────────────
 
-    constructor(address _registry) {
-        owner = msg.sender;
+    constructor(address _registry, address _owner) {
+        require(_owner != address(0), "ARC402: zero owner");
+        owner = _owner;
         registry = ARC402Registry(_registry);
         _trustRegistry().initWallet(address(this));
     }
