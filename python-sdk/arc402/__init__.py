@@ -24,6 +24,8 @@ from .trust import TrustClient as Trust
 from .types import (
     Agreement,
     AgreementStatus,
+    ArbitrationCase,
+    ArbitrationVote,
     AttestationRecord,
     CapabilitySlot,
     DisputeCase,
@@ -71,6 +73,8 @@ __all__ = [
     "SettlementProposal",
     "Agreement",
     "AgreementStatus",
+    "ArbitrationCase",
+    "ArbitrationVote",
     "ProviderResponseType",
     "DisputeOutcome",
     "EvidenceType",

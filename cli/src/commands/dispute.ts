@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { DirectDisputeReason, DisputeOutcome, EvidenceType, ServiceAgreementClient } from "@arc402/sdk";
+import { ArbitrationVote, DirectDisputeReason, DisputeOutcome, EvidenceType, ServiceAgreementClient } from "@arc402/sdk";
 import { loadConfig } from "../config";
 import { getClient, requireSigner } from "../client";
 import { hashFile, hashString } from "../utils/hash";
@@ -42,9 +42,50 @@ export function registerDisputeCommand(program: Command): void {
   dispute.command("status <id>").option("--json").action(async (id, opts) => {
     const config = loadConfig(); if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
     const { provider } = await getClient(config); const client = new ServiceAgreementClient(config.serviceAgreementAddress, provider);
-    const result = { case: await client.getDisputeCase(BigInt(id)), evidence: await client.getDisputeEvidenceAll(BigInt(id)) };
+    const result = {
+      case: await client.getDisputeCase(BigInt(id)),
+      arbitration: await client.getArbitrationCase(BigInt(id)),
+      evidence: await client.getDisputeEvidenceAll(BigInt(id)),
+    };
     console.log(JSON.stringify(result, (_k, value) => typeof value === 'bigint' ? value.toString() : value, opts.json ? 2 : 2));
   });
+  dispute.command("nominate <id>")
+    .description("Nominate an arbitrator during the on-chain arbitration phase")
+    .requiredOption("--arbitrator <address>")
+    .action(async (id, opts) => {
+      const config = loadConfig(); if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
+      const { signer } = await requireSigner(config); const client = new ServiceAgreementClient(config.serviceAgreementAddress, signer);
+      await client.nominateArbitrator(BigInt(id), opts.arbitrator);
+      console.log(`arbitrator nominated for ${id}: ${opts.arbitrator}`);
+    });
+  dispute.command("vote <id>")
+    .description("Cast an arbitration vote on-chain")
+    .requiredOption("--vote <vote>", "provider|refund|split|human-review")
+    .option("--provider-award <amount>", "Wei/token units", "0")
+    .option("--client-award <amount>", "Wei/token units", "0")
+    .action(async (id, opts) => {
+      const config = loadConfig(); if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
+      const { signer } = await requireSigner(config); const client = new ServiceAgreementClient(config.serviceAgreementAddress, signer);
+      const mapping: Record<string, ArbitrationVote> = {
+        provider: ArbitrationVote.PROVIDER_WINS,
+        refund: ArbitrationVote.CLIENT_REFUND,
+        split: ArbitrationVote.SPLIT,
+        'human-review': ArbitrationVote.HUMAN_REVIEW_REQUIRED,
+      };
+      const vote = mapping[String(opts.vote).toLowerCase()];
+      if (vote === undefined) throw new Error('Unsupported --vote value');
+      await client.castArbitrationVote(BigInt(id), vote, BigInt(opts.providerAward), BigInt(opts.clientAward));
+      console.log(`arbitration vote recorded for ${id}`);
+    });
+  dispute.command("human <id>")
+    .description("Request human escalation when arbitration stalls or requires human backstop")
+    .requiredOption("--reason <reason>")
+    .action(async (id, opts) => {
+      const config = loadConfig(); if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
+      const { signer } = await requireSigner(config); const client = new ServiceAgreementClient(config.serviceAgreementAddress, signer);
+      await client.requestHumanEscalation(BigInt(id), opts.reason);
+      console.log(`human escalation requested for ${id}`);
+    });
   dispute.command("resolve <id>").description("Owner-only admin path if you are operating the dispute contract").requiredOption("--outcome <outcome>", "provider|refund|partial-provider|partial-client|mutual-cancel|human-review").option("--provider-award <amount>", "Wei/token units", "0").option("--client-award <amount>", "Wei/token units", "0").action(async (id, opts) => {
     const config = loadConfig(); if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
     const { signer } = await requireSigner(config); const client = new ServiceAgreementClient(config.serviceAgreementAddress, signer);

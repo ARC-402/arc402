@@ -73,6 +73,7 @@ asyncio.run(main())
 
 ```python
 from arc402 import (
+    ArbitrationVote,
     DisputeOutcome,
     EvidenceType,
     ProviderResponseType,
@@ -118,7 +119,16 @@ await agreement.submit_dispute_evidence(
     evidence_uri="ipfs://deliverable-bundle",
 )
 
-# current contract authority path (owner-administered / designated arbiter depending on deployment)
+# current contract includes remediation, arbitration, and human-escalation paths
+await agreement.nominate_arbitrator(agreement_id, "0xArbitrator...")
+await agreement.cast_arbitration_vote(
+    agreement_id,
+    vote=ArbitrationVote.SPLIT,
+    provider_award=30_000_000_000_000_000,
+    client_award=20_000_000_000_000_000,
+)
+
+# deployment-defined admin / designated-human backstop still exists for the final human-escalation path
 await agreement.resolve_dispute_detailed(
     agreement_id,
     outcome=DisputeOutcome.PARTIAL_PROVIDER,
@@ -186,16 +196,15 @@ Discovery guidance for current public integrations:
 That means:
 - negotiated remediation is the default path before dispute. Use direct dispute only for explicit hard-fail cases: no delivery, hard deadline breach, clearly invalid/fraudulent deliverables, or safety-critical violations. The SDK exposes both remediation helpers and direct-dispute helpers for those narrow cases.
 - evidence anchoring and partial-resolution outcomes are supported through the current `ServiceAgreement` contract
-- current dispute resolution authority is deployment-defined and should not be described as fully decentralized by this SDK
+- current dispute flow includes remediation, arbitrator nomination/voting, and human escalation, but final public-legitimacy claims remain deployment-defined and should not be described as fully decentralized by this SDK
 - capability taxonomy reads are supported; root governance writes exist on-chain but you should typically drive them through protocol governance
 - heartbeat / operational trust reads are exposed via `AgentRegistryClient.get_operational_metrics()` and `get_operational_trust()`
 - identity tiers are exposed via `SponsorshipAttestationClient`
 - governance support is currently read-focused in the SDK even though the contract is executable multisig on-chain
 
-Not yet wrapped as first-class high-level Python workflows unless/until they exist more concretely on-chain:
-- peer arbitrator selection
+Not yet wrapped as first-class high-level Python workflows:
 - automated machine-checkable dispute resolution engines
-- human review marketplace orchestration
+- marketplace-style human review routing beyond the current contract backstop
 - richer delivery schema typing beyond the current hash-anchored agreement surface
 
 Also note:

@@ -9,6 +9,8 @@ from web3 import Web3
 from .abis import ServiceAgreement_ABI
 from .types import (
     Agreement,
+    ArbitrationCase,
+    ArbitrationVote,
     DirectDisputeReason,
     DisputeCase,
     DisputeEvidence,
@@ -177,6 +179,27 @@ class ServiceAgreementClient:
             evidence_uri,
         )
 
+    async def nominate_arbitrator(self, agreement_id: int, arbitrator: str) -> str:
+        return await self._simple_write("nominateArbitrator", agreement_id, Web3.to_checksum_address(arbitrator))
+
+    async def cast_arbitration_vote(
+        self,
+        agreement_id: int,
+        vote: ArbitrationVote,
+        provider_award: int,
+        client_award: int,
+    ) -> str:
+        return await self._simple_write(
+            "castArbitrationVote",
+            agreement_id,
+            int(vote),
+            provider_award,
+            client_award,
+        )
+
+    async def request_human_escalation(self, agreement_id: int, reason: str) -> str:
+        return await self._simple_write("requestHumanEscalation", agreement_id, reason)
+
     async def resolve_dispute_detailed(
         self,
         agreement_id: int,
@@ -224,6 +247,9 @@ class ServiceAgreementClient:
 
     def get_dispute_evidence(self, agreement_id: int, index: int) -> DisputeEvidence:
         return DisputeEvidence.from_raw(self._contract.functions.getDisputeEvidence(agreement_id, index).call())
+
+    def get_arbitration_case(self, agreement_id: int) -> ArbitrationCase:
+        return ArbitrationCase.from_raw(self._contract.functions.getArbitrationCase(agreement_id).call())
 
     def agreement_count(self) -> int:
         return self._contract.functions.agreementCount().call()

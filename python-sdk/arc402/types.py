@@ -378,6 +378,48 @@ class DisputeCase(BaseModel):
         )
 
 
+class ArbitrationVote(IntEnum):
+    NONE = 0
+    PROVIDER_WINS = 1
+    CLIENT_REFUND = 2
+    SPLIT = 3
+    HUMAN_REVIEW_REQUIRED = 4
+
+
+class ArbitrationCase(BaseModel):
+    agreement_id: int
+    arbitrators: list[str]
+    arbitrator_count: int
+    provider_votes: int
+    client_votes: int
+    split_votes: int
+    human_votes: int
+    selection_deadline_at: int
+    decision_deadline_at: int
+    split_provider_award: int
+    split_client_award: int
+    finalized: bool
+    human_backstop_used: bool
+
+    @classmethod
+    def from_raw(cls, raw: tuple) -> "ArbitrationCase":
+        return cls(
+            agreement_id=raw[0],
+            arbitrators=list(raw[1]),
+            arbitrator_count=raw[2],
+            provider_votes=raw[3],
+            client_votes=raw[4],
+            split_votes=raw[5],
+            human_votes=raw[6],
+            selection_deadline_at=raw[7],
+            decision_deadline_at=raw[8],
+            split_provider_award=raw[9],
+            split_client_award=raw[10],
+            finalized=raw[11],
+            human_backstop_used=raw[12],
+        )
+
+
 class SignalType(IntEnum):
     ENDORSE = 0
     WARN = 1
