@@ -8,6 +8,7 @@ This Python SDK now covers both the original wallet flows and the current v0.2 p
 - governed wallet spending
 - trust registry v1/v2 reads
 - service agreements with remediation + dispute evidence flows
+- peer-arbitration nomination/voting + human-escalation reads/writes
 - reputation oracle reads/interactions
 - sponsorship + identity tier attestations (informational unless externally strengthened by a deployment)
 - capability taxonomy reads for canonical discovery
