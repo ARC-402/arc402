@@ -1,3 +1,4 @@
-PROVISIONAL-BASE-SHA: ce34123
-STATUS: NOT-FROZEN
-NOTE: ce34123 is the current clean commit base, but the intended release-candidate payload still includes uncommitted worktree changes. Record the final audited target SHA only after contracts/SDK/CLI/docs are recommitted from a clean checkout and verified.
+FINAL-AUDIT-TARGET-SHA: b626cec3318ca4469e32532378643530ebb4a781
+STATUS: FROZEN
+TAG: rc-preseal-2026-03-12-audit-target
+NOTE: The sealed release-candidate audit target is commit b626cec3318ca4469e32532378643530ebb4a781. If later metadata-only commits exist on this branch, the final sealing audit must still target this SHA/tag rather than branch HEAD.
