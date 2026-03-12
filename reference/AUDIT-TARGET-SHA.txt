@@ -1,4 +1,4 @@
-FINAL-AUDIT-TARGET-SHA: d234221adb6c7f9b366f99ca596ac87f7d906dd6
+FINAL-AUDIT-TARGET-SHA: d7f6995f06004f2c461b6189e1c8482a7c3414c2
 STATUS: FROZEN
 TAG: rc-preseal-2026-03-12-audit-target
-NOTE: The sealed release-candidate audit target is commit d234221adb6c7f9b366f99ca596ac87f7d906dd6. If later metadata-only commits exist on this branch, the final sealing audit must still target this SHA/tag rather than branch HEAD.
+NOTE: The sealed release-candidate audit target is commit d7f6995f06004f2c461b6189e1c8482a7c3414c2. This target includes the post-freeze Python SDK arbitration/human-escalation alignment cleanup so docs, SDK surface, and contract ABI reflect the same RC truth.
