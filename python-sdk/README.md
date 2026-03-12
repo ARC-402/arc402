@@ -22,6 +22,19 @@ This Python SDK now covers both the original wallet flows and the current v0.2 p
 pip install arc402
 ```
 
+## Local verification
+
+Use an isolated virtualenv for local test runs so globally installed `pytest` plugins do not interfere with the package's pinned dev dependency set.
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e '.[dev]'
+python -m pytest -q
+python -m build
+```
+
 ## Quick start: governed wallet
 
 ```python

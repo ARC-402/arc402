@@ -64,22 +64,29 @@ interface IServiceAgreement {
         SAFETY_CRITICAL_VIOLATION
     }
 
+    enum ArbitrationVote {
+        NONE,
+        PROVIDER_WINS,
+        CLIENT_REFUND,
+        SPLIT,
+        HUMAN_REVIEW_REQUIRED
+    }
+
     struct Agreement {
         uint256 id;
-        address client;           // paying agent wallet
-        address provider;         // delivering agent wallet
-        string serviceType;       // e.g. "text-generation"
+        address client;
+        address provider;
+        string serviceType;
         string description;
         uint256 price;
-        address token;            // ERC-20 address or address(0) for ETH
-        uint256 deadline;         // unix timestamp
-        bytes32 deliverablesHash; // keccak256 of expected deliverables spec
+        address token;
+        uint256 deadline;
+        bytes32 deliverablesHash;
         Status status;
         uint256 createdAt;
         uint256 resolvedAt;
-        // ─── v2 fields ───────────────────────────────────────────────────────
-        uint256 verifyWindowEnd;  // nonzero when in PENDING_VERIFICATION; 0 = no verify window
-        bytes32 committedHash;    // hash committed by provider via commitDeliverable()
+        uint256 verifyWindowEnd;
+        bytes32 committedHash;
     }
 
     struct RemediationCase {
@@ -132,19 +139,24 @@ interface IServiceAgreement {
         uint256 evidenceCount;
     }
 
+    struct ArbitrationCase {
+        uint256 agreementId;
+        address[3] arbitrators;
+        uint8 arbitratorCount;
+        uint8 providerVotes;
+        uint8 clientVotes;
+        uint8 splitVotes;
+        uint8 humanVotes;
+        uint256 selectionDeadlineAt;
+        uint256 decisionDeadlineAt;
+        uint256 splitProviderAward;
+        uint256 splitClientAward;
+        bool finalized;
+        bool humanBackstopUsed;
+    }
+
     // ─── Core Functions ──────────────────────────────────────────────────────
 
-    /**
-     * @notice Client proposes a service agreement, locking escrow
-     * @param provider The agent wallet that will deliver the service
-     * @param serviceType Short type tag (e.g. "text-generation")
-     * @param description Human/agent-readable description
-     * @param price Payment amount in wei (ETH) or token units
-     * @param token ERC-20 token address, or address(0) for ETH
-     * @param deadline Unix timestamp after which client may cancel if unfulfilled
-     * @param deliverablesHash keccak256 of the expected deliverables spec
-     * @return agreementId The new agreement's ID (starts at 1)
-     */
     function propose(
         address provider,
         string calldata serviceType,
@@ -155,66 +167,14 @@ interface IServiceAgreement {
         bytes32 deliverablesHash
     ) external payable returns (uint256 agreementId);
 
-    /**
-     * @notice Provider accepts a proposed agreement
-     * @param agreementId The agreement to accept
-     */
     function accept(uint256 agreementId) external;
-
-    /**
-     * @notice Legacy-only immediate release path.
-     *         Public launch flow MUST use commitDeliverable() -> verifyDeliverable()/autoRelease(),
-     *         with remediation/dispute escalation when needed.
-     *         Implementations may disable this by default and only allow explicitly trusted providers.
-     * @param agreementId The agreement to fulfill
-     * @param actualDeliverablesHash keccak256 of what was actually delivered
-     */
     function fulfill(uint256 agreementId, bytes32 actualDeliverablesHash) external;
-
-    /**
-     * @notice Provider commits deliverable hash, starting the verification window.
-     *         Moves status ACCEPTED → PENDING_VERIFICATION.
-     *         Client has VERIFY_WINDOW to approve or dispute; after that anyone may autoRelease.
-     * @param agreementId The agreement to commit
-     * @param deliverableHash keccak256 of the delivered work
-     */
     function commitDeliverable(uint256 agreementId, bytes32 deliverableHash) external;
-
-    /**
-     * @notice Client approves delivery and releases escrow to provider.
-     *         Only callable while status is PENDING_VERIFICATION.
-     * @param agreementId The agreement to verify
-     */
     function verifyDeliverable(uint256 agreementId) external;
-
-    /**
-     * @notice If client does not act within VERIFY_WINDOW, anyone may trigger auto-release.
-     * @param agreementId The agreement to auto-release
-     */
     function autoRelease(uint256 agreementId) external;
-
-    /**
-     * @notice Opens a formal dispute only after remediation is exhausted, timed out,
-     *         or otherwise eligible for escalation under the remediation-first policy.
-     * @param agreementId The agreement to dispute
-     * @param reason Human/agent-readable reason
-     */
     function dispute(uint256 agreementId, string calldata reason) external;
-
-    /**
-     * @notice Opens a direct formal dispute only for explicit hard-fail conditions that bypass remediation.
-     * @param agreementId The agreement to dispute
-     * @param directReason Enumerated hard-fail reason allowing direct dispute
-     * @param reason Human/agent-readable case summary
-     */
     function directDispute(uint256 agreementId, DirectDisputeReason directReason, string calldata reason) external;
-
-    /**
-     * @notice Client cancels a PROPOSED agreement and retrieves escrow
-     * @param agreementId The agreement to cancel
-     */
     function cancel(uint256 agreementId) external;
-
 
     function requestRevision(
         uint256 agreementId,
@@ -242,6 +202,15 @@ interface IServiceAgreement {
         string calldata evidenceURI
     ) external;
 
+    function nominateArbitrator(uint256 agreementId, address arbitrator) external;
+    function castArbitrationVote(
+        uint256 agreementId,
+        ArbitrationVote vote,
+        uint256 providerAward,
+        uint256 clientAward
+    ) external;
+    function requestHumanEscalation(uint256 agreementId, string calldata reason) external;
+
     function resolveDisputeDetailed(
         uint256 agreementId,
         DisputeOutcome outcome,
@@ -254,10 +223,6 @@ interface IServiceAgreement {
     function getRemediationResponse(uint256 agreementId, uint256 index) external view returns (RemediationResponse memory);
     function getDisputeCase(uint256 agreementId) external view returns (DisputeCase memory);
     function getDisputeEvidence(uint256 agreementId, uint256 index) external view returns (DisputeEvidence memory);
-
-    /**
-     * @notice Returns a full agreement struct
-     * @param id The agreement ID
-     */
+    function getArbitrationCase(uint256 agreementId) external view returns (ArbitrationCase memory);
     function getAgreement(uint256 id) external view returns (Agreement memory);
 }

@@ -152,11 +152,13 @@ contract ServiceAgreementTest is Test {
         sa.accept(id);
 
         vm.prank(client);
-        sa.dispute(id, "Deliverables not as agreed");
+        sa.requestRevision(id, keccak256("feedback"), "ipfs://feedback", bytes32(0));
+        vm.warp(block.timestamp + 24 hours + 1);
+        vm.prank(client);
+        sa.escalateToDispute(id, "Deliverables not as agreed");
 
         IServiceAgreement.Agreement memory ag = sa.getAgreement(id);
         assertEq(uint256(ag.status), uint256(IServiceAgreement.Status.DISPUTED));
-        // Escrow still locked
         assertEq(address(sa).balance, PRICE);
     }
 
@@ -166,20 +168,22 @@ contract ServiceAgreementTest is Test {
         vm.prank(provider);
         sa.accept(id);
 
+        vm.prank(client);
+        sa.requestRevision(id, keccak256("feedback"), "ipfs://feedback", bytes32(0));
+        bytes32 transcript = sa.getRemediationCase(id).latestTranscriptHash;
         vm.prank(provider);
-        sa.dispute(id, "I delivered everything");
+        sa.respondToRevision(id, IServiceAgreement.ProviderResponseType.REQUEST_HUMAN_REVIEW, 0, keccak256("human"), "ipfs://human", transcript);
+        vm.prank(client);
+        sa.submitDisputeEvidence(id, IServiceAgreement.EvidenceType.DELIVERABLE, keccak256("e1"), "ipfs://e1");
 
         uint256 providerBefore = provider.balance;
 
-        // Owner resolves in provider's favour
         sa.resolveDispute(id, true);
 
         IServiceAgreement.Agreement memory ag = sa.getAgreement(id);
         assertEq(uint256(ag.status), uint256(IServiceAgreement.Status.FULFILLED));
         assertEq(provider.balance, providerBefore + PRICE);
         assertEq(address(sa).balance, 0);
-
-        // T-02: provider vindicated — trust score recorded (provider auto-initialized at 100, then +5 = 105)
         assertEq(trustReg.getScore(provider), trustReg.INITIAL_SCORE() + trustReg.INCREMENT());
     }
 
@@ -190,21 +194,22 @@ contract ServiceAgreementTest is Test {
         sa.accept(id);
 
         vm.prank(client);
-        sa.dispute(id, "Nothing was delivered");
+        sa.requestRevision(id, keccak256("feedback"), "ipfs://feedback", bytes32(0));
+        bytes32 transcript = sa.getRemediationCase(id).latestTranscriptHash;
+        vm.prank(provider);
+        sa.respondToRevision(id, IServiceAgreement.ProviderResponseType.REQUEST_HUMAN_REVIEW, 0, keccak256("human"), "ipfs://human", transcript);
+        vm.prank(client);
+        sa.submitDisputeEvidence(id, IServiceAgreement.EvidenceType.COMMUNICATION, keccak256("e1"), "ipfs://e1");
 
         uint256 clientBefore = client.balance;
         uint256 scoreBefore = trustReg.getScore(provider);
 
-        // Owner resolves in client's favour
         sa.resolveDispute(id, false);
 
         IServiceAgreement.Agreement memory ag = sa.getAgreement(id);
         assertEq(uint256(ag.status), uint256(IServiceAgreement.Status.CANCELLED));
         assertEq(client.balance, clientBefore + PRICE);
         assertEq(address(sa).balance, 0);
-
-        // T-02: provider failed — trust score decremented
-        // Provider was uninitialized (score 0), after anomaly recorded: initializes at 100 then subtracts 20 → 80
         assertLt(trustReg.getScore(provider), scoreBefore + trustReg.INITIAL_SCORE());
     }
 
@@ -455,13 +460,15 @@ contract ServiceAgreementTrustLivenessTest is Test {
     function test_ResolveDispute_FavorProvider_SucceedsEvenIfTrustRegistryReverts() public {
         uint256 id = _proposeAndAccept();
         vm.prank(client);
-        sa.dispute(id, "disputed");
+        sa.requestRevision(id, keccak256("feedback"), "ipfs://feedback", bytes32(0));
+        bytes32 transcript = sa.getRemediationCase(id).latestTranscriptHash;
+        vm.prank(provider);
+        sa.respondToRevision(id, IServiceAgreement.ProviderResponseType.REQUEST_HUMAN_REVIEW, 0, keccak256("human"), "ipfs://human", transcript);
+        vm.prank(client);
+        sa.submitDisputeEvidence(id, IServiceAgreement.EvidenceType.DELIVERABLE, keccak256("e1"), "ipfs://e1");
 
         uint256 providerBefore = provider.balance;
-
-        // Owner resolves in favor of provider — must not revert
         sa.resolveDispute(id, true);
-
         assertEq(provider.balance, providerBefore + PRICE);
     }
 
@@ -472,13 +479,15 @@ contract ServiceAgreementTrustLivenessTest is Test {
     function test_ResolveDispute_FavorClient_SucceedsEvenIfTrustRegistryReverts() public {
         uint256 id = _proposeAndAccept();
         vm.prank(client);
-        sa.dispute(id, "disputed");
+        sa.requestRevision(id, keccak256("feedback"), "ipfs://feedback", bytes32(0));
+        bytes32 transcript = sa.getRemediationCase(id).latestTranscriptHash;
+        vm.prank(provider);
+        sa.respondToRevision(id, IServiceAgreement.ProviderResponseType.REQUEST_HUMAN_REVIEW, 0, keccak256("human"), "ipfs://human", transcript);
+        vm.prank(client);
+        sa.submitDisputeEvidence(id, IServiceAgreement.EvidenceType.COMMUNICATION, keccak256("e1"), "ipfs://e1");
 
         uint256 clientBefore = client.balance;
-
-        // Owner resolves in favor of client — must not revert
         sa.resolveDispute(id, false);
-
         assertEq(client.balance, clientBefore + PRICE);
     }
 
@@ -492,33 +501,28 @@ contract ServiceAgreementTrustLivenessTest is Test {
     function test_DisputeTimeout_RefundsClient() public {
         uint256 id = _proposeAndAccept();
 
-        // Client raises a dispute
         vm.prank(client);
-        sa.dispute(id, "provider is unresponsive");
+        sa.requestRevision(id, keccak256("feedback"), "ipfs://feedback", bytes32(0));
+        vm.warp(block.timestamp + 24 hours + 1);
+        vm.prank(client);
+        sa.escalateToDispute(id, "provider is unresponsive");
 
         IServiceAgreement.Agreement memory ag = sa.getAgreement(id);
         assertEq(uint8(ag.status), uint8(IServiceAgreement.Status.DISPUTED));
-        uint256 disputedAt = ag.resolvedAt; // dispute() now sets resolvedAt = block.timestamp
+        uint256 disputedAt = ag.resolvedAt;
 
-        // Still within the 30-day window — must revert
         vm.warp(disputedAt + 30 days);
         vm.expectRevert("ServiceAgreement: dispute timeout not reached");
         sa.expiredDisputeRefund(id);
 
-        // Advance past the 30-day timeout
         vm.warp(disputedAt + 31 days);
 
         uint256 clientBefore = client.balance;
-
-        // Anyone can trigger the refund (caller is a third party here)
         address caller = address(0xCAFE);
         vm.prank(caller);
         sa.expiredDisputeRefund(id);
-
-        // Client receives the escrowed funds
         assertEq(client.balance, clientBefore + PRICE);
 
-        // Agreement is now CANCELLED
         ag = sa.getAgreement(id);
         assertEq(uint8(ag.status), uint8(IServiceAgreement.Status.CANCELLED));
     }

@@ -24,22 +24,33 @@ export const AGENT_REGISTRY_ABI = [
 ] as const;
 
 export const SERVICE_AGREEMENT_ABI = [
-  // Core functions
   "function propose(address provider, string serviceType, string description, uint256 price, address token, uint256 deadline, bytes32 deliverablesHash) external payable returns (uint256 agreementId)",
   "function accept(uint256 agreementId) external",
   "function fulfill(uint256 agreementId, bytes32 actualDeliverablesHash) external",
+  "function commitDeliverable(uint256 agreementId, bytes32 deliverableHash) external",
+  "function verifyDeliverable(uint256 agreementId) external",
+  "function autoRelease(uint256 agreementId) external",
   "function dispute(uint256 agreementId, string reason) external",
   "function directDispute(uint256 agreementId, uint8 directReason, string reason) external",
+  "function escalateToDispute(uint256 agreementId, string reason) external",
+  "function requestRevision(uint256 agreementId, bytes32 feedbackHash, string feedbackURI, bytes32 previousTranscriptHash) external",
+  "function respondToRevision(uint256 agreementId, uint8 responseType, uint256 proposedProviderPayout, bytes32 responseHash, string responseURI, bytes32 previousTranscriptHash) external",
+  "function submitDisputeEvidence(uint256 agreementId, uint8 evidenceType, bytes32 evidenceHash, string evidenceURI) external",
+  "function nominateArbitrator(uint256 agreementId, address arbitrator) external",
+  "function castArbitrationVote(uint256 agreementId, uint8 vote, uint256 providerAward, uint256 clientAward) external",
+  "function requestHumanEscalation(uint256 agreementId, string reason) external",
   "function cancel(uint256 agreementId) external",
   "function expiredCancel(uint256 agreementId) external",
   "function resolveDispute(uint256 agreementId, bool favorProvider) external",
+  "function resolveDisputeDetailed(uint256 agreementId, uint8 outcome, uint256 providerAward, uint256 clientAward) external",
   "function canDirectDispute(uint256 agreementId, uint8 directReason) external view returns (bool)",
-  // Getters
-  "function getAgreement(uint256 id) external view returns (tuple(uint256 id, address client, address provider, string serviceType, string description, uint256 price, address token, uint256 deadline, bytes32 deliverablesHash, uint8 status, uint256 createdAt, uint256 resolvedAt))",
+  "function getAgreement(uint256 id) external view returns (tuple(uint256 id, address client, address provider, string serviceType, string description, uint256 price, address token, uint256 deadline, bytes32 deliverablesHash, uint8 status, uint256 createdAt, uint256 resolvedAt, uint256 verifyWindowEnd, bytes32 committedHash))",
+  "function getDisputeCase(uint256 agreementId) external view returns (tuple(uint256 agreementId, uint256 openedAt, uint256 responseDeadlineAt, uint8 outcome, uint256 providerAward, uint256 clientAward, bool humanReviewRequested, uint256 evidenceCount))",
+  "function getDisputeEvidence(uint256 agreementId, uint256 index) external view returns (tuple(address submitter, uint8 evidenceType, bytes32 evidenceHash, string evidenceURI, uint256 timestamp))",
+  "function getArbitrationCase(uint256 agreementId) external view returns (tuple(uint256 agreementId, address[3] arbitrators, uint8 arbitratorCount, uint8 providerVotes, uint8 clientVotes, uint8 splitVotes, uint8 humanVotes, uint256 selectionDeadlineAt, uint256 decisionDeadlineAt, uint256 splitProviderAward, uint256 splitClientAward, bool finalized, bool humanBackstopUsed))",
   "function getAgreementsByClient(address client) external view returns (uint256[])",
   "function getAgreementsByProvider(address provider) external view returns (uint256[])",
   "function agreementCount() external view returns (uint256)",
-  // Events
   "event AgreementProposed(uint256 indexed id, address indexed client, address indexed provider, string serviceType, uint256 price, address token, uint256 deadline)",
   "event AgreementAccepted(uint256 indexed id, address indexed provider)",
   "event AgreementFulfilled(uint256 indexed id, address indexed provider, bytes32 deliverablesHash)",

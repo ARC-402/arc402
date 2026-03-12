@@ -3,6 +3,8 @@ import { SERVICE_AGREEMENT_ABI } from "./contracts";
 import {
   Agreement,
   AgreementStatus,
+  ArbitrationCase,
+  ArbitrationVote,
   DisputeCase,
   DisputeEvidence,
   DisputeOutcome,
@@ -91,6 +93,21 @@ export class ServiceAgreementClient {
     return tx.wait();
   }
 
+  async nominateArbitrator(agreementId: bigint, arbitrator: string) {
+    const tx = await this.contract.nominateArbitrator(agreementId, arbitrator);
+    return tx.wait();
+  }
+
+  async castArbitrationVote(agreementId: bigint, vote: ArbitrationVote, providerAward: bigint, clientAward: bigint) {
+    const tx = await this.contract.castArbitrationVote(agreementId, vote, providerAward, clientAward);
+    return tx.wait();
+  }
+
+  async requestHumanEscalation(agreementId: bigint, reason: string) {
+    const tx = await this.contract.requestHumanEscalation(agreementId, reason);
+    return tx.wait();
+  }
+
   async getAgreement(id: bigint): Promise<Agreement> {
     const raw = await this.contract.getAgreement(id);
     return {
@@ -124,6 +141,25 @@ export class ServiceAgreementClient {
   async getDisputeEvidence(id: bigint, index: bigint): Promise<DisputeEvidence> {
     const raw = await this.contract.getDisputeEvidence(id, index);
     return { submitter: raw.submitter, evidenceType: Number(raw.evidenceType) as EvidenceType, evidenceHash: raw.evidenceHash, evidenceURI: raw.evidenceURI, timestamp: BigInt(raw.timestamp) };
+  }
+
+  async getArbitrationCase(id: bigint): Promise<ArbitrationCase> {
+    const raw = await this.contract.getArbitrationCase(id);
+    return {
+      agreementId: BigInt(raw.agreementId),
+      arbitrators: [...raw.arbitrators],
+      arbitratorCount: Number(raw.arbitratorCount),
+      providerVotes: Number(raw.providerVotes),
+      clientVotes: Number(raw.clientVotes),
+      splitVotes: Number(raw.splitVotes),
+      humanVotes: Number(raw.humanVotes),
+      selectionDeadlineAt: BigInt(raw.selectionDeadlineAt),
+      decisionDeadlineAt: BigInt(raw.decisionDeadlineAt),
+      splitProviderAward: BigInt(raw.splitProviderAward),
+      splitClientAward: BigInt(raw.splitClientAward),
+      finalized: raw.finalized,
+      humanBackstopUsed: raw.humanBackstopUsed,
+    };
   }
 
   async getDisputeEvidenceAll(id: bigint): Promise<DisputeEvidence[]> {

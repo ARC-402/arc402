@@ -270,9 +270,14 @@ contract ServiceAgreementAttackTest is Test {
         attacker.setSecondAgreementId(id2);
         attacker.doAccept(id2);
 
-        // Dispute agreement 1
+        // Move agreement 1 into human backstop resolution path
         vm.prank(client);
-        sa.dispute(id1, "dispute");
+        sa.requestRevision(id1, keccak256("feedback"), "ipfs://feedback", bytes32(0));
+        bytes32 transcript = sa.getRemediationCase(id1).latestTranscriptHash;
+        vm.prank(address(attacker));
+        sa.respondToRevision(id1, IServiceAgreement.ProviderResponseType.REQUEST_HUMAN_REVIEW, 0, keccak256("human"), "ipfs://human", transcript);
+        vm.prank(client);
+        sa.submitDisputeEvidence(id1, IServiceAgreement.EvidenceType.DELIVERABLE, keccak256("e1"), "ipfs://e1");
 
         // Arm the reentrancy attack on resolve
         attacker.setAttacking(true);
@@ -284,10 +289,10 @@ contract ServiceAgreementAttackTest is Test {
         vm.expectRevert();
         sa.resolveDispute(id1, true);
 
-        // Verify state: dispute still active, no ETH moved
+        // Verify state: human-backstop stage unchanged, no ETH moved
         IServiceAgreement.Agreement memory ag1 = sa.getAgreement(id1);
-        assertEq(uint256(ag1.status), uint256(IServiceAgreement.Status.DISPUTED),
-            "Attack blocked: agreement remains DISPUTED");
+        assertEq(uint256(ag1.status), uint256(IServiceAgreement.Status.ESCALATED_TO_HUMAN),
+            "Attack blocked: agreement remains ESCALATED_TO_HUMAN");
         assertEq(address(sa).balance, 2 * PRICE, "Attack blocked: both escrows intact");
     }
 
@@ -418,9 +423,10 @@ contract ServiceAgreementAttackTest is Test {
         uint256 idB = _proposeETH(client, provider, PRICE, DEADLINE);
         vm.prank(provider); sa.accept(idB);
 
-        // Client disputes first
+        // Client disputes first via direct hard-fail path after deadline breach
+        vm.warp(block.timestamp + DEADLINE + 1);
         vm.prank(client);
-        sa.dispute(idB, "Preemptive dispute");
+        sa.directDispute(idB, IServiceAgreement.DirectDisputeReason.NO_DELIVERY, "Preemptive dispute");
 
         // Provider tries to fulfill — must revert (agreement now DISPUTED)
         vm.prank(provider);
@@ -520,14 +526,14 @@ contract ServiceAgreementAttackTest is Test {
         uint256 id = _proposeETH(client, provider, PRICE, DEADLINE);
 
         // Status is PROPOSED, not DISPUTED
-        vm.expectRevert("ServiceAgreement: not DISPUTED");
+        vm.expectRevert("ServiceAgreement: human escalation required");
         sa.resolveDispute(id, true); // owner calls this (test contract is owner)
 
         // Also test on ACCEPTED state
         vm.prank(provider);
         sa.accept(id);
 
-        vm.expectRevert("ServiceAgreement: not DISPUTED");
+        vm.expectRevert("ServiceAgreement: human escalation required");
         sa.resolveDispute(id, true);
 
         // Escrow intact
@@ -545,9 +551,10 @@ contract ServiceAgreementAttackTest is Test {
         uint256 id = _proposeETH(client, provider, PRICE, DEADLINE);
         vm.prank(provider); sa.accept(id);
 
-        // Client raises dispute
+        // Client raises direct hard-fail dispute after missed deadline
+        vm.warp(block.timestamp + DEADLINE + 1);
         vm.prank(client);
-        sa.dispute(id, "I'm not satisfied");
+        sa.directDispute(id, IServiceAgreement.DirectDisputeReason.NO_DELIVERY, "I'm not satisfied");
 
         // Provider attempts to fulfill — must revert
         vm.prank(provider);

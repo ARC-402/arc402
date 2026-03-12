@@ -24,6 +24,9 @@ contract ServiceAgreementTrack1Test is Test {
         registry = new TrustRegistryV2(address(0));
         sa = new ServiceAgreement(address(registry));
         registry.addUpdater(address(sa));
+        sa.setApprovedArbitrator(address(0xB1), true);
+        sa.setApprovedArbitrator(address(0xB2), true);
+        sa.setApprovedArbitrator(address(0xB3), true);
         vm.deal(client, 100 ether);
         vm.deal(provider, 10 ether);
     }
@@ -37,8 +40,9 @@ contract ServiceAgreementTrack1Test is Test {
 
     function test_DisputeSetsResolvedAt() public {
         uint256 id = _proposeAccept();
+        vm.warp(block.timestamp + 8 days);
         vm.prank(client);
-        sa.dispute(id, "broken");
+        sa.directDispute(id, IServiceAgreement.DirectDisputeReason.NO_DELIVERY, "broken");
         IServiceAgreement.Agreement memory ag = sa.getAgreement(id);
         assertEq(uint256(ag.status), uint256(IServiceAgreement.Status.DISPUTED));
         assertEq(ag.resolvedAt, block.timestamp);
@@ -122,9 +126,10 @@ contract ServiceAgreementTrack1Test is Test {
         uint256 id = _proposeAccept();
         vm.prank(client);
         sa.requestRevision(id, keccak256("f1"), "uri1", bytes32(0));
-        vm.warp(block.timestamp + 24 hours + 1);
+        bytes32 transcript = sa.getRemediationCase(id).latestTranscriptHash;
+
         vm.prank(provider);
-        sa.escalateToDispute(id, "escalated");
+        sa.respondToRevision(id, IServiceAgreement.ProviderResponseType.REQUEST_HUMAN_REVIEW, 0, keccak256("human"), "uri-human", transcript);
 
         vm.prank(client);
         sa.submitDisputeEvidence(id, IServiceAgreement.EvidenceType.DELIVERABLE, keccak256("e1"), "ipfs://e1");
@@ -133,6 +138,7 @@ contract ServiceAgreementTrack1Test is Test {
 
         IServiceAgreement.DisputeCase memory beforeResolution = sa.getDisputeCase(id);
         assertEq(beforeResolution.evidenceCount, 2);
+        assertTrue(beforeResolution.humanReviewRequested);
 
         uint256 providerBefore = provider.balance;
         uint256 clientBefore = client.balance;
@@ -154,6 +160,43 @@ contract ServiceAgreementTrack1Test is Test {
 
         assertEq(uint256(sa.getAgreement(id).status), uint256(IServiceAgreement.Status.ESCALATED_TO_HUMAN));
         assertTrue(sa.getDisputeCase(id).humanReviewRequested);
+    }
+
+    function test_PeerArbitration_MajoritySplitFinalizesExactPartialOutcome() public {
+        address arb1 = address(0xB1);
+        address arb2 = address(0xB2);
+        address arb3 = address(0xB3);
+
+        uint256 id = _proposeAccept();
+        vm.prank(client);
+        sa.requestRevision(id, keccak256("f1"), "uri1", bytes32(0));
+        vm.warp(block.timestamp + 24 hours + 1);
+        vm.prank(client);
+        sa.escalateToDispute(id, "peer arbitration needed");
+
+        vm.prank(client);
+        sa.submitDisputeEvidence(id, IServiceAgreement.EvidenceType.DELIVERABLE, keccak256("e1"), "ipfs://e1");
+
+        vm.prank(client);
+        sa.nominateArbitrator(id, arb1);
+        vm.prank(provider);
+        sa.nominateArbitrator(id, arb2);
+        vm.prank(client);
+        sa.nominateArbitrator(id, arb3);
+
+        assertEq(uint256(sa.getAgreement(id).status), uint256(IServiceAgreement.Status.ESCALATED_TO_ARBITRATION));
+
+        uint256 providerBefore = provider.balance;
+        uint256 clientBefore = client.balance;
+
+        vm.prank(arb1);
+        sa.castArbitrationVote(id, IServiceAgreement.ArbitrationVote.SPLIT, 0.4 ether, 0.6 ether);
+        vm.prank(arb2);
+        sa.castArbitrationVote(id, IServiceAgreement.ArbitrationVote.SPLIT, 0.4 ether, 0.6 ether);
+
+        assertEq(provider.balance, providerBefore + 0.4 ether);
+        assertEq(client.balance, clientBefore + 0.6 ether);
+        assertEq(uint256(sa.getAgreement(id).status), uint256(IServiceAgreement.Status.PARTIAL_SETTLEMENT));
     }
 }
 

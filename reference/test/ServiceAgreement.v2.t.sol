@@ -332,6 +332,7 @@ contract CommitRevealTest is Test {
 
         vm.prank(client);
         sa.requestRevision(id, keccak256("needs-fix"), "ipfs://feedback", bytes32(0));
+        vm.warp(block.timestamp + 24 hours + 1);
 
         vm.prank(provider);
         sa.escalateToDispute(id, "deadlocked after remediation started");

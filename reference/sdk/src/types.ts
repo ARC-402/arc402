@@ -246,6 +246,30 @@ export interface DisputeEvidence {
   timestamp: bigint;
 }
 
+export enum ArbitrationVote {
+  NONE = 0,
+  PROVIDER_WINS = 1,
+  CLIENT_REFUND = 2,
+  SPLIT = 3,
+  HUMAN_REVIEW_REQUIRED = 4,
+}
+
+export interface ArbitrationCase {
+  agreementId: bigint;
+  arbitrators: Address[];
+  arbitratorCount: number;
+  providerVotes: number;
+  clientVotes: number;
+  splitVotes: number;
+  humanVotes: number;
+  selectionDeadlineAt: bigint;
+  decisionDeadlineAt: bigint;
+  splitProviderAward: bigint;
+  splitClientAward: bigint;
+  finalized: boolean;
+  humanBackstopUsed: boolean;
+}
+
 export enum ReputationSignalType {
   ENDORSE = 0,
   WARN = 1,

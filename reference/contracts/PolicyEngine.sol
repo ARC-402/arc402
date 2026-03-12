@@ -107,12 +107,14 @@ contract PolicyEngine is IPolicyEngine {
     /// @notice Block a provider from being hired by this wallet.
     function addToBlocklist(address wallet, address provider) external onlyWalletOwnerOrWallet(wallet) {
         require(provider != address(0), "PolicyEngine: zero provider");
+        require(!_blocklist[wallet][provider], "PolicyEngine: already blocked");
         _blocklist[wallet][provider] = true;
         emit ProviderBlocked(wallet, provider);
     }
 
     /// @notice Remove a provider from the blocklist.
     function removeFromBlocklist(address wallet, address provider) external onlyWalletOwnerOrWallet(wallet) {
+        require(_blocklist[wallet][provider], "PolicyEngine: not blocked");
         _blocklist[wallet][provider] = false;
         emit ProviderUnblocked(wallet, provider);
     }

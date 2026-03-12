@@ -1,0 +1,3 @@
+PROVISIONAL-BASE-SHA: ce34123
+STATUS: NOT-FROZEN
+NOTE: ce34123 is the current clean commit base, but the intended release-candidate payload still includes uncommitted worktree changes. Record the final audited target SHA only after contracts/SDK/CLI/docs are recommitted from a clean checkout and verified.

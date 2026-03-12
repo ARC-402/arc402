@@ -20,10 +20,15 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     uint256 public constant VERIFY_WINDOW = 3 days;
     uint256 public constant DISPUTE_TIMEOUT = 30 days;
     uint256 public constant REMEDIATION_WINDOW = 24 hours;
+    uint256 public constant ARBITRATION_SELECTION_WINDOW = 3 days;
+    uint256 public constant ARBITRATION_DECISION_WINDOW = 7 days;
     uint8 public constant MAX_REMEDIATION_CYCLES = 2;
+    uint8 public constant ARBITRATOR_PANEL_SIZE = 3;
+    uint8 public constant ARBITRATOR_MAJORITY = 2;
 
     mapping(address => bool) public allowedTokens;
     mapping(address => bool) public legacyFulfillProviders;
+    mapping(address => bool) public approvedArbitrators;
     bool public legacyFulfillEnabled;
     uint256 public minimumTrustValue;
     uint256 private _nextId;
@@ -37,6 +42,9 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     mapping(uint256 => RemediationResponse[]) private _remediationResponses;
     mapping(uint256 => DisputeCase) private _disputeCases;
     mapping(uint256 => DisputeEvidence[]) private _disputeEvidence;
+    mapping(uint256 => ArbitrationCase) private _arbitrationCases;
+    mapping(uint256 => mapping(address => bool)) public disputeArbitratorNominated;
+    mapping(uint256 => mapping(address => bool)) public disputeArbitratorVoted;
 
     event AgreementProposed(uint256 indexed id, address indexed client, address indexed provider, string serviceType, uint256 price, address token, uint256 deadline);
     event AgreementAccepted(uint256 indexed id, address indexed provider);
@@ -61,9 +69,20 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     event RevisionResponded(uint256 indexed id, uint8 indexed cycle, address indexed provider, ProviderResponseType responseType, bytes32 transcriptHash);
     event DisputeEvidenceSubmitted(uint256 indexed id, uint256 indexed evidenceIndex, address indexed submitter, EvidenceType evidenceType, bytes32 evidenceHash);
     event DetailedDisputeResolved(uint256 indexed id, DisputeOutcome outcome, uint256 providerAward, uint256 clientAward);
+    event ArbitratorApprovalUpdated(address indexed arbitrator, bool approved);
+    event ArbitratorNominated(uint256 indexed id, address indexed nominator, address indexed arbitrator, uint8 panelSize);
+    event ArbitrationActivated(uint256 indexed id, uint256 selectionDeadlineAt, uint256 decisionDeadlineAt);
+    event ArbitrationVoteCast(uint256 indexed id, address indexed arbitrator, ArbitrationVote vote, uint256 providerAward, uint256 clientAward);
+    event HumanEscalationRequested(uint256 indexed id, address indexed requester, string reason);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "ServiceAgreement: not owner");
+        _;
+    }
+
+    modifier onlyParty(uint256 agreementId) {
+        Agreement storage ag = _get(agreementId);
+        require(msg.sender == ag.client || msg.sender == ag.provider, "ServiceAgreement: not a party");
         _;
     }
 
@@ -96,6 +115,11 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     function disallowToken(address token) external onlyOwner {
         allowedTokens[token] = false;
         emit TokenDisallowed(token);
+    }
+
+    function setApprovedArbitrator(address arbitrator, bool approved) external onlyOwner {
+        approvedArbitrators[arbitrator] = approved;
+        emit ArbitratorApprovalUpdated(arbitrator, approved);
     }
 
     function setMinimumTrustValue(uint256 value) external onlyOwner {
@@ -346,6 +370,91 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         _releaseEscrow(ag.token, ag.client, ag.price);
     }
 
+    function nominateArbitrator(uint256 agreementId, address arbitrator) external onlyParty(agreementId) {
+        Agreement storage ag = _get(agreementId);
+        require(ag.status == Status.DISPUTED || ag.status == Status.ESCALATED_TO_ARBITRATION || ag.status == Status.ESCALATED_TO_HUMAN, "ServiceAgreement: no active dispute");
+        require(approvedArbitrators[arbitrator], "ServiceAgreement: arbitrator not approved");
+        require(arbitrator != ag.client && arbitrator != ag.provider, "ServiceAgreement: conflicted arbitrator");
+
+        ArbitrationCase storage ac = _arbitrationCases[agreementId];
+        if (ac.selectionDeadlineAt == 0) {
+            ac.agreementId = agreementId;
+            ac.selectionDeadlineAt = block.timestamp + ARBITRATION_SELECTION_WINDOW;
+        }
+        require(block.timestamp <= ac.selectionDeadlineAt, "ServiceAgreement: arbitration selection closed");
+        require(!disputeArbitratorNominated[agreementId][arbitrator], "ServiceAgreement: arbitrator already nominated");
+        require(ac.arbitratorCount < ARBITRATOR_PANEL_SIZE, "ServiceAgreement: arbitration panel full");
+
+        ac.arbitrators[ac.arbitratorCount] = arbitrator;
+        ac.arbitratorCount += 1;
+        disputeArbitratorNominated[agreementId][arbitrator] = true;
+        ag.status = Status.ESCALATED_TO_ARBITRATION;
+
+        emit ArbitratorNominated(agreementId, msg.sender, arbitrator, ac.arbitratorCount);
+
+        if (ac.arbitratorCount == ARBITRATOR_PANEL_SIZE) {
+            ac.decisionDeadlineAt = block.timestamp + ARBITRATION_DECISION_WINDOW;
+            emit ArbitrationActivated(agreementId, ac.selectionDeadlineAt, ac.decisionDeadlineAt);
+        }
+    }
+
+    function castArbitrationVote(uint256 agreementId, ArbitrationVote vote, uint256 providerAward, uint256 clientAward) external {
+        Agreement storage ag = _get(agreementId);
+        require(ag.status == Status.ESCALATED_TO_ARBITRATION, "ServiceAgreement: not in arbitration");
+        ArbitrationCase storage ac = _arbitrationCases[agreementId];
+        require(ac.arbitratorCount == ARBITRATOR_PANEL_SIZE, "ServiceAgreement: panel incomplete");
+        require(_isPanelArbitrator(ac, msg.sender), "ServiceAgreement: not panel arbitrator");
+        require(!disputeArbitratorVoted[agreementId][msg.sender], "ServiceAgreement: vote already cast");
+        require(block.timestamp <= ac.decisionDeadlineAt, "ServiceAgreement: arbitration deadline passed");
+        require(vote != ArbitrationVote.NONE, "ServiceAgreement: invalid vote");
+
+        disputeArbitratorVoted[agreementId][msg.sender] = true;
+
+        if (vote == ArbitrationVote.PROVIDER_WINS) {
+            require(providerAward == ag.price && clientAward == 0, "ServiceAgreement: invalid provider vote split");
+            ac.providerVotes += 1;
+        } else if (vote == ArbitrationVote.CLIENT_REFUND) {
+            require(providerAward == 0 && clientAward == ag.price, "ServiceAgreement: invalid client vote split");
+            ac.clientVotes += 1;
+        } else if (vote == ArbitrationVote.SPLIT) {
+            require(providerAward + clientAward == ag.price, "ServiceAgreement: invalid split");
+            if (ac.splitVotes == 0) {
+                ac.splitProviderAward = providerAward;
+                ac.splitClientAward = clientAward;
+            } else {
+                require(ac.splitProviderAward == providerAward && ac.splitClientAward == clientAward, "ServiceAgreement: split mismatch");
+            }
+            ac.splitVotes += 1;
+        } else if (vote == ArbitrationVote.HUMAN_REVIEW_REQUIRED) {
+            require(providerAward == 0 && clientAward == 0, "ServiceAgreement: human review vote requires zero awards");
+            ac.humanVotes += 1;
+        }
+
+        emit ArbitrationVoteCast(agreementId, msg.sender, vote, providerAward, clientAward);
+
+        if (ac.providerVotes >= ARBITRATOR_MAJORITY) {
+            _finalizeDispute(agreementId, DisputeOutcome.PROVIDER_WINS, ag.price, 0, false);
+        } else if (ac.clientVotes >= ARBITRATOR_MAJORITY) {
+            _finalizeDispute(agreementId, DisputeOutcome.CLIENT_REFUND, 0, ag.price, false);
+        } else if (ac.splitVotes >= ARBITRATOR_MAJORITY) {
+            _finalizeDispute(agreementId, DisputeOutcome.PARTIAL_PROVIDER, ac.splitProviderAward, ac.splitClientAward, false);
+        } else if (ac.humanVotes >= ARBITRATOR_MAJORITY) {
+            _markHumanEscalation(agreementId);
+        }
+    }
+
+    function requestHumanEscalation(uint256 agreementId, string calldata reason) external onlyParty(agreementId) {
+        require(bytes(reason).length <= 512, "ServiceAgreement: reason too long");
+        Agreement storage ag = _get(agreementId);
+        require(ag.status == Status.DISPUTED || ag.status == Status.ESCALATED_TO_ARBITRATION || ag.status == Status.ESCALATED_TO_HUMAN, "ServiceAgreement: no active dispute");
+        ArbitrationCase storage ac = _arbitrationCases[agreementId];
+        bool arbitrationStalled = (ac.selectionDeadlineAt != 0 && ac.arbitratorCount < ARBITRATOR_PANEL_SIZE && block.timestamp > ac.selectionDeadlineAt)
+            || (ac.decisionDeadlineAt != 0 && block.timestamp > ac.decisionDeadlineAt);
+        require(arbitrationStalled || ag.status == Status.ESCALATED_TO_HUMAN, "ServiceAgreement: arbitration still active");
+        _markHumanEscalation(agreementId);
+        emit HumanEscalationRequested(agreementId, msg.sender, reason);
+    }
+
     function resolveDispute(uint256 agreementId, bool favorProvider) external onlyOwner {
         resolveDisputeDetailed(
             agreementId,
@@ -373,45 +482,10 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
 
     function resolveDisputeDetailed(uint256 agreementId, DisputeOutcome outcome, uint256 providerAward, uint256 clientAward) public onlyOwner nonReentrant {
         Agreement storage ag = _get(agreementId);
-        require(ag.status == Status.DISPUTED || ag.status == Status.ESCALATED_TO_HUMAN || ag.status == Status.ESCALATED_TO_ARBITRATION, "ServiceAgreement: not DISPUTED");
-        require(providerAward + clientAward == ag.price, "ServiceAgreement: invalid split");
-
-        DisputeCase storage dc = _disputeCases[agreementId];
-        if (dc.openedAt == 0) {
-            _ensureDisputeCase(agreementId, ag.status == Status.ESCALATED_TO_HUMAN);
-        }
-        dc.outcome = outcome;
-        dc.providerAward = providerAward;
-        dc.clientAward = clientAward;
-        dc.responseDeadlineAt = block.timestamp;
-
-        _closeRemediation(agreementId);
-        ag.resolvedAt = block.timestamp;
-
-        if (outcome == DisputeOutcome.PROVIDER_WINS) {
-            ag.status = Status.FULFILLED;
-            if (providerAward > 0) _releaseEscrow(ag.token, ag.provider, providerAward);
-            _updateTrust(agreementId, ag, true);
-        } else if (outcome == DisputeOutcome.CLIENT_REFUND) {
-            ag.status = Status.CANCELLED;
-            if (clientAward > 0) _releaseEscrow(ag.token, ag.client, clientAward);
-            _updateTrust(agreementId, ag, false);
-        } else if (outcome == DisputeOutcome.PARTIAL_PROVIDER || outcome == DisputeOutcome.PARTIAL_CLIENT) {
-            ag.status = Status.PARTIAL_SETTLEMENT;
-            if (providerAward > 0) _releaseEscrow(ag.token, ag.provider, providerAward);
-            if (clientAward > 0) _releaseEscrow(ag.token, ag.client, clientAward);
-        } else if (outcome == DisputeOutcome.MUTUAL_CANCEL) {
-            ag.status = Status.MUTUAL_CANCEL;
-            if (clientAward > 0) _releaseEscrow(ag.token, ag.client, clientAward);
-            if (providerAward > 0) _releaseEscrow(ag.token, ag.provider, providerAward);
-        } else if (outcome == DisputeOutcome.HUMAN_REVIEW_REQUIRED) {
-            ag.status = Status.ESCALATED_TO_HUMAN;
-            dc.humanReviewRequested = true;
-        } else {
-            revert("ServiceAgreement: unsupported outcome");
-        }
-
-        emit DetailedDisputeResolved(agreementId, outcome, providerAward, clientAward);
+        require(ag.status == Status.ESCALATED_TO_HUMAN, "ServiceAgreement: human escalation required");
+        require(_disputeCases[agreementId].humanReviewRequested, "ServiceAgreement: human review not requested");
+        require(_disputeEvidence[agreementId].length > 0, "ServiceAgreement: evidence required");
+        _finalizeDispute(agreementId, outcome, providerAward, clientAward, true);
     }
 
     function expiredDisputeRefund(uint256 agreementId) external nonReentrant {
@@ -449,6 +523,10 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
 
     function getDisputeEvidence(uint256 agreementId, uint256 index) external view returns (DisputeEvidence memory) {
         return _disputeEvidence[agreementId][index];
+    }
+
+    function getArbitrationCase(uint256 agreementId) external view returns (ArbitrationCase memory) {
+        return _arbitrationCases[agreementId];
     }
 
     function getAgreementsByClient(address client) external view returns (uint256[] memory) { return _byClient[client]; }
@@ -511,6 +589,65 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         } else if (humanReviewRequested) {
             dc.humanReviewRequested = true;
         }
+    }
+
+    function _markHumanEscalation(uint256 agreementId) internal {
+        Agreement storage ag = _get(agreementId);
+        _ensureDisputeCase(agreementId, true);
+        ag.status = Status.ESCALATED_TO_HUMAN;
+    }
+
+    function _finalizeDispute(uint256 agreementId, DisputeOutcome outcome, uint256 providerAward, uint256 clientAward, bool humanBackstopUsed) internal {
+        Agreement storage ag = _get(agreementId);
+        require(ag.status == Status.DISPUTED || ag.status == Status.ESCALATED_TO_HUMAN || ag.status == Status.ESCALATED_TO_ARBITRATION, "ServiceAgreement: not DISPUTED");
+        require(providerAward + clientAward == ag.price || outcome == DisputeOutcome.HUMAN_REVIEW_REQUIRED, "ServiceAgreement: invalid split");
+
+        DisputeCase storage dc = _disputeCases[agreementId];
+        if (dc.openedAt == 0) {
+            _ensureDisputeCase(agreementId, ag.status == Status.ESCALATED_TO_HUMAN);
+        }
+        dc.outcome = outcome;
+        dc.providerAward = providerAward;
+        dc.clientAward = clientAward;
+        dc.responseDeadlineAt = block.timestamp;
+
+        ArbitrationCase storage ac = _arbitrationCases[agreementId];
+        ac.finalized = outcome != DisputeOutcome.HUMAN_REVIEW_REQUIRED;
+        ac.humanBackstopUsed = humanBackstopUsed;
+
+        _closeRemediation(agreementId);
+        ag.resolvedAt = block.timestamp;
+
+        if (outcome == DisputeOutcome.PROVIDER_WINS) {
+            ag.status = Status.FULFILLED;
+            if (providerAward > 0) _releaseEscrow(ag.token, ag.provider, providerAward);
+            _updateTrust(agreementId, ag, true);
+        } else if (outcome == DisputeOutcome.CLIENT_REFUND) {
+            ag.status = Status.CANCELLED;
+            if (clientAward > 0) _releaseEscrow(ag.token, ag.client, clientAward);
+            _updateTrust(agreementId, ag, false);
+        } else if (outcome == DisputeOutcome.PARTIAL_PROVIDER || outcome == DisputeOutcome.PARTIAL_CLIENT) {
+            ag.status = Status.PARTIAL_SETTLEMENT;
+            if (providerAward > 0) _releaseEscrow(ag.token, ag.provider, providerAward);
+            if (clientAward > 0) _releaseEscrow(ag.token, ag.client, clientAward);
+        } else if (outcome == DisputeOutcome.MUTUAL_CANCEL) {
+            ag.status = Status.MUTUAL_CANCEL;
+            if (clientAward > 0) _releaseEscrow(ag.token, ag.client, clientAward);
+            if (providerAward > 0) _releaseEscrow(ag.token, ag.provider, providerAward);
+        } else if (outcome == DisputeOutcome.HUMAN_REVIEW_REQUIRED) {
+            _markHumanEscalation(agreementId);
+        } else {
+            revert("ServiceAgreement: unsupported outcome");
+        }
+
+        emit DetailedDisputeResolved(agreementId, outcome, providerAward, clientAward);
+    }
+
+    function _isPanelArbitrator(ArbitrationCase storage ac, address arbitrator) internal view returns (bool) {
+        for (uint256 i = 0; i < ac.arbitratorCount; i++) {
+            if (ac.arbitrators[i] == arbitrator) return true;
+        }
+        return false;
     }
 
     function _closeRemediation(uint256 agreementId) internal {
