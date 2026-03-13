@@ -396,6 +396,7 @@ contract ARC402Wallet is ReentrancyGuard {
         _policyEngine().recordSpend(address(this), category, amount, activeContextId);
         _intentAttestation().consume(attestationId);
         emit SettlementProposed(recipientWallet, amount, attestationId);
+        // slither-disable-next-line unused-return
         _settlementCoordinator().propose(
             address(this),
             recipientWallet,
@@ -458,7 +459,7 @@ contract ARC402Wallet is ReentrancyGuard {
 
         // 2. Per-tx ERC-20 approval — NOT infinite
         if (params.approvalToken != address(0) && params.maxApprovalAmount > 0) {
-            IERC20(params.approvalToken).approve(params.target, params.maxApprovalAmount);
+            IERC20(params.approvalToken).forceApprove(params.target, params.maxApprovalAmount);
         }
 
         // 3. Call target
@@ -468,7 +469,7 @@ contract ARC402Wallet is ReentrancyGuard {
 
         // 4. Reset approval to 0 (prevent residual allowance)
         if (params.approvalToken != address(0) && params.maxApprovalAmount > 0) {
-            IERC20(params.approvalToken).approve(params.target, 0);
+            IERC20(params.approvalToken).forceApprove(params.target, 0);
         }
 
         // 5. Slippage check — only if caller specified a minimum return value
