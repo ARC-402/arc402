@@ -94,6 +94,12 @@ contract PolicyEngine is IPolicyEngine {
     /// @dev Per-wallet allowed NFT contracts (ERC-721 / ERC-1155).
     mapping(address => EnumerableSet.AddressSet) private _allowedNFTContracts;
 
+    // ─── Approval Tracking ────────────────────────────────────────────────────
+
+    /// @notice Outstanding ERC-20 approval amounts per wallet per token.
+    ///         Updated whenever the wallet calls approve() via executeContractCall.
+    mapping(address => mapping(address => uint256)) public outstandingApprovals;
+
     // ─── Blocklist ───────────────────────────────────────────────────────────
 
     /// @notice wallet → provider → blocked
@@ -127,6 +133,9 @@ contract PolicyEngine is IPolicyEngine {
     // Fix 2 events
     event SpendFrozen(address indexed wallet, address indexed by);
     event SpendUnfrozen(address indexed wallet, address indexed by);
+
+    // Approval tracking event
+    event ApprovalRecorded(address indexed wallet, address indexed token, uint256 amount);
 
     // Fix 4 events
     event CapReductionQueued(address indexed wallet, string category, uint256 newCap, uint256 effectiveAt);
@@ -365,6 +374,49 @@ contract PolicyEngine is IPolicyEngine {
         }
 
         emit SpendRecorded(wallet, category, amount, contextId);
+    }
+
+    // ─── Approval Tracking ────────────────────────────────────────────────────
+
+    /// @notice Validate a proposed ERC-20 approve() call against policy.
+    ///         Infinite (MAX_UINT256) approvals are always rejected.
+    ///         If maxSpendPerHour is configured, large approvals are checked against it.
+    // slither-disable-next-line timestamp
+    function validateApproval(
+        address wallet,
+        address token,
+        uint256 amount
+    ) external view returns (bool valid, string memory reason) {
+        // Hard block on frozen wallets
+        require(!spendFrozen[wallet], "PolicyEngine: spend frozen");
+
+        // Never allow infinite approvals — this is the primary bypass vector
+        if (amount == type(uint256).max) {
+            return (false, "PolicyEngine: infinite approval rejected");
+        }
+
+        // If a per-hour spend cap is configured, treat approval as a virtual spend
+        if (maxSpendPerHour[wallet] > 0) {
+            if (_getEffectiveHourlySpend(wallet) + amount > maxSpendPerHour[wallet]) {
+                return (false, "PolicyEngine: approval exceeds hourly spend limit");
+            }
+        }
+
+        // Suppress unused variable warning — token is used as the subject of the approval,
+        // retained as a parameter for future per-token limit checks.
+        token;
+
+        return (true, "");
+    }
+
+    /// @notice Record an ERC-20 approval. Counts against the velocity window.
+    ///         Only callable by the wallet itself or its registered owner.
+    // slither-disable-next-line timestamp
+    function recordApproval(address wallet, address token, uint256 amount) external {
+        require(msg.sender == wallet || msg.sender == walletOwners[wallet], "PolicyEngine: not authorized");
+        _recordVelocitySpend(wallet, amount);
+        outstandingApprovals[wallet][token] = amount;
+        emit ApprovalRecorded(wallet, token, amount);
     }
 
     // ─── Fix 2: Emergency freeze ──────────────────────────────────────────────

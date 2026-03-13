@@ -22,7 +22,7 @@ export function registerWalletCommands(program: Command): void {
 
   // ─── status ────────────────────────────────────────────────────────────────
 
-  wallet.command("status").description("Show address, balances, contract wallet, and trust score").option("--json").action(async (opts) => {
+  wallet.command("status").description("Show address, balances, contract wallet, guardian, and frozen status").option("--json").action(async (opts) => {
     const config = loadConfig();
     const { provider, address } = await getClient(config);
     if (!address) throw new Error("No wallet configured");
@@ -34,6 +34,20 @@ export function registerWalletCommands(program: Command): void {
       usdc.balanceOf(address),
       trust.getScore(address),
     ]);
+
+    // Query contract wallet for frozen/guardian state if deployed
+    let contractFrozen: boolean | null = null;
+    let contractGuardian: string | null = null;
+    if (config.walletContractAddress) {
+      try {
+        const walletContract = new ethers.Contract(config.walletContractAddress, ARC402_WALLET_GUARDIAN_ABI, provider);
+        [contractFrozen, contractGuardian] = await Promise.all([
+          walletContract.frozen(),
+          walletContract.guardian(),
+        ]);
+      } catch { /* contract may not be deployed yet */ }
+    }
+
     const payload = {
       address,
       network: config.network,
@@ -42,12 +56,17 @@ export function registerWalletCommands(program: Command): void {
       trustScore: score.score,
       trustTier: getTrustTier(score.score),
       walletContractAddress: config.walletContractAddress ?? null,
+      frozen: contractFrozen,
+      guardian: contractGuardian,
+      guardianAddress: config.guardianAddress ?? null,
     };
     if (opts.json) {
       console.log(JSON.stringify(payload, null, 2));
     } else {
       console.log(`${payload.address}\nETH=${payload.ethBalance}\nUSDC=${payload.usdcBalance}\nTrust=${payload.trustScore} ${payload.trustTier}`);
       if (payload.walletContractAddress) console.log(`Contract=${payload.walletContractAddress}`);
+      if (contractFrozen !== null) console.log(`Frozen=${contractFrozen}`);
+      if (contractGuardian && contractGuardian !== ethers.ZeroAddress) console.log(`Guardian=${contractGuardian}`);
     }
   });
 
@@ -200,6 +219,7 @@ export function registerWalletCommands(program: Command): void {
         console.log(`ARC402Wallet deployed at: ${walletAddress}`);
         console.log(`Owner: ${account} (your phone wallet)`);
         console.log(`Your wallet contract is ready for policy enforcement`);
+        console.log(`\nNext: run 'arc402 wallet set-guardian' to configure the emergency guardian key.`);
       } else {
         console.warn("⚠ WalletConnect not configured. Using stored private key (insecure).");
         console.warn("  Run `arc402 config set walletConnectProjectId <id>` to enable phone wallet signing.");
@@ -222,9 +242,22 @@ export function registerWalletCommands(program: Command): void {
           console.error("Could not find WalletCreated event in receipt. Check the transaction on-chain.");
           process.exit(1);
         }
+
+        // Generate guardian key (separate from hot key) and call setGuardian
+        const guardianWallet = ethers.Wallet.createRandom();
         config.walletContractAddress = walletAddress;
+        config.guardianPrivateKey = guardianWallet.privateKey;
+        config.guardianAddress = guardianWallet.address;
         saveConfig(config);
+
+        // Call setGuardian on the deployed wallet
+        const walletContract = new ethers.Contract(walletAddress, ARC402_WALLET_GUARDIAN_ABI, signer);
+        const setGuardianTx = await walletContract.setGuardian(guardianWallet.address);
+        await setGuardianTx.wait();
+
         console.log(`ARC402Wallet deployed at: ${walletAddress}`);
+        console.log(`Guardian key generated: ${guardianWallet.address}`);
+        console.log(`Guardian private key saved to config (keep it safe — used for emergency freeze only)`);
         console.log(`Your wallet contract is ready for policy enforcement`);
       }
     });
@@ -313,27 +346,124 @@ export function registerWalletCommands(program: Command): void {
       }
     });
 
-  // ─── freeze / unfreeze ─────────────────────────────────────────────────────
+  // ─── freeze (guardian key — emergency wallet freeze) ──────────────────────
+  //
+  // Uses the guardian private key from config to call ARC402Wallet.freeze() or
+  // ARC402Wallet.freezeAndDrain() directly on the wallet contract.
+  // No human approval needed — designed for immediate AI-initiated emergency response.
 
-  wallet.command("freeze <walletAddress>")
-    .description("Freeze spend for a wallet. Callable by the wallet, its owner, or an authorized freeze agent. Use immediately if suspicious activity is detected.")
+  wallet.command("freeze")
+    .description("Emergency freeze via guardian key. Use immediately if suspicious activity is detected. Owner must unfreeze.")
+    .option("--drain", "Also drain all ETH to owner address (use when machine compromise is suspected)")
+    .option("--json")
+    .action(async (opts) => {
+      const config = loadConfig();
+      if (!config.walletContractAddress) {
+        console.error("walletContractAddress not set in config. Run `arc402 wallet deploy` first.");
+        process.exit(1);
+      }
+      if (!config.guardianPrivateKey) {
+        console.error("guardianPrivateKey not set in config. Guardian key was generated during `arc402 wallet deploy`.");
+        process.exit(1);
+      }
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+      const guardianSigner = new ethers.Wallet(config.guardianPrivateKey, provider);
+      const walletContract = new ethers.Contract(config.walletContractAddress, ARC402_WALLET_GUARDIAN_ABI, guardianSigner);
+
+      let tx;
+      if (opts.drain) {
+        console.log("Triggering freeze-and-drain via guardian key...");
+        tx = await walletContract.freezeAndDrain();
+      } else {
+        console.log("Triggering emergency freeze via guardian key...");
+        tx = await walletContract.freeze();
+      }
+      const receipt = await tx.wait();
+
+      if (opts.json) {
+        console.log(JSON.stringify({ txHash: receipt.hash, walletAddress: config.walletContractAddress, drained: !!opts.drain }));
+      } else {
+        console.log(`Wallet ${config.walletContractAddress} is now FROZEN`);
+        if (opts.drain) console.log("All ETH drained to owner.");
+        console.log(`Tx: ${receipt.hash}`);
+        console.log(`\nOwner must unfreeze: arc402 wallet unfreeze`);
+      }
+    });
+
+  // ─── unfreeze (owner key — requires WalletConnect or hot key) ─────────────
+
+  wallet.command("unfreeze")
+    .description("Unfreeze wallet contract. Only the owner can unfreeze — guardian cannot.")
+    .option("--json")
+    .action(async (opts) => {
+      const config = loadConfig();
+      if (!config.walletContractAddress) {
+        console.error("walletContractAddress not set in config. Run `arc402 wallet deploy` first.");
+        process.exit(1);
+      }
+      const { signer } = await requireSigner(config);
+      const walletContract = new ethers.Contract(config.walletContractAddress, ARC402_WALLET_GUARDIAN_ABI, signer);
+      const tx = await walletContract.unfreeze();
+      const receipt = await tx.wait();
+      if (opts.json) {
+        console.log(JSON.stringify({ txHash: receipt.hash, walletAddress: config.walletContractAddress }));
+      } else {
+        console.log(`Wallet ${config.walletContractAddress} unfrozen.`);
+        console.log(`Tx: ${receipt.hash}`);
+      }
+    });
+
+  // ─── set-guardian ──────────────────────────────────────────────────────────
+
+  wallet.command("set-guardian")
+    .description("Generate a new guardian key and register it on the wallet contract (owner signs)")
+    .option("--guardian-key <key>", "Use an existing private key as the guardian (optional)")
+    .action(async (opts) => {
+      const config = loadConfig();
+      if (!config.walletContractAddress) {
+        console.error("walletContractAddress not set in config. Run `arc402 wallet deploy` first.");
+        process.exit(1);
+      }
+      const { signer } = await requireSigner(config);
+      let guardianWallet: ethers.Wallet;
+      if (opts.guardianKey) {
+        guardianWallet = new ethers.Wallet(opts.guardianKey);
+      } else {
+        guardianWallet = ethers.Wallet.createRandom();
+        console.log("Generated new guardian key.");
+      }
+      const walletContract = new ethers.Contract(config.walletContractAddress, ARC402_WALLET_GUARDIAN_ABI, signer);
+      const tx = await walletContract.setGuardian(guardianWallet.address);
+      await tx.wait();
+      config.guardianPrivateKey = guardianWallet.privateKey;
+      config.guardianAddress = guardianWallet.address;
+      saveConfig(config);
+      console.log(`Guardian set to: ${guardianWallet.address}`);
+      console.log(`Guardian private key saved to config.`);
+      console.log(`WARN: The guardian key can freeze your wallet. Store it separately from your hot key.`);
+    });
+
+  // ─── policy-engine freeze / unfreeze (legacy — for PolicyEngine-level freeze) ──
+
+  wallet.command("freeze-policy <walletAddress>")
+    .description("Freeze PolicyEngine spend for a wallet address (authorized freeze agents only)")
     .action(async (walletAddress) => {
       const config = loadConfig();
       if (!config.policyEngineAddress) throw new Error("policyEngineAddress missing in config");
       const { signer } = await requireSigner(config);
       const client = new PolicyClient(config.policyEngineAddress, signer);
       await client.freezeSpend(walletAddress);
-      console.log(`wallet ${walletAddress} spend frozen`);
+      console.log(`wallet ${walletAddress} spend frozen (PolicyEngine)`);
     });
 
-  wallet.command("unfreeze <walletAddress>")
-    .description("Unfreeze spend for a wallet. Only callable by the wallet or its registered owner.")
+  wallet.command("unfreeze-policy <walletAddress>")
+    .description("Unfreeze PolicyEngine spend for a wallet. Only callable by the wallet or its registered owner.")
     .action(async (walletAddress) => {
       const config = loadConfig();
       if (!config.policyEngineAddress) throw new Error("policyEngineAddress missing in config");
       const { signer } = await requireSigner(config);
       const client = new PolicyClient(config.policyEngineAddress, signer);
       await client.unfreeze(walletAddress);
-      console.log(`wallet ${walletAddress} spend unfrozen`);
+      console.log(`wallet ${walletAddress} spend unfrozen (PolicyEngine)`);
     });
 }

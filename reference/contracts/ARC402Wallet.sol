@@ -26,6 +26,12 @@ interface IDefiPolicy {
         address target,
         uint256 value
     ) external view returns (bool valid, string memory reason);
+
+    function validateApproval(
+        address wallet,
+        address token,
+        uint256 amount
+    ) external view returns (bool valid, string memory reason);
 }
 
 contract ARC402Wallet is ReentrancyGuard {
@@ -47,6 +53,12 @@ contract ARC402Wallet is ReentrancyGuard {
     /// @notice Address allowed to call executeTokenSpend on behalf of the owner.
     ///         Set by owner via setAuthorizedInterceptor(). Used by X402Interceptor.
     address public authorizedInterceptor;
+
+    // ─── Guardian State ───────────────────────────────────────────────────────
+
+    /// @notice Emergency freeze guardian. Can only call freeze() and freezeAndDrain().
+    ///         Held by the AI agent. Cannot unfreeze — only owner can unfreeze.
+    address public guardian;
 
     // ─── Circuit Breaker State ────────────────────────────────────────────────
 
@@ -85,6 +97,7 @@ contract ARC402Wallet is ReentrancyGuard {
     event SettlementProposed(address indexed recipientWallet, uint256 amount, bytes32 attestationId);
     event WalletFrozen(address indexed by, string reason, uint256 timestamp);
     event WalletUnfrozen(address indexed by, uint256 timestamp);
+    event GuardianUpdated(address indexed newGuardian);
     event VelocityLimitUpdated(uint256 newLimit);
     event InterceptorUpdated(address indexed interceptor);
     event ContractCallExecuted(address indexed target, uint256 value, bytes data, uint256 returnValue);
@@ -176,8 +189,17 @@ contract ARC402Wallet is ReentrancyGuard {
         emit InterceptorUpdated(interceptor);
     }
 
+    // ─── Guardian Management ──────────────────────────────────────────────────
+
+    /// @notice Update guardian address. Only owner can change guardian.
+    function setGuardian(address _guardian) external onlyOwner {
+        guardian = _guardian;
+        emit GuardianUpdated(_guardian);
+    }
+
     // ─── Circuit Breaker ──────────────────────────────────────────────────────
 
+    /// @notice Owner-initiated freeze with a reason string.
     function freeze(string calldata reason) external onlyOwner {
         require(!frozen, "ARC402: already frozen");
         frozen = true;
@@ -186,6 +208,37 @@ contract ARC402Wallet is ReentrancyGuard {
         emit WalletFrozen(msg.sender, reason, block.timestamp);
     }
 
+    /// @notice Emergency freeze. Can only be called by guardian.
+    ///         Guardian is the AI agent's designated emergency key.
+    ///         Guardian cannot unfreeze — only owner can.
+    function freeze() external {
+        require(guardian != address(0), "ARC402: guardian not set");
+        require(msg.sender == guardian, "ARC402: not guardian");
+        frozen = true;
+        frozenAt = block.timestamp;
+        frozenBy = msg.sender;
+        emit WalletFrozen(msg.sender, "guardian emergency freeze", block.timestamp);
+    }
+
+    /// @notice Emergency freeze with fund extraction.
+    ///         Freezes wallet AND transfers all ETH balance to owner.
+    ///         Use when machine compromise is suspected.
+    function freezeAndDrain() external {
+        require(guardian != address(0), "ARC402: guardian not set");
+        require(msg.sender == guardian, "ARC402: not guardian");
+        frozen = true;
+        frozenAt = block.timestamp;
+        frozenBy = msg.sender;
+        emit WalletFrozen(msg.sender, "guardian freeze-and-drain", block.timestamp);
+
+        uint256 balance = address(this).balance;
+        if (balance > 0) {
+            (bool ok,) = owner.call{value: balance}("");
+            require(ok, "ARC402: drain failed");
+        }
+    }
+
+    /// @notice Unfreeze. Only owner can unfreeze — guardian cannot.
     function unfreeze() external onlyOwner {
         require(frozen, "ARC402: not frozen");
         frozen = false;
@@ -456,6 +509,25 @@ contract ARC402Wallet is ReentrancyGuard {
             params.value
         );
         require(valid, reason);
+
+        // 1b. Detect ERC-20 approve() calls and validate approval amount against policy.
+        //     approve(address,uint256) selector = 0x095ea7b3
+        //     ABI layout: [0:4]=selector [4:36]=spender [36:68]=amount
+        if (params.data.length >= 68) {
+            bytes4 sel;
+            uint256 approvalAmount;
+            bytes calldata d = params.data;
+            assembly {
+                sel := calldataload(d.offset)
+                approvalAmount := calldataload(add(d.offset, 36))
+            }
+            if (sel == bytes4(0x095ea7b3)) {
+                (bool approveOk, string memory approveReason) = IDefiPolicy(registry.policyEngine()).validateApproval(
+                    address(this), params.target, approvalAmount
+                );
+                require(approveOk, approveReason);
+            }
+        }
 
         // 2. Per-tx ERC-20 approval — NOT infinite
         if (params.approvalToken != address(0) && params.maxApprovalAmount > 0) {
