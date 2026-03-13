@@ -92,6 +92,7 @@ blocklist
 blocklist
   .command("list")
   .description("List all addresses on your blocklist (scans on-chain events)")
+  .option("--from-block <n>", "Start block for event log query (default: latest-9000 to stay within public RPC limits)")
   .option("--json")
   .action(async (opts) => {
     const config = loadConfig();
@@ -103,9 +104,12 @@ blocklist
     const { address: wallet } = await requireSigner(config);
     const contract = getPolicyEngine(config.policyEngineAddress, provider);
 
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock = opts.fromBlock !== undefined ? parseInt(opts.fromBlock, 10) : Math.max(0, latestBlock - 9000);
+
     const [blockedEvents, unblockedEvents] = await Promise.all([
-      contract.queryFilter(contract.filters.ProviderBlocked(wallet)),
-      contract.queryFilter(contract.filters.ProviderUnblocked(wallet)),
+      contract.queryFilter(contract.filters.ProviderBlocked(wallet), fromBlock),
+      contract.queryFilter(contract.filters.ProviderUnblocked(wallet), fromBlock),
     ]);
     const unblocked = new Set(
       unblockedEvents.map((e) => (e as ethers.EventLog).args.provider.toLowerCase())
@@ -193,6 +197,7 @@ shortlist
   .command("list")
   .description("List shortlisted providers, optionally filtered by capability")
   .option("--capability <name>", "Filter by capability name")
+  .option("--from-block <n>", "Start block for event log query (default: latest-9000 to stay within public RPC limits)")
   .option("--json")
   .action(async (opts) => {
     const config = loadConfig();
@@ -213,9 +218,11 @@ shortlist
     }
 
     // No capability filter — reconstruct from events
+    const latestBlock = await provider.getBlockNumber();
+    const fromBlock = opts.fromBlock !== undefined ? parseInt(opts.fromBlock, 10) : Math.max(0, latestBlock - 9000);
     const [preferredEvents, unpreferredEvents] = await Promise.all([
-      contract.queryFilter(contract.filters.ProviderPreferred(wallet)),
-      contract.queryFilter(contract.filters.ProviderUnpreferred(wallet)),
+      contract.queryFilter(contract.filters.ProviderPreferred(wallet), fromBlock),
+      contract.queryFilter(contract.filters.ProviderUnpreferred(wallet), fromBlock),
     ]);
     const removed = new Set(
       unpreferredEvents.map((e) => {

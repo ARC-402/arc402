@@ -15,8 +15,8 @@ export function registerHireCommand(program: Command): void {
     .requiredOption("--agent <address>")
     .requiredOption("--task <description>")
     .requiredOption("--service-type <type>")
-    .option("--max <amount>", "Max price (required unless --session is provided)")
-    .option("--deadline <duration>", "Deadline duration (required unless --session is provided)")
+    .option("--max <amount>", "Max price in wei (e.g. 1000000000000000) or ETH (e.g. 0.001eth) or USDC (e.g. 1USDC). Required unless --session is provided.")
+    .option("--deadline <duration>", "Deadline as duration (1h, 30m, 7d) or absolute ISO date (2026-04-01). Required unless --session is provided.")
     .option("--token <token>", "eth or usdc", "eth")
     .option("--deliverable-spec <filepath>")
     .option("--session <sessionId>", "Load agreed price and deadline from a completed negotiation session")
@@ -39,15 +39,26 @@ export function registerHireCommand(program: Command): void {
         deadlineArg = session.agreedDeadline;
         transcriptHash = session.transcriptHash;
       } else {
-        if (!opts.max) throw new Error("--max is required when --session is not provided");
-        if (!opts.deadline) throw new Error("--deadline is required when --session is not provided");
+        if (!opts.max) throw new Error("--max is required when --session is not provided. Examples: 0.001eth, 1000000000000000 (wei), 1USDC");
+        if (!opts.deadline) throw new Error("--deadline is required when --session is not provided. Examples: 1h, 30m, 7d, 2026-04-01");
         maxAmount = opts.max;
         deadlineArg = opts.deadline;
       }
 
+      // Normalise --max: strip trailing 'eth' or 'USDC' suffix and convert to correct unit
       const useUsdc = String(opts.token).toLowerCase() === "usdc";
+      const ethSuffix = /^(\d+(?:\.\d+)?)eth$/i.exec(maxAmount);
+      const usdcSuffix = /^(\d+(?:\.\d+)?)usdc$/i.exec(maxAmount);
+      if (ethSuffix) maxAmount = String(BigInt(Math.round(parseFloat(ethSuffix[1]) * 1e18)));
+      else if (usdcSuffix) maxAmount = usdcSuffix[1]; // keep decimal for USDC path
       const token = useUsdc ? getUsdcAddress(config) : ethers.ZeroAddress;
-      const price = useUsdc ? BigInt(Math.round(Number(maxAmount) * 1_000_000)) : BigInt(maxAmount);
+      let price: bigint;
+      try {
+        price = useUsdc ? BigInt(Math.round(Number(maxAmount) * 1_000_000)) : BigInt(maxAmount);
+      } catch {
+        throw new Error(`Invalid --max value "${opts.max}". Use wei (1000000000000000), ETH (0.001eth), or USDC (1USDC)`);
+      }
+      if (price <= 0n) throw new Error(`--max must be greater than zero`);
 
       if (useUsdc) {
         const usdc = new ethers.Contract(

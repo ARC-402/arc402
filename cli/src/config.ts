@@ -19,18 +19,19 @@ export interface Arc402Config {
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".arc402");
-const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+const CONFIG_PATH = process.env.ARC402_CONFIG || path.join(CONFIG_DIR, "config.json");
 
 export function loadConfig(): Arc402Config {
   if (!fs.existsSync(CONFIG_PATH)) {
-    console.error("No config found. Run `arc402 config init` to set up your configuration.");
+    console.error(`No config found at ${CONFIG_PATH}. Run \`arc402 config init\` to set up your configuration.`);
     process.exit(1);
   }
   return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Arc402Config;
 }
 
 export function saveConfig(config: Arc402Config): void {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  const configDir = path.dirname(CONFIG_PATH);
+  fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
