@@ -30,7 +30,7 @@ Displayed on first run and `arc init`. Not shown on subsequent commands.
  ██║  ██║██║  ██║╚██████╗           ██║╚██████╔╝███████╗
  ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝          ╚═╝ ╚═════╝ ╚══════╝
 
- Agent Resource Contracts · v0.1.0
+ agent-to-agent arcing · v0.1.0
  ◈ ─────────────────────────────────────────────
 
  Network   Base Sepolia
@@ -42,7 +42,7 @@ Displayed on first run and `arc init`. Not shown on subsequent commands.
 
 **Color rules:**
 - ASCII art: **cyan**
-- Tagline `Agent Resource Contracts · v0.1.0`: dim white
+- Tagline `agent-to-agent arcing · v0.1.0`: dim white
 - `◈` separator: bright cyan
 - `─────` line: dim
 - Network/Wallet/Balance labels: dim
