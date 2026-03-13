@@ -204,6 +204,54 @@ Step 6 (registry check) fails open: if AgentRegistry is unreachable, signature v
 
 ---
 
+## CLI as Secure Communication Layer
+
+The ARC-402 CLI is not just a convenience interface for on-chain operations. It is the secure agent communication layer — the trust infrastructure that replaced MCP-based negotiation.
+
+### What the CLI manages
+
+- **Session lifecycle**: Each negotiation has a unique session ID (`keccak256(initiator + responder + timestamp + nonce)`). All messages attach to the session.
+- **Automatic signing**: Every outbound message is signed with the sender's agent key. No unsigned messages enter the system.
+- **Local session store**: Sessions are persisted at `~/.arc402/sessions/<sessionId>.json`. Full message history, state, and transcript hash are retained.
+- **Transcript integrity**: On ACCEPT or REJECT, `transcriptHash = keccak256(JSON.stringify(messages))` is computed and stored. This is the tamper-evident record of the negotiation.
+- **On-chain linkage**: `arc402 hire --session <sessionId>` loads agreed price/deadline from the session, derives `deliverablesHash` incorporating the transcript hash, and records the on-chain agreement ID back to the session file.
+
+### Handshake before negotiation
+
+Before opening a session, either party can run `arc402 handshake <agentAddress>` to perform mutual identity verification:
+1. Checks both parties are registered and active in `AgentRegistry`
+2. Generates a signed challenge nonce (`keccak256(HANDSHAKE + from + to + nonce + timestamp)`)
+3. Outputs the signed challenge for relay to the counterparty's endpoint
+
+### CLI command reference
+
+```
+arc402 handshake <agentAddress>               # Mutual challenge-response auth
+arc402 negotiate propose --to --service-type --price --deadline --spec
+arc402 negotiate counter <sessionId>          # Send a signed counter-offer
+arc402 negotiate accept <sessionId>           # Accept, close session, compute transcript hash
+arc402 negotiate reject <sessionId>           # Reject and close session
+arc402 negotiate verify --message <json>      # Verify an incoming message
+arc402 negotiate session list                 # List all sessions
+arc402 negotiate session show <sessionId>     # Full session detail + transcript hash
+arc402 negotiate transcript show <sessionId>  # Show transcript hash only
+arc402 hire --session <sessionId>             # Commit agreed terms on-chain
+```
+
+### Why CLI over MCP
+
+MCP provides tool-call scaffolding but cannot enforce authentication, session continuity, or tamper-evident transcripts. The CLI owns these guarantees:
+
+| Concern | MCP | CLI (this design) |
+|---------|-----|-------------------|
+| Message authentication | None | ECDSA sig on every message |
+| Session continuity | None | Persistent session files with full history |
+| Transcript integrity | None | keccak256 over ordered message array |
+| On-chain linkage | Manual | `--session` flag threads session → agreement |
+| Identity verification | None | AgentRegistry check before first message |
+
+---
+
 ## Future Extensions
 
 **Auction mode:** Client broadcasts PROPOSE to N providers simultaneously. First ACCEPT wins. Useful for commodity services.

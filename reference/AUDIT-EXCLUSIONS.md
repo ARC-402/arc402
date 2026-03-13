@@ -1,17 +1,19 @@
-# ARC-402 Audit Exclusions (provisional)
+# ARC-402 Audit Exclusions (freeze baseline)
 
-Until a final freeze commit is produced, the following should be treated as excluded from the audited target unless intentionally versioned and verified:
+For freeze baseline commit `7c79ae7129e222da6391bb198ab93770589507ea`, excluded from audited target unless explicitly versioned:
 
-- local install directories:
+- local install dirs:
   - `cli/node_modules/`
   - `reference/node_modules/`
   - `reference/circuits/node_modules/`
-- generated Python caches:
+- local Python virtual envs and caches:
+  - `python-sdk/.venv*/`
   - `python-sdk/**/__pycache__/`
-- ignored local build outputs:
+- generated local build outputs:
   - `reference/cache/`
   - `reference/out/`
   - `reference/broadcast/`
   - `reference/typechain-types/`
-- any machine-local environment/config values not intentionally committed
-- ZK/privacy machinery for launch readiness decisions unless the final freeze explicitly brings it back into scope
+- machine-local env/config values not intentionally committed
+- post-freeze arbitration implementation line (separate branch/scope)
+- DeFi insurance / pooled financialization features

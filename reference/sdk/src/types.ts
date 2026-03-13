@@ -371,6 +371,19 @@ export type NegotiationMessage =
   | NegotiationAccept
   | NegotiationReject;
 
+export interface NegotiationSession {
+  sessionId: Hex;              // keccak256(initiator + responder + timestamp + nonce)
+  initiator: Address;
+  responder: Address;
+  createdAt: number;           // Unix seconds
+  messages: NegotiationMessage[];
+  state: "OPEN" | "ACCEPTED" | "REJECTED" | "EXPIRED";
+  transcriptHash?: Hex;        // set after session closes
+  agreedPrice?: string;
+  agreedDeadline?: string;
+  onChainAgreementId?: string; // set after propose() is called
+}
+
 export interface SignedNegotiationMessage<T extends NegotiationMessage = NegotiationMessage> {
   message: T;
   recoveredSigner: Address;

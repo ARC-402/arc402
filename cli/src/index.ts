@@ -10,6 +10,7 @@ import { registerDeliverCommand } from "./commands/deliver";
 import { registerDiscoverCommand } from "./commands/discover";
 import { registerDisputeCommand } from "./commands/dispute";
 import { registerHireCommand } from "./commands/hire";
+import { registerHandshakeCommand } from "./commands/agent-handshake";
 import { registerNegotiateCommands } from "./commands/negotiate";
 import { registerRemediateCommands } from "./commands/remediate";
 import { registerTrustCommand } from "./commands/trust";
@@ -17,7 +18,9 @@ import { registerWalletCommands } from "./commands/wallet";
 
 const program = new Command();
 program.name("arc402").description("ARC-402 CLI aligned to canonical-capability discovery → negotiate → hire → remediate → dispute workflow").version("0.2.0");
+program.option("--json", "Machine-parseable output for all commands");
 registerConfigCommands(program);
+registerHandshakeCommand(program);
 registerAgentCommands(program);
 registerDiscoverCommand(program);
 registerNegotiateCommands(program);

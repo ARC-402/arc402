@@ -1,8 +1,7 @@
-# ARC-402 Audit Assumptions (provisional)
+# ARC-402 Audit Assumptions (freeze baseline)
 
-1. The intended release-candidate target is the current local `main` line ending at `ce34123`, plus the present uncommitted worktree changes.
-2. No additional hidden repo/worktree contains required release-candidate code.
-3. Untracked markdown files under `reference/` and `reference/audit-independent/` are descriptive artifacts, not missing executable code.
-4. Tracked Python `__pycache__` deletions are cleanup only and do not affect runtime behavior.
-5. ZK remains out of default public-launch scope unless explicitly reintroduced in the final freeze decision.
-6. Final audit reproducibility requires a new clean commit SHA after the dirty worktree is split, verified, and recommitted.
+1. Planned freeze baseline is RC-C aligned commit `7c79ae7129e222da6391bb198ab93770589507ea`.
+2. Arbitration-aware preseal commits after this point are post-freeze work, not part of baseline truth.
+3. Freeze closure requires reproducible verification evidence across contracts, TS SDK, CLI, and Python SDK.
+4. Known verification failures at baseline are documented, not hidden, and must be resolved before a final all-green freeze seal.
+5. No DeFi insurance / pooled financialization is in freeze scope.
