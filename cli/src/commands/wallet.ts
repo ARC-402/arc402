@@ -429,7 +429,7 @@ export function registerWalletCommands(program: Command): void {
       if (opts.guardianKey) {
         guardianWallet = new ethers.Wallet(opts.guardianKey);
       } else {
-        guardianWallet = ethers.Wallet.createRandom();
+        guardianWallet = new ethers.Wallet(ethers.Wallet.createRandom().privateKey);
         console.log("Generated new guardian key.");
       }
       const walletContract = new ethers.Contract(config.walletContractAddress, ARC402_WALLET_GUARDIAN_ABI, signer);
