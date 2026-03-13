@@ -13,8 +13,11 @@
     "AgentRegistry":         "0x07D526f8A8e148570509aFa249EFF295045A0cc9",
     "TrustRegistryV2":       "0xfCc2CDC42654e05Dad5F6734cE5caFf3dAE0E94F",
     "SponsorshipAttestation":"0xc0d927745AcF8DEeE551BE11A12c97c492DDC989",
-    "ServiceAgreement":      "UNDEPLOYED — contract exceeds EIP-170 24KB limit (40.8KB compiled)",
-    "ReputationOracle":      "UNDEPLOYED — blocked by ServiceAgreement deployment failure"
+    "TrustRegistryV3":       "0xbd3f2F15F794FDE8B3A59B6643e4b7e985Ee1389",
+    "ServiceAgreement":      "0xa214D30906A934358f451514dA1ba732AD79f158",
+    "SessionChannels":       "0x21340f81F5ddc9C213ff2AC45F0f34FB2449386d",
+    "DisputeModule":         "0xcAcf606374E29bbC573620afFd7f9f739D25317F",
+    "ReputationOracle":      "UNDEPLOYED — not required for initial release"
   },
   "gasReport": {
     "PolicyEngine":          { "gasUsed": 2885127 },
@@ -26,9 +29,13 @@
     "AgentRegistry":         { "gasUsed": 2219728 },
     "TrustRegistryV2":       { "gasUsed": 1513748 },
     "SponsorshipAttestation":{ "gasUsed": 1090454 },
-    "totalGasUsed":          14267210,
-    "totalEthSpent":         "0.00008560 ETH",
-    "gasPrice":              "0.011 gwei"
+    "TrustRegistryV3":       { "gasUsed": 791108 },
+    "ServiceAgreement":      { "gasUsed": 5381740 },
+    "SessionChannels":       { "gasUsed": 2399314 },
+    "DisputeModule":         { "gasUsed": 3774764 },
+    "totalGasUsed":          26686836,
+    "totalEthSpent":         "0.00016012 ETH",
+    "gasPrice":              "0.006 gwei"
   },
   "basescanVerified": [
     "PolicyEngine",
@@ -41,5 +48,5 @@
     "TrustRegistryV2",
     "SponsorshipAttestation"
   ],
-  "note": "ServiceAgreement (40.8KB) and ReputationOracle blocked by EIP-170 24KB contract size limit. All other contracts deployed and verified."
+  "note": "SA split into 3 contracts (SA 23,759B + DisputeModule + SessionChannels) to meet EIP-170 24KB limit. All ARC-402 core contracts now live on Base Sepolia."
 }
