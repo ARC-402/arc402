@@ -45,9 +45,35 @@ arc-402/
 │   ├── 03-trust-primitive.md
 │   ├── 04-intent-attestation.md
 │   ├── 05-multi-agent-settlement.md
-│   └── 06-existing-standards.md
+│   ├── 06-existing-standards.md
+│   ├── 07-agent-registry.md
+│   ├── 08-service-agreement.md
+│   ├── 09-trust-graph-v2.md
+│   ├── 10-reputation-oracle.md
+│   ├── 11-sponsorship-attestation.md
+│   ├── 12-privacy-model.md
+│   ├── 13-zk-extensions.md
+│   ├── 14-negotiation-protocol.md
+│   ├── 15-transport-agnostic.md
+│   ├── 16-capability-taxonomy.md
+│   ├── 17-governance.md
+│   ├── 18-discovery-search.md
+│   ├── 18-session-channels.md
+│   ├── 19-multi-party-agreements.md
+│   ├── 20-protocol-versioning.md
+│   ├── 21-relay-architecture.md
+│   ├── 22-trust-score-economics.md
+│   ├── 22-watchtower.md
+│   ├── 23-agent-metadata.md
+│   ├── 24-deliverable-types.md
+│   ├── 25-deliverable-privacy.md
+│   ├── 26-contract-interaction.md
+│   ├── 27-soulbound-identity.md
+│   ├── 28-trust-score-time-weighting.md
+│   └── 29-wallet-migration-policy.md
 ├── reference/               # Reference implementation
 │   ├── contracts/           # Solidity — EVM-compatible
+│   ├── audit/               # Audit artifacts (threat model, reports, assumptions)
 │   └── sdk/                 # TypeScript SDK
 ├── articles/                # The case for ARC-402
 └── CONTRIBUTING.md
