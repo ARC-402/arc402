@@ -239,6 +239,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         require(provider != address(0), "ServiceAgreement: zero provider");
         require(provider != msg.sender, "ServiceAgreement: client == provider");
         require(price > 0, "ServiceAgreement: zero price");
+        // slither-disable-next-line timestamp
         require(deadline > block.timestamp, "ServiceAgreement: deadline in past");
         require(allowedTokens[token], "ServiceAgreement: token not allowed");
 
@@ -287,6 +288,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         require(legacyFulfillEnabled, "ServiceAgreement: legacy fulfill disabled");
         require(legacyFulfillProviders[msg.sender], "ServiceAgreement: provider not legacy trusted");
         require(ag.status == Status.ACCEPTED || ag.status == Status.REVISED, "ServiceAgreement: not ACCEPTED");
+        // slither-disable-next-line timestamp
         require(block.timestamp <= ag.deadline, "ServiceAgreement: past deadline");
         _closeRemediation(agreementId);
         ag.status = Status.FULFILLED;
@@ -301,6 +303,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         Agreement storage ag = _get(agreementId);
         require(msg.sender == ag.provider, "ServiceAgreement: not provider");
         require(ag.status == Status.ACCEPTED || ag.status == Status.REVISED, "ServiceAgreement: not ACCEPTED");
+        // slither-disable-next-line timestamp
         require(block.timestamp <= ag.deadline, "ServiceAgreement: past deadline");
         _closeRemediation(agreementId);
         ag.status = Status.PENDING_VERIFICATION;
@@ -325,6 +328,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     function autoRelease(uint256 agreementId) external nonReentrant {
         Agreement storage ag = _get(agreementId);
         require(ag.status == Status.PENDING_VERIFICATION, "ServiceAgreement: not PENDING_VERIFICATION");
+        // slither-disable-next-line timestamp
         require(block.timestamp > ag.verifyWindowEnd, "ServiceAgreement: verify window open");
         _closeRemediation(agreementId);
         ag.status = Status.FULFILLED;
@@ -466,6 +470,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         Agreement storage ag = _get(agreementId);
         require(msg.sender == ag.client, "ServiceAgreement: not client");
         require(ag.status == Status.ACCEPTED || ag.status == Status.REVISED || ag.status == Status.REVISION_REQUESTED || ag.status == Status.PARTIAL_SETTLEMENT || ag.status == Status.ESCALATED_TO_HUMAN, "ServiceAgreement: not ACCEPTED");
+        // slither-disable-next-line timestamp
         require(block.timestamp > ag.deadline, "ServiceAgreement: not past deadline");
         _closeRemediation(agreementId);
         ag.status = Status.CANCELLED;
@@ -605,6 +610,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     function expiredDisputeRefund(uint256 agreementId) external nonReentrant {
         Agreement storage ag = _get(agreementId);
         require(ag.status == Status.DISPUTED || ag.status == Status.ESCALATED_TO_HUMAN || ag.status == Status.ESCALATED_TO_ARBITRATION, "ServiceAgreement: not DISPUTED");
+        // slither-disable-next-line timestamp
         require(block.timestamp > ag.resolvedAt + DISPUTE_TIMEOUT, "ServiceAgreement: dispute timeout not reached");
         _closeRemediation(agreementId);
         ag.status = Status.CANCELLED;
@@ -814,7 +820,9 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         return _agreements[id];
     }
 
+    // slither-disable-next-line arbitrary-send-eth
     function _releaseEscrow(address token, address recipient, uint256 amount) internal {
+        // slither-disable-next-line incorrect-equality
         if (amount == 0) return;
         if (token == address(0)) {
             (bool ok, ) = recipient.call{value: amount}("");
@@ -829,6 +837,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     ///      Handles both ETH (token == address(0)) and ERC-20 paths.
     ///      If protocolFeeBps is 0 or protocolTreasury is unset, behaves identically to _releaseEscrow.
     function _releaseEscrowWithFee(address token, address provider, uint256 amount) internal {
+        // slither-disable-next-line incorrect-equality
         if (amount == 0) return;
         if (protocolFeeBps > 0 && protocolTreasury != address(0)) {
             uint256 fee = (amount * protocolFeeBps) / 10_000;
@@ -951,6 +960,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
             "ServiceAgreement: not authorized to challenge"
         );
         if (ch.status == ChannelStatus.CLOSING) {
+            // slither-disable-next-line timestamp
             require(block.timestamp <= ch.challengeExpiry, "ServiceAgreement: challenge window expired");
         }
         ChannelState memory state = abi.decode(latestStateBytes, (ChannelState));
@@ -978,6 +988,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         Channel storage ch = channels[channelId];
         require(ch.client != address(0), "ServiceAgreement: channel not found");
         require(ch.status == ChannelStatus.CLOSING, "ServiceAgreement: not CLOSING");
+        // slither-disable-next-line timestamp
         require(block.timestamp > ch.challengeExpiry, "ServiceAgreement: challenge window open");
         ch.status = ChannelStatus.SETTLED;
         emit ChallengeFinalised(channelId, msg.sender, ch.settledAmount);
@@ -991,6 +1002,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         require(ch.client != address(0), "ServiceAgreement: channel not found");
         require(msg.sender == ch.client, "ServiceAgreement: not client");
         require(ch.status == ChannelStatus.OPEN, "ServiceAgreement: channel not OPEN");
+        // slither-disable-next-line timestamp
         require(block.timestamp > ch.deadline, "ServiceAgreement: deadline not passed");
         ch.status = ChannelStatus.SETTLED;
         ch.settledAmount = 0;

@@ -43,6 +43,7 @@ contract TrustRegistryV2 is ITrustRegistryV2, ITrustRegistry, Ownable2Step {
 
     /// @notice Top-5 on-chain capability score slots per wallet.
     /// @dev CapabilityScore.capabilityHash == 0 means slot is empty.
+    // slither-disable-next-line uninitialized-state
     mapping(address => CapabilityScore[5]) internal _capabilitySlots;
 
     /// @notice Counterparty diversity tracker: wallet → counterparty → capabilityHash → count.

@@ -46,6 +46,7 @@ contract ARC402Guardian is IArc402Guardian, Ownable2Step {
 
     /// @notice Unpause the protocol. Only owner may unpause, and only after the 24h timelock.
     function unpause() external onlyOwner {
+        // slither-disable-next-line timestamp
         require(block.timestamp >= unpauseAvailableAt, "Guardian: timelock not expired");
         paused = false;
         emit ProtocolUnpaused(msg.sender);

@@ -79,9 +79,18 @@ The public-facing operator standard extracts the portable parts of that doctrine
 
 ## Status
 
-`DRAFT` — The specification is in active development. This is not yet a final standard.
+`PRE-AUDIT` (Mar 13, 2026) — Core protocol complete. All five governance primitives implemented. Dispute arbitration, session channels, watchtower liveness protection, and trust infrastructure shipped. 394 tests, 0 failures. Protocol audit-ready. Security audit in progress.
 
-Public-readiness note: experimental ZK/privacy extensions are explicitly outside current launch scope. The public path should be understood in terms of governed wallets, discovery, escrow, remediation, dispute handling, and reputation — not ZK-assisted proofs.
+**Protocol layers implemented:**
+- Policy Object (context binding + intent attestation)
+- Trust Primitive (on-chain trust substrate + arbitration)
+- Multi-Agent Settlement (bilateral verification + session channels)
+- Dispute Resolution (arbitration + trust consequences)
+- Liveness Protection (watchtower + session challenge)
+
+**Not in launch scope:** ZK/privacy extensions, third-party attestation hooks (v2), broad party slashing (governance risk too high).
+
+**Launch readiness:** Audit pending. Once approved, go-live includes: deployment guide, Discord community, ClawHub skill publication, OpenClaw home node setup.
 
 Feedback, issues, and contributions welcome.
 

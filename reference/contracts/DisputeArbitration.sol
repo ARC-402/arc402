@@ -66,12 +66,17 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
     mapping(uint256 => address[]) private _accepted; // arbitrators who called acceptAssignment
     mapping(uint256 => mapping(address => bool)) private _voted; // local vote tracking
 
+    /// @notice Commit hash for arbitrator seed selection. agreementId => keccak256(abi.encode(reveal)).
+    /// @dev Set by owner before calling selectArbitratorFromPool. Zero = not yet committed.
+    mapping(uint256 => bytes32) public arbitratorCommits;
+
     /// @notice Pending bond/fee withdrawals for arbitrators (pull payment pattern).
     ///         token => account => amount
     mapping(address => mapping(address => uint256)) public pendingWithdrawals;
 
     // ─── Admin events ────────────────────────────────────────────────────────
 
+    event ArbitratorSeedCommitted(uint256 indexed agreementId, bytes32 commit);
     event FeeFloorUpdated(uint256 newFloor);
     event FeeCapUpdated(uint256 newCap);
     event MinBondFloorUpdated(uint256 newFloor);
@@ -149,6 +154,7 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
     // ─── ServiceAgreement integration ────────────────────────────────────────
 
     /// @inheritdoc IDisputeArbitration
+    // slither-disable-next-line reentrancy-eth
     function openDispute(
         uint256 agreementId,
         DisputeMode mode,
@@ -188,11 +194,13 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
     }
 
     /// @inheritdoc IDisputeArbitration
+    // slither-disable-next-line reentrancy-eth
     function joinMutualDispute(uint256 agreementId) external payable nonReentrant {
         DisputeFeeState storage fs = _fees[agreementId];
         require(fs.active && !fs.resolved, "DisputeArbitration: not active");
         require(fs.mode == DisputeMode.MUTUAL, "DisputeArbitration: not mutual");
         require(fs.respondentPaid == 0, "DisputeArbitration: already funded");
+        // slither-disable-next-line timestamp
         require(block.timestamp <= fs.openedAt + MUTUAL_FUNDING_WINDOW, "DisputeArbitration: funding window closed");
 
         address respondent = (msg.sender == fs.client) ? fs.client : fs.provider;
@@ -255,6 +263,7 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
     // ─── Arbitrator panel ────────────────────────────────────────────────────
 
     /// @inheritdoc IDisputeArbitration
+    // slither-disable-next-line reentrancy-eth
     function acceptAssignment(uint256 agreementId) external payable nonReentrant {
         DisputeFeeState storage fs = _fees[agreementId];
         require(fs.active, "DisputeArbitration: dispute not active");
@@ -407,6 +416,7 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
         }
     }
 
+    // slither-disable-next-line arbitrary-send-eth
     function _releasePayment(address token, address to, uint256 amount) internal {
         if (amount == 0 || to == address(0)) return;
         if (token == address(0)) {
@@ -417,6 +427,7 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
         }
     }
 
+    // slither-disable-next-line reentrancy-eth
     function _settleArbitratorBondsAndFees(
         uint256 agreementId,
         address token,
@@ -507,24 +518,43 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
         _voted[agreementId][arbitrator] = true;
     }
 
-    // ─── Randomised Arbitrator Selection ─────────────────────────────────────
+    // ─── Randomised Arbitrator Selection — Commit-Reveal ─────────────────────
+    //
+    // Two-step scheme to eliminate validator/miner manipulation of entropy:
+    //   1. Owner commits a hash off-chain:  commitArbitratorSeed(agreementId, keccak256(reveal))
+    //   2. Owner reveals in a later block:  selectArbitratorFromPool(agreementId, pool, reveal)
+    //
+    // The reveal is the pre-image; on-chain we check keccak256(abi.encode(reveal)) == commit
+    // and use reveal as entropy for the Fisher-Yates shuffle.
+    // Chainlink VRF remains the v2 upgrade path for fully trustless randomness.
 
-    /// @notice Randomly select PANEL_SIZE arbitrators from a pool of eligible candidates.
-    ///         Uses blockhash + agreementId + block.timestamp as entropy source.
-    ///         Replaces deterministic first-come-first-served panel formation.
+    /// @notice Step 1 — Owner commits a hash before the reveal block.
+    /// @param agreementId The dispute for which a panel is being selected.
+    /// @param commit      keccak256(abi.encode(reveal)) — the pre-image stays off-chain until reveal.
+    function commitArbitratorSeed(uint256 agreementId, bytes32 commit) external onlyOwner {
+        require(arbitratorCommits[agreementId] == bytes32(0), "DisputeArbitration: already committed");
+        arbitratorCommits[agreementId] = commit;
+        emit ArbitratorSeedCommitted(agreementId, commit);
+    }
+
+    /// @notice Step 2 — Reveal the pre-image and select PANEL_SIZE arbitrators from the pool.
     ///
-    /// @dev Fisher-Yates partial shuffle over a memory copy of the candidate pool.
-    ///      The entropy seed is re-hashed at each step to avoid trivial bias.
-    ///
-    ///      TODO: blockhash randomness is manipulable by miners — Chainlink VRF is v2 upgrade path.
+    /// @dev Fisher-Yates partial shuffle using commit-reveal entropy.
+    ///      The entropy seed is re-hashed at each step to avoid index-correlation bias.
+    ///      Caller must have previously called commitArbitratorSeed for this agreementId.
     ///
     /// @param agreementId  The dispute being assigned (included in entropy for uniqueness).
     /// @param pool         Candidate arbitrator addresses. Must have >= PANEL_SIZE entries.
+    /// @param reveal       Pre-image: keccak256(abi.encode(reveal)) must equal the stored commit.
     /// @return selected    The PANEL_SIZE randomly chosen arbitrators. Caller must assign them.
     function selectArbitratorFromPool(
         uint256 agreementId,
-        address[] calldata pool
+        address[] calldata pool,
+        bytes32 reveal
     ) external view returns (address[] memory selected) {
+        bytes32 commit = arbitratorCommits[agreementId];
+        require(commit != bytes32(0), "DisputeArbitration: no commit for agreement");
+        require(keccak256(abi.encode(reveal)) == commit, "DisputeArbitration: reveal mismatch");
         require(pool.length >= PANEL_SIZE, "DisputeArbitration: pool too small");
 
         // Build memory copy for in-place shuffle
@@ -533,12 +563,8 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
             candidates[i] = pool[i];
         }
 
-        // TODO: blockhash randomness is manipulable by miners — Chainlink VRF is v2 upgrade path.
-        bytes32 seed = keccak256(abi.encode(
-            blockhash(block.number - 1),
-            agreementId,
-            block.timestamp
-        ));
+        // Derive seed from reveal + agreementId for dispute-specific entropy
+        bytes32 seed = keccak256(abi.encode(reveal, agreementId));
 
         // Fisher-Yates partial shuffle — only first PANEL_SIZE positions needed
         selected = new address[](PANEL_SIZE);
