@@ -486,5 +486,52 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
         _voted[agreementId][arbitrator] = true;
     }
 
+    // ─── Randomised Arbitrator Selection ─────────────────────────────────────
+
+    /// @notice Randomly select PANEL_SIZE arbitrators from a pool of eligible candidates.
+    ///         Uses blockhash + agreementId + block.timestamp as entropy source.
+    ///         Replaces deterministic first-come-first-served panel formation.
+    ///
+    /// @dev Fisher-Yates partial shuffle over a memory copy of the candidate pool.
+    ///      The entropy seed is re-hashed at each step to avoid trivial bias.
+    ///
+    ///      TODO: blockhash randomness is manipulable by miners — Chainlink VRF is v2 upgrade path.
+    ///
+    /// @param agreementId  The dispute being assigned (included in entropy for uniqueness).
+    /// @param pool         Candidate arbitrator addresses. Must have >= PANEL_SIZE entries.
+    /// @return selected    The PANEL_SIZE randomly chosen arbitrators. Caller must assign them.
+    function selectArbitratorFromPool(
+        uint256 agreementId,
+        address[] calldata pool
+    ) external view returns (address[] memory selected) {
+        require(pool.length >= PANEL_SIZE, "DisputeArbitration: pool too small");
+
+        // Build memory copy for in-place shuffle
+        address[] memory candidates = new address[](pool.length);
+        for (uint256 i = 0; i < pool.length; i++) {
+            candidates[i] = pool[i];
+        }
+
+        // TODO: blockhash randomness is manipulable by miners — Chainlink VRF is v2 upgrade path.
+        bytes32 seed = keccak256(abi.encode(
+            blockhash(block.number - 1),
+            agreementId,
+            block.timestamp
+        ));
+
+        // Fisher-Yates partial shuffle — only first PANEL_SIZE positions needed
+        selected = new address[](PANEL_SIZE);
+        for (uint256 i = 0; i < PANEL_SIZE; i++) {
+            // Re-derive seed per step to avoid index-correlation bias
+            seed = keccak256(abi.encode(seed, i));
+            uint256 j = i + (uint256(seed) % (candidates.length - i));
+            // Swap candidates[i] ↔ candidates[j]
+            address tmp = candidates[i];
+            candidates[i] = candidates[j];
+            candidates[j] = tmp;
+            selected[i] = candidates[i];
+        }
+    }
+
     receive() external payable {}
 }

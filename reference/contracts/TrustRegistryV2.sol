@@ -52,6 +52,10 @@ contract TrustRegistryV2 is ITrustRegistryV2, ITrustRegistry, Ownable2Step {
     /// @notice Addresses authorised to call recordSuccess / recordAnomaly.
     mapping(address => bool) public isAuthorizedUpdater;
 
+    /// @notice Tracks the last block number a wallet's trust score was written.
+    ///         Used by noFlashLoan modifier to block same-block multi-write attacks.
+    mapping(address => uint256) private _lastUpdateBlock;
+
     /// @notice Minimum agreement value (wei). 0 = disabled.
     /// @dev Agreements below this threshold produce no trust update (not reverted).
     uint256 public minimumAgreementValue;
@@ -69,6 +73,14 @@ contract TrustRegistryV2 is ITrustRegistryV2, ITrustRegistry, Ownable2Step {
 
     modifier onlyUpdater() {
         require(isAuthorizedUpdater[msg.sender], "TrustRegistryV2: not authorized updater");
+        _;
+    }
+
+    /// @dev Prevents flash-loan-assisted same-block trust manipulation.
+    ///      A wallet's trust score can only be written once per block.
+    modifier noFlashLoan(address subject) {
+        require(block.number > _lastUpdateBlock[subject], "TrustRegistryV2: flash loan protection");
+        _lastUpdateBlock[subject] = block.number;
         _;
     }
 
@@ -112,7 +124,7 @@ contract TrustRegistryV2 is ITrustRegistryV2, ITrustRegistry, Ownable2Step {
         address counterparty,
         string calldata capability,
         uint256 agreementValueWei
-    ) external override(ITrustRegistry, ITrustRegistryV2) onlyUpdater {
+    ) external override(ITrustRegistry, ITrustRegistryV2) onlyUpdater noFlashLoan(wallet) {
         // Minimum agreement value gate — silent skip, no revert
         if (minimumAgreementValue > 0 && agreementValueWei < minimumAgreementValue) return;
 
@@ -158,7 +170,7 @@ contract TrustRegistryV2 is ITrustRegistryV2, ITrustRegistry, Ownable2Step {
         address counterparty,
         string calldata capability,
         uint256 agreementValueWei
-    ) external override(ITrustRegistry, ITrustRegistryV2) onlyUpdater {
+    ) external override(ITrustRegistry, ITrustRegistryV2) onlyUpdater noFlashLoan(wallet) {
         // Minimum agreement value gate
         if (minimumAgreementValue > 0 && agreementValueWei < minimumAgreementValue) return;
 
@@ -399,7 +411,7 @@ contract TrustRegistryV2 is ITrustRegistryV2, ITrustRegistry, Ownable2Step {
     function recordArbitratorSlash(
         address arbitrator,
         string calldata reason
-    ) external override(ITrustRegistry) onlyUpdater {
+    ) external override(ITrustRegistry) onlyUpdater noFlashLoan(arbitrator) {
         _ensureInitialized(arbitrator);
         TrustProfile storage p = profiles[arbitrator];
         uint256 oldGlobal = p.globalScore;

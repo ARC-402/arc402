@@ -172,15 +172,14 @@ contract AgreementTreeTest is Test {
         // Try to register child 2 under a different parent (3)
         _setAgreement(3);
         vm.prank(provider);
-        vm.expectRevert("AgreementTree: child already registered");
+        vm.expectRevert("AgreementTree: node already in tree");
         tree.registerSubAgreement(3, 2);
     }
 
     // ─── registerSubAgreement: circular reference ────────────────────────────
-    // NOTE: In this implementation, any attempt to create a circular reference
-    // requires reusing an already-registered ancestor node as the child. The
-    // "child already registered" guard fires before the _isAncestor check, so
-    // that is the observable revert for circular-reference attempts.
+    // NOTE: Circular references are structurally impossible. Any cycle attempt requires reusing
+    // a node already in the tree, which the _registered guard blocks. This is
+    // the correct and intended protection mechanism.
 
     function test_RegisterSubAgreement_revert_circular_direct() public {
         // Register 1→2, then try 2→1 (circular attempt)
@@ -190,7 +189,7 @@ contract AgreementTreeTest is Test {
         vm.prank(provider); tree.registerSubAgreement(1, 2);
 
         vm.prank(provider);
-        vm.expectRevert("AgreementTree: child already registered");
+        vm.expectRevert("AgreementTree: node already in tree");
         tree.registerSubAgreement(2, 1);
     }
 
@@ -202,7 +201,7 @@ contract AgreementTreeTest is Test {
         vm.prank(provider); tree.registerSubAgreement(2, 3);
 
         vm.prank(provider);
-        vm.expectRevert("AgreementTree: child already registered");
+        vm.expectRevert("AgreementTree: node already in tree");
         tree.registerSubAgreement(3, 1);
     }
 

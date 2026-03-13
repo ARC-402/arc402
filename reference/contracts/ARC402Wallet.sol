@@ -8,6 +8,7 @@ import "./ARC402Registry.sol";
 import "./SettlementCoordinator.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title ARC402Wallet
@@ -18,7 +19,16 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  *      new infrastructure versions. Nobody else can force an upgrade.
  * STATUS: DRAFT — not audited, do not use in production
  */
-contract ARC402Wallet {
+/// @dev Minimal interface for PolicyEngine DeFi access validation (avoids circular imports).
+interface IDefiPolicy {
+    function validateContractCall(
+        address wallet,
+        address target,
+        uint256 value
+    ) external view returns (bool valid, string memory reason);
+}
+
+contract ARC402Wallet is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // ─── State ───────────────────────────────────────────────────────────────
@@ -77,6 +87,7 @@ contract ARC402Wallet {
     event WalletUnfrozen(address indexed by, uint256 timestamp);
     event VelocityLimitUpdated(uint256 newLimit);
     event InterceptorUpdated(address indexed interceptor);
+    event ContractCallExecuted(address indexed target, uint256 value, bytes data, uint256 returnValue);
 
     // ─── Modifiers ───────────────────────────────────────────────────────────
 
@@ -416,6 +427,100 @@ contract ARC402Wallet {
 
     function getActiveContext() external view returns (bytes32, string memory, uint256, bool) {
         return (activeContextId, activeTaskType, contextOpenedAt, contextOpen);
+    }
+
+    // ─── DeFi Contract Calls ──────────────────────────────────────────────────
+
+    /// @notice Parameters for a governed external contract call.
+    struct ContractCallParams {
+        address target;           // Contract to call
+        bytes   data;             // Calldata
+        uint256 value;            // ETH value to forward (wei)
+        uint256 minReturnValue;   // Minimum acceptable return value (0 = no slippage check)
+        uint256 maxApprovalAmount;// ERC-20 approval ceiling for this tx (NOT infinite)
+        address approvalToken;    // ERC-20 token to approve (address(0) = no approval)
+    }
+
+    /// @notice Execute a governed DeFi contract call.
+    ///         Validates against PolicyEngine DeFi whitelist, sets a per-tx ERC-20 approval
+    ///         (never infinite), resets approval after the call, and checks slippage.
+    /// @dev nonReentrant prevents callback exploits. onlyOwner restricts to wallet owner.
+    function executeContractCall(ContractCallParams calldata params)
+        external
+        onlyOwner
+        notFrozen
+        nonReentrant
+        returns (bytes memory returnData)
+    {
+        // 1. Validate via PolicyEngine DeFi access tier
+        (bool valid, string memory reason) = IDefiPolicy(registry.policyEngine()).validateContractCall(
+            address(this),
+            params.target,
+            params.value
+        );
+        require(valid, reason);
+
+        // 2. Per-tx ERC-20 approval — NOT infinite
+        if (params.approvalToken != address(0) && params.maxApprovalAmount > 0) {
+            IERC20(params.approvalToken).approve(params.target, params.maxApprovalAmount);
+        }
+
+        // 3. Call target
+        bool success;
+        (success, returnData) = params.target.call{value: params.value}(params.data);
+        require(success, "ARC402: contract call failed");
+
+        // 4. Reset approval to 0 (prevent residual allowance)
+        if (params.approvalToken != address(0) && params.maxApprovalAmount > 0) {
+            IERC20(params.approvalToken).approve(params.target, 0);
+        }
+
+        // 5. Slippage check — only if caller specified a minimum return value
+        uint256 returnValue = 0;
+        if (params.minReturnValue > 0) {
+            require(returnData.length >= 32, "ARC402: return data too short for slippage check");
+            returnValue = abi.decode(returnData, (uint256));
+            require(returnValue >= params.minReturnValue, "ARC402: slippage exceeded");
+        }
+
+        emit ContractCallExecuted(params.target, params.value, params.data, returnValue);
+    }
+
+    // ─── NFT Receiver Interfaces ──────────────────────────────────────────────
+
+    /// @notice Accept ERC-721 safe transfers into this wallet.
+    /// @return IERC721Receiver.onERC721Received.selector (0x150b7a02)
+    function onERC721Received(
+        address, /* operator */
+        address, /* from */
+        uint256, /* tokenId */
+        bytes calldata /* data */
+    ) external pure returns (bytes4) {
+        return 0x150b7a02;
+    }
+
+    /// @notice Accept ERC-1155 safe transfers into this wallet.
+    /// @return IERC1155Receiver.onERC1155Received.selector (0xf23a6e61)
+    function onERC1155Received(
+        address, /* operator */
+        address, /* from */
+        uint256, /* id */
+        uint256, /* value */
+        bytes calldata /* data */
+    ) external pure returns (bytes4) {
+        return 0xf23a6e61;
+    }
+
+    /// @notice Accept ERC-1155 batch safe transfers into this wallet.
+    /// @return IERC1155Receiver.onERC1155BatchReceived.selector (0xbc197c81)
+    function onERC1155BatchReceived(
+        address, /* operator */
+        address, /* from */
+        uint256[] calldata, /* ids */
+        uint256[] calldata, /* values */
+        bytes calldata /* data */
+    ) external pure returns (bytes4) {
+        return 0xbc197c81;
     }
 
     // ─── Receive ─────────────────────────────────────────────────────────────

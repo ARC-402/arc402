@@ -33,6 +33,11 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     uint8 public constant ARBITRATOR_MAJORITY = 2;
     uint256 public constant CHALLENGE_WINDOW = 24 hours;
 
+    // ─── Protocol Fee ─────────────────────────────────────────────────────────
+    uint256 public constant MAX_PROTOCOL_FEE_BPS = 100; // 1% hard ceiling (immutable constant)
+    uint256 public protocolFeeBps = 30;                 // 0.3% default, governance-adjustable up to ceiling
+    address public protocolTreasury;
+
     mapping(address => bool) public allowedTokens;
     mapping(address => bool) public legacyFulfillProviders;
     mapping(address => bool) public approvedArbitrators;
@@ -118,6 +123,8 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     event ChallengeFinalised(bytes32 indexed channelId, address indexed finaliser, uint256 settledAmount);
     event GuardianUpdated(address indexed guardian);
     event WatchtowerRegistryUpdated(address indexed watchtowerRegistry);
+    event ProtocolFeeUpdated(uint256 newFeeBps);
+    event ProtocolTreasuryUpdated(address indexed newTreasury);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "ServiceAgreement: not owner");
@@ -208,6 +215,20 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         emit WatchtowerRegistryUpdated(_watchtowerRegistry);
     }
 
+    /// @notice Update protocol fee in basis points (max 1%, enforced by MAX_PROTOCOL_FEE_BPS).
+    function setProtocolFee(uint256 feeBps) external onlyOwner {
+        require(feeBps <= MAX_PROTOCOL_FEE_BPS, "ServiceAgreement: fee exceeds ceiling");
+        protocolFeeBps = feeBps;
+        emit ProtocolFeeUpdated(feeBps);
+    }
+
+    /// @notice Set the protocol treasury address that receives protocol fees.
+    function setProtocolTreasury(address treasury) external onlyOwner {
+        require(treasury != address(0), "ServiceAgreement: zero treasury");
+        protocolTreasury = treasury;
+        emit ProtocolTreasuryUpdated(treasury);
+    }
+
     function propose(address provider, string calldata serviceType, string calldata description, uint256 price, address token, uint256 deadline, bytes32 deliverablesHash) external payable nonReentrant whenNotPaused returns (uint256 agreementId) {
         require(bytes(serviceType).length <= 64, "ServiceAgreement: serviceType too long");
         require(bytes(description).length <= 1024, "ServiceAgreement: description too long");
@@ -268,7 +289,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         ag.resolvedAt = block.timestamp;
         ag.deliverablesHash = actualDeliverablesHash;
         emit AgreementFulfilled(agreementId, msg.sender, actualDeliverablesHash);
-        _releaseEscrow(ag.token, ag.provider, ag.price);
+        _releaseEscrowWithFee(ag.token, ag.provider, ag.price);
         _updateTrust(agreementId, ag, true);
     }
 
@@ -293,7 +314,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         ag.status = Status.FULFILLED;
         ag.resolvedAt = block.timestamp;
         emit AgreementFulfilled(agreementId, ag.provider, ag.committedHash);
-        _releaseEscrow(ag.token, ag.provider, ag.price);
+        _releaseEscrowWithFee(ag.token, ag.provider, ag.price);
         _updateTrust(agreementId, ag, true);
     }
 
@@ -306,7 +327,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         ag.resolvedAt = block.timestamp;
         emit AgreementFulfilled(agreementId, ag.provider, ag.committedHash);
         emit AutoReleased(agreementId, ag.provider);
-        _releaseEscrow(ag.token, ag.provider, ag.price);
+        _releaseEscrowWithFee(ag.token, ag.provider, ag.price);
         _updateTrust(agreementId, ag, true);
     }
 
@@ -796,6 +817,23 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
             require(ok, "ServiceAgreement: ETH transfer failed");
         } else {
             IERC20(token).safeTransfer(recipient, amount);
+        }
+    }
+
+    /// @dev Release escrow to provider after deducting the protocol fee.
+    ///      Fee goes to protocolTreasury; remainder goes to provider.
+    ///      Handles both ETH (token == address(0)) and ERC-20 paths.
+    ///      If protocolFeeBps is 0 or protocolTreasury is unset, behaves identically to _releaseEscrow.
+    function _releaseEscrowWithFee(address token, address provider, uint256 amount) internal {
+        if (amount == 0) return;
+        if (protocolFeeBps > 0 && protocolTreasury != address(0)) {
+            uint256 fee = (amount * protocolFeeBps) / 10_000;
+            if (fee > 0) {
+                _releaseEscrow(token, protocolTreasury, fee);
+            }
+            _releaseEscrow(token, provider, amount - fee);
+        } else {
+            _releaseEscrow(token, provider, amount);
         }
     }
 

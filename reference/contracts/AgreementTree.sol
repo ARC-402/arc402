@@ -11,9 +11,11 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
  *
  * Rules:
  *   - Only the provider of a parent agreement may register sub-agreements.
- *   - Maximum tree depth is 8 (prevents gas exhaustion / circular attacks).
+ *   - Maximum tree depth is 8 (prevents gas exhaustion).
  *   - A child may only have one parent (strict tree, not a DAG).
- *   - Circular references are rejected by walking ancestors before registration.
+ *   - Circular references are impossible: every node in the tree is registered
+ *     exactly once. Any cycle attempt requires reusing a registered node as a
+ *     child, which the `_registered` guard rejects before any ancestor walk.
  *
  * STATUS: DRAFT — not audited, do not use in production
  */
@@ -49,7 +51,9 @@ contract AgreementTree is IAgreementTree, Ownable2Step {
     /// @inheritdoc IAgreementTree
     function registerSubAgreement(uint256 parentAgreementId, uint256 childAgreementId) external override {
         require(parentAgreementId != childAgreementId, "AgreementTree: self-link");
-        require(!_registered[childAgreementId], "AgreementTree: child already registered");
+        // This guard also prevents circular references: any cycle requires reusing a node
+        // that is already in the tree (_registered == true). No ancestor walk needed.
+        require(!_registered[childAgreementId], "AgreementTree: node already in tree");
 
         // Verify caller is the provider of the parent agreement
         IServiceAgreement.Agreement memory parentAg = serviceAgreement.getAgreement(parentAgreementId);
@@ -64,9 +68,6 @@ contract AgreementTree is IAgreementTree, Ownable2Step {
         // Check depth: parent's depth + 1 must not exceed MAX_DEPTH
         uint256 parentDepth = _computeDepth(parentAgreementId);
         require(parentDepth < MAX_DEPTH, "AgreementTree: max depth exceeded");
-
-        // Circular reference check: childId must not be an ancestor of parentId
-        require(!_isAncestor(parentAgreementId, childAgreementId), "AgreementTree: circular reference");
 
         // Register the child
         _registered[childAgreementId] = true;
@@ -165,18 +166,6 @@ contract AgreementTree is IAgreementTree, Ownable2Step {
             current = p;
         }
         return depth;
-    }
-
-    /// @dev Returns true if `potentialAncestor` is an ancestor of (or equal to) `id`.
-    function _isAncestor(uint256 id, uint256 potentialAncestor) internal view returns (bool) {
-        uint256 current = id;
-        for (uint256 i = 0; i <= MAX_DEPTH; i++) {
-            if (current == potentialAncestor) return true;
-            uint256 p = _parent[current];
-            if (p == 0) return false;
-            current = p;
-        }
-        return false;
     }
 
     function _isSettled(IServiceAgreement.Status status) internal pure returns (bool) {

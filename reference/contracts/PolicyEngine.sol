@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "./IPolicyEngine.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 /**
  * @title PolicyEngine
@@ -9,6 +10,8 @@ import "./IPolicyEngine.sol";
  * STATUS: DRAFT — not audited, do not use in production
  */
 contract PolicyEngine is IPolicyEngine {
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     struct PolicyData {
         bytes32 policyHash;
         bytes policyData;
@@ -28,6 +31,16 @@ contract PolicyEngine is IPolicyEngine {
 
     // contextId deduplication — prevents same agreement being validated twice
     mapping(bytes32 => bool) private _usedContextIds;
+
+    // ─── DeFi Access Tier ─────────────────────────────────────────────────────
+    // Opt-in DeFi access — NOT enabled by default.
+    mapping(address => bool) public defiAccessEnabled;
+    /// @dev Per-wallet whitelist of allowed external contract targets.
+    mapping(address => EnumerableSet.AddressSet) private _whitelistedContracts;
+    /// @notice Maximum value (wei / token units) allowed per contract call. 0 = unlimited.
+    mapping(address => uint256) public maxContractCallValue;
+    /// @dev Per-wallet allowed NFT contracts (ERC-721 / ERC-1155).
+    mapping(address => EnumerableSet.AddressSet) private _allowedNFTContracts;
 
     // ─── Blocklist ───────────────────────────────────────────────────────────
 
@@ -49,6 +62,13 @@ contract PolicyEngine is IPolicyEngine {
     event ProviderUnblocked(address indexed wallet, address indexed provider);
     event ProviderPreferred(address indexed wallet, address indexed provider, string capability);
     event ProviderUnpreferred(address indexed wallet, address indexed provider, string capability);
+    event DefiAccessEnabled(address indexed wallet);
+    event DefiAccessDisabled(address indexed wallet);
+    event ContractWhitelisted(address indexed wallet, address indexed target);
+    event ContractRemoved(address indexed wallet, address indexed target);
+    event MaxContractCallValueSet(address indexed wallet, uint256 value);
+    event NFTContractAllowed(address indexed wallet, address indexed nftContract);
+    event NFTContractDisallowed(address indexed wallet, address indexed nftContract);
 
     /**
      * @notice Register a wallet and record its owner.
@@ -245,5 +265,84 @@ contract PolicyEngine is IPolicyEngine {
         external view returns (bool)
     {
         return _shortlistIdx[wallet][keccak256(bytes(capability))][provider] != 0;
+    }
+
+    // ─── DeFi Access Tier ─────────────────────────────────────────────────────
+
+    /// @notice Opt this wallet into DeFi contract-call access. NOT enabled by default.
+    function enableDefiAccess(address wallet) external onlyWalletOwnerOrWallet(wallet) {
+        defiAccessEnabled[wallet] = true;
+        emit DefiAccessEnabled(wallet);
+    }
+
+    /// @notice Revoke DeFi contract-call access for this wallet.
+    function disableDefiAccess(address wallet) external onlyWalletOwnerOrWallet(wallet) {
+        defiAccessEnabled[wallet] = false;
+        emit DefiAccessDisabled(wallet);
+    }
+
+    /// @notice Add a contract address to the per-wallet DeFi whitelist.
+    function whitelistContract(address wallet, address target) external onlyWalletOwnerOrWallet(wallet) {
+        require(target != address(0), "PolicyEngine: zero target");
+        _whitelistedContracts[wallet].add(target);
+        emit ContractWhitelisted(wallet, target);
+    }
+
+    /// @notice Remove a contract address from the per-wallet DeFi whitelist.
+    function removeWhitelistedContract(address wallet, address target) external onlyWalletOwnerOrWallet(wallet) {
+        _whitelistedContracts[wallet].remove(target);
+        emit ContractRemoved(wallet, target);
+    }
+
+    /// @notice Set the maximum value per contract call for this wallet. 0 = unlimited.
+    function setMaxContractCallValue(address wallet, uint256 value) external onlyWalletOwnerOrWallet(wallet) {
+        maxContractCallValue[wallet] = value;
+        emit MaxContractCallValueSet(wallet, value);
+    }
+
+    /// @notice Validate a proposed external contract call against the DeFi policy.
+    /// @return valid  True if the call is permitted.
+    /// @return reason Human-readable rejection reason if not valid.
+    function validateContractCall(
+        address wallet,
+        address target,
+        uint256 value
+    ) external view returns (bool valid, string memory reason) {
+        if (!defiAccessEnabled[wallet]) {
+            return (false, "PolicyEngine: DeFi access not enabled");
+        }
+        if (!_whitelistedContracts[wallet].contains(target)) {
+            return (false, "PolicyEngine: contract not whitelisted");
+        }
+        uint256 maxVal = maxContractCallValue[wallet];
+        if (maxVal > 0 && value > maxVal) {
+            return (false, "PolicyEngine: value exceeds max contract call limit");
+        }
+        return (true, "");
+    }
+
+    /// @notice Returns true if the target contract is whitelisted for this wallet.
+    function isContractWhitelisted(address wallet, address target) external view returns (bool) {
+        return _whitelistedContracts[wallet].contains(target);
+    }
+
+    // ─── NFT Contract Governance ──────────────────────────────────────────────
+
+    /// @notice Allow an NFT contract (ERC-721 / ERC-1155) for this wallet's governance.
+    function allowNFTContract(address wallet, address nftContract) external onlyWalletOwnerOrWallet(wallet) {
+        require(nftContract != address(0), "PolicyEngine: zero nft contract");
+        _allowedNFTContracts[wallet].add(nftContract);
+        emit NFTContractAllowed(wallet, nftContract);
+    }
+
+    /// @notice Remove an NFT contract from this wallet's allowed list.
+    function disallowNFTContract(address wallet, address nftContract) external onlyWalletOwnerOrWallet(wallet) {
+        _allowedNFTContracts[wallet].remove(nftContract);
+        emit NFTContractDisallowed(wallet, nftContract);
+    }
+
+    /// @notice Returns true if the NFT contract is allowed for this wallet.
+    function isNFTContractAllowed(address wallet, address nftContract) external view returns (bool) {
+        return _allowedNFTContracts[wallet].contains(nftContract);
     }
 }
