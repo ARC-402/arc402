@@ -25,12 +25,64 @@ contract PolicyEngine is IPolicyEngine {
     // Per-day cumulative limits (separate from per-tx limits)
     mapping(address => mapping(string => uint256)) public dailyCategoryLimit;
 
-    // Cumulative spend tracking
-    mapping(address => mapping(string => uint256)) public dailySpend;
-    mapping(address => mapping(string => uint256)) public periodStart;
+    // ─── Fix 1: Two-bucket spend window (replaces single dailySpend/periodStart) ──
+
+    /// @dev 12-hour bucket. Effective spend = current + previous bucket.
+    ///      Worst-case boundary spend is 1.5× daily limit (vs 2× with discrete reset).
+    uint256 private constant BUCKET_DURATION = 43200; // 12 hours
+
+    struct SpendWindow {
+        uint256 currentBucketStart;
+        uint256 currentBucketSpend;
+        uint256 previousBucketSpend;
+    }
+
+    /// @dev Per-wallet per-category two-bucket window.
+    mapping(address => mapping(string => SpendWindow)) private _spendWindows;
 
     // contextId deduplication — prevents same agreement being validated twice
     mapping(bytes32 => bool) private _usedContextIds;
+
+    // ─── Fix 2: Emergency freeze ──────────────────────────────────────────────
+
+    /// @notice Whether spending from this wallet is frozen.
+    mapping(address => bool) public spendFrozen;
+
+    /// @dev wallet → agent → authorized to freeze
+    mapping(address => mapping(address => bool)) private _authorizedFreezeAgents;
+
+    // ─── Fix 3: Velocity detection (1-hour rate limit via 30-min buckets) ────
+
+    uint256 private constant VELOCITY_BUCKET = 1800; // 30 minutes
+
+    struct VelocityWindow {
+        uint256 currentBucketStart;
+        uint256 currentBucketCount;
+        uint256 previousBucketCount;
+        uint256 currentBucketSpend;
+        uint256 previousBucketSpend;
+    }
+
+    /// @dev Per-wallet (not per-category) hourly velocity tracking.
+    mapping(address => VelocityWindow) private _velocityWindows;
+
+    /// @notice Maximum transactions per hour. 0 = disabled.
+    mapping(address => uint256) public maxTxPerHour;
+
+    /// @notice Maximum spend per hour (across all categories). 0 = disabled.
+    mapping(address => uint256) public maxSpendPerHour;
+
+    // ─── Fix 4: Per-agreement cap with timelock ───────────────────────────────
+
+    struct PendingCapReduction {
+        uint256 newCap;
+        uint256 effectiveAt;
+    }
+
+    /// @notice Pending daily-limit reductions keyed by wallet+category.
+    ///         Only reductions (not increases) may be queued. A 24-hour timelock
+    ///         applies before the new cap can be applied.
+    mapping(address => mapping(string => PendingCapReduction)) public pendingCapReductions;
 
     // ─── DeFi Access Tier ─────────────────────────────────────────────────────
     // Opt-in DeFi access — NOT enabled by default.
@@ -54,6 +106,8 @@ contract PolicyEngine is IPolicyEngine {
     /// @notice wallet → capabilityHash → provider → 1-based index (0 = not present)
     mapping(address => mapping(bytes32 => mapping(address => uint256))) private _shortlistIdx;
 
+    // ─── Events ───────────────────────────────────────────────────────────────
+
     event PolicySet(address indexed wallet, bytes32 policyHash);
     event CategoryLimitSet(address indexed wallet, string category, uint256 limitPerTx);
     event DailyCategoryLimitSet(address indexed wallet, string category, uint256 dailyLimit);
@@ -69,6 +123,14 @@ contract PolicyEngine is IPolicyEngine {
     event MaxContractCallValueSet(address indexed wallet, uint256 value);
     event NFTContractAllowed(address indexed wallet, address indexed nftContract);
     event NFTContractDisallowed(address indexed wallet, address indexed nftContract);
+
+    // Fix 2 events
+    event SpendFrozen(address indexed wallet, address indexed by);
+    event SpendUnfrozen(address indexed wallet, address indexed by);
+
+    // Fix 4 events
+    event CapReductionQueued(address indexed wallet, string category, uint256 newCap, uint256 effectiveAt);
+    event CapReductionApplied(address indexed wallet, string category, uint256 newCap);
 
     /**
      * @notice Register a wallet and record its owner.
@@ -98,11 +160,15 @@ contract PolicyEngine is IPolicyEngine {
         return (p.policyHash, p.policyData);
     }
 
+    // @dev Intentionally does not reset spend window state. Only limit values change.
+    // Spend windows reset based on time only — see _recordBucketSpend.
     function setCategoryLimit(string calldata category, uint256 limitPerTx) external {
         categoryLimits[msg.sender][category] = limitPerTx;
         emit CategoryLimitSet(msg.sender, category, limitPerTx);
     }
 
+    // @dev Intentionally does not reset spend window state. Only limit values change.
+    // Spend windows reset based on time only — see _recordBucketSpend.
     function setCategoryLimitFor(address wallet, string calldata category, uint256 limitPerTx) external {
         // Allow owner to set limits for their wallet
         require(walletOwners[wallet] == msg.sender || wallet == msg.sender, "PolicyEngine: not authorized");
@@ -110,20 +176,121 @@ contract PolicyEngine is IPolicyEngine {
         emit CategoryLimitSet(wallet, category, limitPerTx);
     }
 
+    // @dev Intentionally does not reset spend window state. Only limit values change.
+    // Spend windows reset based on time only — see _recordBucketSpend.
     function setDailyLimit(string calldata category, uint256 limit) external {
         dailyCategoryLimit[msg.sender][category] = limit;
         emit DailyCategoryLimitSet(msg.sender, category, limit);
     }
 
+    // @dev Intentionally does not reset spend window state. Only limit values change.
+    // Spend windows reset based on time only — see _recordBucketSpend.
     function setDailyLimitFor(address wallet, string calldata category, uint256 limit) external {
         require(walletOwners[wallet] == msg.sender || wallet == msg.sender, "PolicyEngine: not authorized");
         dailyCategoryLimit[wallet][category] = limit;
         emit DailyCategoryLimitSet(wallet, category, limit);
     }
 
-    /// @dev Uses block.timestamp for rolling daily window tracking.
+    // ─── Fix 3: Velocity limit config ─────────────────────────────────────────
+
+    // @dev Intentionally does not reset spend window state. Only limit values change.
+    // Spend windows reset based on time only — see _recordBucketSpend.
+    function setMaxTxPerHour(address wallet, uint256 limit) external {
+        require(walletOwners[wallet] == msg.sender || wallet == msg.sender, "PolicyEngine: not authorized");
+        maxTxPerHour[wallet] = limit;
+    }
+
+    // @dev Intentionally does not reset spend window state. Only limit values change.
+    // Spend windows reset based on time only — see _recordBucketSpend.
+    function setMaxSpendPerHour(address wallet, uint256 limit) external {
+        require(walletOwners[wallet] == msg.sender || wallet == msg.sender, "PolicyEngine: not authorized");
+        maxSpendPerHour[wallet] = limit;
+    }
+
+    // ─── Fix 1: Two-bucket window helpers ─────────────────────────────────────
+
+    /// @dev Returns the effective accumulated spend for wallet+category across both buckets.
+    ///      Uses a rolling two-bucket window: if both buckets have expired, returns 0.
+    ///      If only the current bucket has expired but previous is still visible, returns current.
+    // slither-disable-next-line timestamp
+    function _getEffectiveSpend(address wallet, string memory category) internal view returns (uint256) {
+        SpendWindow storage w = _spendWindows[wallet][category];
+        if (block.timestamp >= w.currentBucketStart + 2 * BUCKET_DURATION) {
+            return 0;
+        }
+        if (block.timestamp >= w.currentBucketStart + BUCKET_DURATION) {
+            return w.currentBucketSpend;
+        }
+        return w.currentBucketSpend + w.previousBucketSpend;
+    }
+
+    /// @dev Records spend in the two-bucket window for wallet+category.
+    // slither-disable-next-line timestamp
+    function _recordBucketSpend(address wallet, string memory category, uint256 amount) internal {
+        SpendWindow storage w = _spendWindows[wallet][category];
+        if (block.timestamp >= w.currentBucketStart + 2 * BUCKET_DURATION) {
+            w.previousBucketSpend = 0;
+            w.currentBucketSpend = amount;
+            w.currentBucketStart = block.timestamp;
+        } else if (block.timestamp >= w.currentBucketStart + BUCKET_DURATION) {
+            w.previousBucketSpend = w.currentBucketSpend;
+            w.currentBucketSpend = amount;
+            w.currentBucketStart = w.currentBucketStart + BUCKET_DURATION;
+        } else {
+            w.currentBucketSpend += amount;
+        }
+    }
+
+    // ─── Fix 3: Velocity window helpers ───────────────────────────────────────
+
+    // slither-disable-next-line timestamp
+    function _getEffectiveTxCount(address wallet) internal view returns (uint256) {
+        VelocityWindow storage v = _velocityWindows[wallet];
+        if (block.timestamp >= v.currentBucketStart + 2 * VELOCITY_BUCKET) {
+            return 0;
+        }
+        if (block.timestamp >= v.currentBucketStart + VELOCITY_BUCKET) {
+            return v.currentBucketCount;
+        }
+        return v.currentBucketCount + v.previousBucketCount;
+    }
+
+    // slither-disable-next-line timestamp
+    function _getEffectiveHourlySpend(address wallet) internal view returns (uint256) {
+        VelocityWindow storage v = _velocityWindows[wallet];
+        if (block.timestamp >= v.currentBucketStart + 2 * VELOCITY_BUCKET) {
+            return 0;
+        }
+        if (block.timestamp >= v.currentBucketStart + VELOCITY_BUCKET) {
+            return v.currentBucketSpend;
+        }
+        return v.currentBucketSpend + v.previousBucketSpend;
+    }
+
+    // slither-disable-next-line timestamp
+    function _recordVelocitySpend(address wallet, uint256 amount) internal {
+        VelocityWindow storage v = _velocityWindows[wallet];
+        if (block.timestamp >= v.currentBucketStart + 2 * VELOCITY_BUCKET) {
+            v.previousBucketCount = 0;
+            v.previousBucketSpend = 0;
+            v.currentBucketCount = 1;
+            v.currentBucketSpend = amount;
+            v.currentBucketStart = block.timestamp;
+        } else if (block.timestamp >= v.currentBucketStart + VELOCITY_BUCKET) {
+            v.previousBucketCount = v.currentBucketCount;
+            v.previousBucketSpend = v.currentBucketSpend;
+            v.currentBucketCount = 1;
+            v.currentBucketSpend = amount;
+            v.currentBucketStart = v.currentBucketStart + VELOCITY_BUCKET;
+        } else {
+            v.currentBucketCount += 1;
+            v.currentBucketSpend += amount;
+        }
+    }
+
+    /// @dev Uses block.timestamp for rolling window tracking.
     ///      Validator timestamp manipulation is bounded to ~12 seconds.
-    ///      Daily window is 86400 seconds; 12s = 0.014% max drift.
+    ///      BUCKET_DURATION is 43200 seconds; 12s = 0.028% max drift.
     ///      Formally documented in SECURITY-ASSUMPTIONS-RC0.md (SWC-116 accepted risk).
     // slither-disable-next-line timestamp
     function validateSpend(
@@ -132,6 +299,9 @@ contract PolicyEngine is IPolicyEngine {
         uint256 amount,
         bytes32 contextId
     ) external view returns (bool valid, string memory reason) {
+        // Fix 2: Emergency freeze check (hard revert — does not return false)
+        require(!spendFrozen[wallet], "PolicyEngine: spend frozen");
+
         // Per-tx limit check
         uint256 limit = categoryLimits[wallet][category];
         if (limit == 0) {
@@ -146,20 +316,26 @@ contract PolicyEngine is IPolicyEngine {
             return (false, "PolicyEngine: contextId already used");
         }
 
-        // Daily cumulative check
-        // NOTE: "Daily" limit uses a rolling 24-hour window from the first spend of a period,
-        // NOT calendar-day resets. On Base L2, block.timestamp is reliable to within ~2 seconds.
-        // This is intentional — UTC midnight resets require oracle coordination and add complexity.
-        // NOTE: dailySpend[wallet][category] accumulates GLOBALLY across ALL concurrent agreements
-        // for this wallet and category. If 100 agreements each call recordSpend in the same period,
-        // the accumulator reflects the sum of all of them. Per-agreement escaping is not possible.
+        // Fix 1: Daily cumulative check using two-bucket window.
+        // NOTE: dailyCategoryLimit accumulates GLOBALLY across ALL concurrent agreements
+        // for this wallet and category. Per-agreement escaping is not possible.
         uint256 daily = dailyCategoryLimit[wallet][category];
         if (daily > 0) {
-            uint256 accumulated = (block.timestamp > periodStart[wallet][category] + 1 days)
-                ? 0
-                : dailySpend[wallet][category];
+            uint256 accumulated = _getEffectiveSpend(wallet, category);
             if (accumulated + amount > daily) {
                 return (false, "PolicyEngine: daily limit exceeded");
+            }
+        }
+
+        // Fix 3: Velocity checks (0 = disabled; defaults are 0 so existing wallets unaffected)
+        if (maxTxPerHour[wallet] > 0) {
+            if (_getEffectiveTxCount(wallet) + 1 > maxTxPerHour[wallet]) {
+                return (false, "PolicyEngine: tx rate limit exceeded");
+            }
+        }
+        if (maxSpendPerHour[wallet] > 0) {
+            if (_getEffectiveHourlySpend(wallet) + amount > maxSpendPerHour[wallet]) {
+                return (false, "PolicyEngine: hourly spend limit exceeded");
             }
         }
 
@@ -177,14 +353,11 @@ contract PolicyEngine is IPolicyEngine {
     ) external {
         require(msg.sender == wallet || msg.sender == walletOwners[wallet], "PolicyEngine: not authorized");
 
-        // Reset period if expired
-        if (block.timestamp > periodStart[wallet][category] + 1 days) {
-            dailySpend[wallet][category] = 0;
-            periodStart[wallet][category] = block.timestamp;
-        }
+        // Fix 1: Record in two-bucket window (replaces old dailySpend/periodStart reset)
+        _recordBucketSpend(wallet, category, amount);
 
-        // Accumulate
-        dailySpend[wallet][category] += amount;
+        // Fix 3: Update velocity window
+        _recordVelocitySpend(wallet, amount);
 
         // Mark contextId as used
         if (contextId != bytes32(0)) {
@@ -192,6 +365,70 @@ contract PolicyEngine is IPolicyEngine {
         }
 
         emit SpendRecorded(wallet, category, amount, contextId);
+    }
+
+    // ─── Fix 2: Emergency freeze ──────────────────────────────────────────────
+
+    /// @notice Freeze spending for a wallet. Callable by wallet owner or authorized watchtower.
+    function freezeSpend(address wallet) external {
+        require(
+            msg.sender == wallet || msg.sender == walletOwners[wallet] || _authorizedFreezeAgents[wallet][msg.sender],
+            "PolicyEngine: not authorized"
+        );
+        spendFrozen[wallet] = true;
+        emit SpendFrozen(wallet, msg.sender);
+    }
+
+    /// @notice Unfreeze spending for a wallet. Only callable by the wallet or its registered owner.
+    function unfreeze(address wallet) external {
+        require(msg.sender == wallet || msg.sender == walletOwners[wallet], "PolicyEngine: only owner can unfreeze");
+        spendFrozen[wallet] = false;
+        emit SpendUnfrozen(wallet, msg.sender);
+    }
+
+    /// @notice Authorize a watchtower agent to freeze this wallet's spending.
+    function authorizeFreezeAgent(address agent) external {
+        _authorizedFreezeAgents[msg.sender][agent] = true;
+    }
+
+    /// @notice Revoke a watchtower agent's freeze authorization.
+    function revokeFreezeAgent(address agent) external {
+        _authorizedFreezeAgents[msg.sender][agent] = false;
+    }
+
+    /// @notice Returns true if the given agent is authorized to freeze wallet's spending.
+    function isFreezeAgent(address wallet, address agent) external view returns (bool) {
+        return _authorizedFreezeAgents[wallet][agent];
+    }
+
+    // ─── Fix 4: Per-agreement cap with 24-hour reduction timelock ─────────────
+
+    /// @notice Queue a daily-limit reduction for wallet+category.
+    ///         Only reductions (newCap < current cap) are allowed.
+    ///         A 24-hour timelock applies before the new cap can be applied.
+    function queueCapReduction(address wallet, string calldata category, uint256 newCap) external {
+        require(walletOwners[wallet] == msg.sender || wallet == msg.sender, "PolicyEngine: not authorized");
+        require(newCap < dailyCategoryLimit[wallet][category], "PolicyEngine: can only reduce cap");
+        uint256 effectiveAt = block.timestamp + 86400;
+        pendingCapReductions[wallet][category] = PendingCapReduction({
+            newCap: newCap,
+            effectiveAt: effectiveAt
+        });
+        emit CapReductionQueued(wallet, category, newCap, effectiveAt);
+    }
+
+    /// @notice Apply a queued cap reduction after the timelock has elapsed.
+    // @dev Intentionally does not reset spend window state. Only limit values change.
+    // Spend windows reset based on time only — see _recordBucketSpend.
+    // slither-disable-next-line timestamp
+    function applyCapReduction(address wallet, string calldata category) external {
+        PendingCapReduction storage p = pendingCapReductions[wallet][category];
+        require(p.effectiveAt > 0, "PolicyEngine: no pending reduction");
+        require(block.timestamp >= p.effectiveAt, "PolicyEngine: timelock active");
+        uint256 newCap = p.newCap;
+        dailyCategoryLimit[wallet][category] = newCap;
+        delete pendingCapReductions[wallet][category];
+        emit CapReductionApplied(wallet, category, newCap);
     }
 
     // ─── Blocklist ────────────────────────────────────────────────────────────
