@@ -13,6 +13,13 @@ import { registerDisputeCommand } from "./commands/dispute";
 import { registerCancelCommand } from "./commands/cancel";
 import { registerTrustCommand } from "./commands/trust";
 import { registerWalletCommands } from "./commands/wallet";
+import { renderBanner } from "./ui/banner";
+
+// Show banner when invoked with no arguments
+if (process.argv.length <= 2) {
+  renderBanner();
+  process.exit(0);
+}
 
 const program = new Command();
 
