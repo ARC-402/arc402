@@ -89,6 +89,7 @@ interface IServiceAgreement {
         uint256 resolvedAt;
         uint256 verifyWindowEnd;
         bytes32 committedHash;
+        string protocolVersion;  // Set at propose() time; never changes (Spec 20)
     }
 
     struct RemediationCase {

@@ -23,9 +23,13 @@ export function registerNegotiateCommands(program: Command): void {
       "This is the secure communication layer — not just payload generation."
     );
 
-  // Session management
-  negotiate
-    .command("session list")
+  // Session management — nest list/show under a single 'session' subcommand
+  const session = negotiate
+    .command("session")
+    .description("Manage local negotiation sessions");
+
+  session
+    .command("list")
     .description("List all negotiation sessions")
     .option("--json", "Machine-parseable output")
     .action((opts) => {
@@ -39,22 +43,22 @@ export function registerNegotiateCommands(program: Command): void {
       }
     });
 
-  negotiate
-    .command("session show <sessionId>")
+  session
+    .command("show <sessionId>")
     .description("Show full session including message history and transcript hash")
     .option("--json", "Machine-parseable output")
     .action((sessionId, opts) => {
-      const session = sessionManager.load(sessionId);
+      const sess = sessionManager.load(sessionId);
       if (opts.json) {
-        console.log(JSON.stringify(session));
+        console.log(JSON.stringify(sess));
       } else {
-        console.log(`Session: ${session.sessionId}`);
-        console.log(`State: ${session.state}`);
-        console.log(`Parties: ${session.initiator} ↔ ${session.responder}`);
-        console.log(`Messages: ${session.messages.length}`);
-        if (session.transcriptHash) console.log(`Transcript hash: ${session.transcriptHash}`);
-        if (session.onChainAgreementId) console.log(`On-chain agreement: ${session.onChainAgreementId}`);
-        session.messages.forEach((m, i) => console.log(`  ${i + 1}. ${m.type} from ${m.from.slice(0, 8)}...`));
+        console.log(`Session: ${sess.sessionId}`);
+        console.log(`State: ${sess.state}`);
+        console.log(`Parties: ${sess.initiator} ↔ ${sess.responder}`);
+        console.log(`Messages: ${sess.messages.length}`);
+        if (sess.transcriptHash) console.log(`Transcript hash: ${sess.transcriptHash}`);
+        if (sess.onChainAgreementId) console.log(`On-chain agreement: ${sess.onChainAgreementId}`);
+        sess.messages.forEach((m, i) => console.log(`  ${i + 1}. ${m.type} from ${m.from.slice(0, 8)}...`));
       }
     });
 
@@ -90,7 +94,8 @@ export function registerNegotiateCommands(program: Command): void {
         spec: opts.spec,
         specHash,
         expiresAt: now + parseInt(opts.expiresIn),
-      }, signer);
+        protocolVersion: "1.0.0",
+      } as Parameters<typeof createSignedProposal>[0], signer);
 
       sessionManager.addMessage(session.sessionId, proposal);
 

@@ -8,9 +8,13 @@ export function registerArbitratorCommand(program: Command): void {
     .command("arbitrator")
     .description("Arbitrator panel operations: bonds, eligibility, status");
 
-  // Bond status
-  arbitrator
-    .command("bond status <arbitratorAddress> [agreementId]")
+  // Bond subcommands — nest under 'bond' to avoid duplicate registration
+  const bond = arbitrator
+    .command("bond")
+    .description("Arbitrator bond operations: status, accept, fallback");
+
+  bond
+    .command("status <arbitratorAddress> [agreementId]")
     .description("Check arbitrator bond status for an agreement (or general eligibility)")
     .action(async (arbitratorAddress, agreementId, _opts) => {
       const config = loadConfig();
@@ -18,7 +22,6 @@ export function registerArbitratorCommand(program: Command): void {
       const { provider } = await getClient(config);
       const client = new DisputeArbitrationClient(config.disputeArbitrationAddress, provider);
 
-      // Check eligibility
       const eligible = await client.isEligibleArbitrator(arbitratorAddress);
       console.log(`Arbitrator ${arbitratorAddress} eligible: ${eligible}`);
 
@@ -33,9 +36,8 @@ export function registerArbitratorCommand(program: Command): void {
       }
     });
 
-  // Accept assignment (post bond)
-  arbitrator
-    .command("bond accept <agreementId>")
+  bond
+    .command("accept <agreementId>")
     .description("Accept panel assignment and post bond")
     .option("--bond <bond>", "Bond amount in wei (for ETH agreements)", "0")
     .action(async (agreementId, opts) => {
@@ -53,9 +55,8 @@ export function registerArbitratorCommand(program: Command): void {
       console.log(`accepted assignment for agreement ${agreementId}`);
     });
 
-  // Trigger fallback
-  arbitrator
-    .command("bond fallback <agreementId>")
+  bond
+    .command("fallback <agreementId>")
     .description("Trigger fallback to human backstop (mutual unfunded or panel incomplete)")
     .action(async (agreementId, _opts) => {
       const config = loadConfig();
@@ -66,19 +67,23 @@ export function registerArbitratorCommand(program: Command): void {
       console.log(`fallback triggered for ${agreementId}`);
     });
 
-  // Admin: set token rate
-  arbitrator
-    .command("rate set <tokenAddress> <usdPerToken>")
-    .description("Set USD rate for a token. Owner only. Rate in USD with 18 decimals. e.g. 2000e18 for $2000")
+  // Rate subcommands — nest under 'rate'
+  const rate = arbitrator
+    .command("rate")
+    .description("Token USD rate management (owner only)");
+
+  rate
+    .command("set <tokenAddress> <usdPerToken>")
+    .description("Set USD rate for a token. Rate in USD with 18 decimals. e.g. 2000e18 for $2000")
     .action(async (tokenAddress, usdPerToken, _opts) => {
       const config = loadConfig();
       if (!config.disputeArbitrationAddress) throw new Error("disputeArbitrationAddress missing in config");
       const { signer } = await requireSigner(config);
       const client = new DisputeArbitrationClient(config.disputeArbitrationAddress, signer);
 
-      const rate = BigInt(usdPerToken);
-      await client.setTokenUsdRate(tokenAddress, rate);
-      console.log(`token rate set: ${tokenAddress} = ${rate.toString()} USD/token`);
+      const rateVal = BigInt(usdPerToken);
+      await client.setTokenUsdRate(tokenAddress, rateVal);
+      console.log(`token rate set: ${tokenAddress} = ${rateVal.toString()} USD/token`);
     });
 
   // Admin: slash arbitrator (manual rules violation)

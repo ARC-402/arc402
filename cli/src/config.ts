@@ -14,6 +14,7 @@ export interface Arc402Config {
   sponsorshipAttestationAddress?: string;
   capabilityRegistryAddress?: string;
   governanceAddress?: string;
+  agreementTreeAddress?: string;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".arc402");

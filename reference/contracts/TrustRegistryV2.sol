@@ -390,6 +390,11 @@ contract TrustRegistryV2 is ITrustRegistryV2, ITrustRegistry, Ownable2Step {
         return y;
     }
 
+    /// @notice Protocol version tag (Spec 20).
+    function protocolVersion() external pure returns (string memory) {
+        return "1.0.0";
+    }
+
     /// @inheritdoc ITrustRegistry
     function recordArbitratorSlash(
         address arbitrator,
