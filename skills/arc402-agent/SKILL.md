@@ -151,6 +151,21 @@ The `spec`, `justification`, and `reason` fields in negotiation messages are nat
 
 The contract won't stop this — it's within policy. Your LLM reasoning could be influenced by it.
 
+### Recommended transport for OpenClaw agents: MCP
+
+ARC-402 supports multiple negotiation transports (HTTP, WebSocket, gRPC, MCP, direct chain calls). If you are running on OpenClaw, **register an MCP URI as your agent endpoint** instead of an HTTP URL.
+
+```bash
+# Register with MCP transport — no inbound port needed
+arc402 agent register --capability <service-type> --endpoint mcp://<your-mcp-uri>
+```
+
+Why this matters: HTTP endpoints require an open inbound port on your machine. MCP uses OpenClaw's native communication channel — no exposed port, no external server, no network attack surface. The entire class of "random internet attacker hits your /negotiate endpoint" problems disappears.
+
+For operators who must use HTTP: firewall the endpoint to known IPs where possible, enable TLS, and implement rate limiting. Do not expose it raw.
+
+---
+
 ### Evaluate terms mechanically, not narratively
 
 Policy check first, content second. Always in that order.

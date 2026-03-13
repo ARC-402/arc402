@@ -656,6 +656,86 @@ All recommendations from this document, consolidated for tracking:
 
 ---
 
+## 10. Negotiation Transport Security
+
+> Added: 2026-03-13 | Based on architectural review of Spec 14 (Negotiation Protocol) and Spec 15 (Transport Agnosticism)
+
+### The gap
+
+The negotiation layer (Spec 14) defines message types (PROPOSE, COUNTER, ACCEPT, REJECT) but does not mandate:
+- Authentication of the sender before processing
+- Cross-session nonce deduplication
+- Message TTL / expiry
+- Maximum message size
+
+This means an attacker can currently:
+1. POST arbitrary PROPOSE messages to any agent's `/negotiate` endpoint without proving they are a registered ARC-402 wallet
+2. Replay a full recorded negotiation session from a previous date (nonce chaining only prevents within-session replay)
+3. Send a stale PROPOSE weeks after original transmission — no expiry exists
+4. Send a crafted oversized PROPOSE to exhaust agent memory or compute resources
+
+### The available fix
+
+The protocol already has the infrastructure. Agent keys and AgentRegistry are deployed. They're just not enforced at the negotiation layer.
+
+**Required additions to Spec 14:**
+
+Every negotiation message MUST include:
+```json
+{
+  "...existing fields...",
+  "sig": "0x...",            // ECDSA signature over keccak256(type + from + to + nonce + timestamp)
+  "timestamp": 1742875432    // Unix seconds — receiver rejects if |now - timestamp| > 60s
+}
+```
+
+Receiver MUST:
+1. Recover signer from `sig` — reject (401) if recovery fails
+2. Verify recovered address matches `from` field
+3. Verify `from` is registered in AgentRegistry — reject (401) if not found
+4. Verify `|now - timestamp| ≤ 60 seconds` — reject (408) if stale
+5. Verify `nonce` not seen before in this session AND not in receiver's nonce cache (TTL: 24h) — reject (409) if replay
+6. Enforce max message size: reject any message > 64KB before parsing
+
+### The transport exposure (HTTP only)
+
+Agents registering an HTTP endpoint expose an open port. For operators running on laptops or home machines, this creates unintended network exposure. Three mitigations:
+
+**Short term (v1):** Mandatory signed messages reduce the attack surface from "the whole internet" to "registered ARC-402 wallets only."
+
+**Medium term (v1.x):** Ship a reference relay with the SDK. Agents that use the relay post negotiation messages to the relay (push) and poll from it (pull) — no inbound port needed.
+
+**Long term (v2):** Hybrid transport mode. Registry stores `transportMode: direct | relay | both`. Initiator routes accordingly. Direct if available and preferred; relay as fallback.
+
+### MCP transport eliminates the HTTP exposure for OpenClaw agents
+
+Spec 15 lists MCP (Model Context Protocol) as a supported transport. Agents that register an MCP URI instead of an HTTP URL communicate through OpenClaw's native channel — no exposed port, no inbound endpoint required. This is the recommended integration path for OpenClaw deployments specifically.
+
+### Nonce replay window
+
+Nonce chaining (Spec 14, `refNonce`) prevents replay of messages within a single negotiation thread. It does not prevent a full recorded session from being replayed with a new timestamp. Receiver-side nonce cache (24h TTL) closes this gap.
+
+### Message TTL
+
+No expiry is currently defined. A PROPOSE has infinite validity. Recommended:
+- `expiresAt` field added to PROPOSE messages (required, maximum 24h from `timestamp`)
+- Receiver rejects any PROPOSE where `now > expiresAt`
+- Once expired, the nonce is released and the sender must create a new PROPOSE
+
+### New PSM recommendations
+
+| ID | Recommendation | Priority |
+|----|----------------|----------|
+| PSM-17 | Mandate agent key signature on every negotiation message (PROPOSE, COUNTER, ACCEPT, REJECT); receiver recovers signer and verifies against AgentRegistry before processing | HIGH |
+| PSM-18 | Enforce ±60s timestamp window on signed negotiation messages; reject stale messages before processing content | HIGH |
+| PSM-19 | Receiver must maintain a 24h nonce cache; reject any nonce seen before regardless of session context (cross-session replay prevention) | HIGH |
+| PSM-20 | Add `expiresAt` field to PROPOSE (required, max 24h); receivers reject expired proposals before processing | MEDIUM |
+| PSM-21 | Enforce 64KB maximum message size before parsing; log and drop oversized messages without processing | HIGH |
+| PSM-22 | Ship a reference relay with the SDK as the default for home/laptop deployments; document as the recommended path for operators who cannot accept inbound ports | MEDIUM |
+| PSM-23 | Document MCP transport as the recommended integration path for OpenClaw agents; register MCP URI in AgentRegistry to eliminate HTTP endpoint exposure entirely | MEDIUM |
+
+---
+
 ## Appendix: THREAT-MODEL.md Cross-Reference
 
 The following threats in THREAT-MODEL.md have direct cross-boundary implications documented here:
