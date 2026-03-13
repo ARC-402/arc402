@@ -6,6 +6,7 @@ import "./ITrustRegistry.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title DisputeArbitration
 /// @notice Standalone arbitration fee, bond, and trust layer for ARC-402.
@@ -65,6 +66,18 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
     mapping(uint256 => address[]) private _accepted; // arbitrators who called acceptAssignment
     mapping(uint256 => mapping(address => bool)) private _voted; // local vote tracking
 
+    /// @notice Pending bond/fee withdrawals for arbitrators (pull payment pattern).
+    ///         token => account => amount
+    mapping(address => mapping(address => uint256)) public pendingWithdrawals;
+
+    // ─── Admin events ────────────────────────────────────────────────────────
+
+    event FeeFloorUpdated(uint256 newFloor);
+    event FeeCapUpdated(uint256 newCap);
+    event MinBondFloorUpdated(uint256 newFloor);
+    event ServiceAgreementUpdated(address newServiceAgreement);
+    event TrustRegistryUpdated(address newTrustRegistry);
+
     // ─── Modifiers ───────────────────────────────────────────────────────────
 
     modifier onlyOwner() {
@@ -80,6 +93,7 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
     // ─── Constructor ─────────────────────────────────────────────────────────
 
     constructor(address _trustRegistry, address _treasury) {
+        require(_trustRegistry != address(0), "DisputeArbitration: zero trust registry");
         owner = msg.sender;
         trustRegistry = _trustRegistry;
         treasury = _treasury != address(0) ? _treasury : msg.sender;
@@ -95,23 +109,30 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
     function setFeeFloorUsd(uint256 floorUsd18) external onlyOwner {
         require(floorUsd18 <= feeCapUsd18, "DisputeArbitration: floor exceeds cap");
         feeFloorUsd18 = floorUsd18;
+        emit FeeFloorUpdated(floorUsd18);
     }
 
     function setFeeCapUsd(uint256 capUsd18) external onlyOwner {
         require(capUsd18 >= feeFloorUsd18, "DisputeArbitration: cap below floor");
         feeCapUsd18 = capUsd18;
+        emit FeeCapUpdated(capUsd18);
     }
 
     function setMinBondFloorUsd(uint256 floorUsd18) external onlyOwner {
         minBondFloorUsd18 = floorUsd18;
+        emit MinBondFloorUpdated(floorUsd18);
     }
 
     function setServiceAgreement(address sa) external onlyOwner {
+        require(sa != address(0), "DisputeArbitration: zero address");
         serviceAgreement = sa;
+        emit ServiceAgreementUpdated(sa);
     }
 
     function setTrustRegistry(address tr) external onlyOwner {
+        require(tr != address(0), "DisputeArbitration: zero address");
         trustRegistry = tr;
+        emit TrustRegistryUpdated(tr);
     }
 
     function setTreasury(address _treasury) external onlyOwner {
@@ -281,7 +302,7 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
         uint256 agreementId,
         address arbitrator,
         string calldata reason
-    ) external onlyOwner nonReentrant {
+    ) external nonReentrant onlyOwner {
         ArbitratorBondState storage bond = _bonds[agreementId][arbitrator];
         require(bond.locked && !bond.slashed && !bond.returned, "DisputeArbitration: bond not slashable");
 
@@ -336,10 +357,10 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
         // Convert agreement price (in token wei) to USD (18-decimal).
         // rate = USD/token in 1e18. agreementPrice is in token wei (1e18 = 1 token).
         // agreementPriceUsd = agreementPrice [token wei] * rate [USD/token, 1e18] / 1e18 [wei/token]
-        uint256 agreementPriceUsd = (agreementPrice * rate) / 1e18;
+        uint256 agreementPriceUsd = Math.mulDiv(agreementPrice, rate, 1e18);
 
         // 3% of agreement value in USD
-        uint256 rawFeeUsd = (agreementPriceUsd * 3) / 100;
+        uint256 rawFeeUsd = Math.mulDiv(agreementPriceUsd, 3, 100);
 
         // clamp to floor/cap
         uint256 clampedFeeUsd = rawFeeUsd < feeFloorUsd18 ? feeFloorUsd18
@@ -348,13 +369,13 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
 
         // apply class multiplier
         uint256 multiplierBps = _classMultiplierBps(disputeClass);
-        uint256 classFeeUsd = (clampedFeeUsd * multiplierBps) / 10000;
+        uint256 classFeeUsd = Math.mulDiv(clampedFeeUsd, multiplierBps, 10000);
 
         // cap again after multiplier
         uint256 finalFeeUsd = classFeeUsd > feeCapUsd18 ? feeCapUsd18 : classFeeUsd;
 
         // convert USD back to tokens: tokens = USD / (USD/token) = USD * 1e18 / rate
-        return (finalFeeUsd * 1e18) / rate;
+        return Math.mulDiv(finalFeeUsd, 1e18, rate);
     }
 
     function _classMultiplierBps(DisputeClass disputeClass) internal pure returns (uint256) {
@@ -424,12 +445,12 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
             if (!bond.locked || bond.slashed || bond.returned) continue;
 
             if (_voted[agreementId][arb]) {
-                // Clean completion: return bond + pay fee share
+                // Clean completion: queue bond + fee share for pull withdrawal (DoS-safe)
                 bond.returned = true;
-                _releasePayment(token, arb, bond.bondAmount);
+                pendingWithdrawals[token][arb] += bond.bondAmount;
                 emit ArbitratorBondReturned(agreementId, arb, bond.bondAmount);
                 if (feePerArbitrator > 0) {
-                    _releasePayment(token, arb, feePerArbitrator);
+                    pendingWithdrawals[token][arb] += feePerArbitrator;
                     emit ArbitratorFeePaid(agreementId, arb, feePerArbitrator);
                 }
             } else {
@@ -531,6 +552,17 @@ contract DisputeArbitration is IDisputeArbitration, ReentrancyGuard {
             candidates[j] = tmp;
             selected[i] = candidates[i];
         }
+    }
+
+    // ─── Pull Withdrawal (arbitrator bonds and fees) ──────────────────────────
+
+    /// @notice Arbitrators call this to collect their bond return and fee share after settlement.
+    /// @param token The payment token (address(0) for ETH) used in the dispute.
+    function withdrawBond(address token) external nonReentrant {
+        uint256 amount = pendingWithdrawals[token][msg.sender];
+        require(amount > 0, "DisputeArbitration: nothing to withdraw");
+        pendingWithdrawals[token][msg.sender] = 0;
+        _releasePayment(token, msg.sender, amount);
     }
 
     receive() external payable {}

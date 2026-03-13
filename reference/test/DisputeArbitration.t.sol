@@ -389,7 +389,14 @@ contract DisputeArbitrationTest is Test {
         vm.prank(saAddr);
         da.resolveDisputeFee(AGREEMENT_ID, 2);
 
-        assertTrue(arb1.balance > arb1Before, "arb1 should receive bond + fee share");
+        // With pull-payment pattern, funds are queued — arb must call withdrawBond
+        assertEq(arb1.balance, arb1Before, "arb1 balance unchanged before withdrawal");
+        assertTrue(da.pendingWithdrawals(address(0), arb1) > 0, "arb1 should have pending withdrawal");
+
+        vm.prank(arb1);
+        da.withdrawBond(address(0));
+
+        assertTrue(arb1.balance > arb1Before, "arb1 should receive bond + fee share after withdrawal");
 
         IDisputeArbitration.ArbitratorBondState memory bond =
             da.getArbitratorBondState(arb1, AGREEMENT_ID);

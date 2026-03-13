@@ -284,13 +284,13 @@ contract PolicyEngine is IPolicyEngine {
     /// @notice Add a contract address to the per-wallet DeFi whitelist.
     function whitelistContract(address wallet, address target) external onlyWalletOwnerOrWallet(wallet) {
         require(target != address(0), "PolicyEngine: zero target");
-        _whitelistedContracts[wallet].add(target);
+        require(_whitelistedContracts[wallet].add(target), "PolicyEngine: already whitelisted");
         emit ContractWhitelisted(wallet, target);
     }
 
     /// @notice Remove a contract address from the per-wallet DeFi whitelist.
     function removeWhitelistedContract(address wallet, address target) external onlyWalletOwnerOrWallet(wallet) {
-        _whitelistedContracts[wallet].remove(target);
+        require(_whitelistedContracts[wallet].remove(target), "PolicyEngine: not whitelisted");
         emit ContractRemoved(wallet, target);
     }
 
@@ -331,13 +331,13 @@ contract PolicyEngine is IPolicyEngine {
     /// @notice Allow an NFT contract (ERC-721 / ERC-1155) for this wallet's governance.
     function allowNFTContract(address wallet, address nftContract) external onlyWalletOwnerOrWallet(wallet) {
         require(nftContract != address(0), "PolicyEngine: zero nft contract");
-        _allowedNFTContracts[wallet].add(nftContract);
+        require(_allowedNFTContracts[wallet].add(nftContract), "PolicyEngine: NFT contract already allowed");
         emit NFTContractAllowed(wallet, nftContract);
     }
 
     /// @notice Remove an NFT contract from this wallet's allowed list.
     function disallowNFTContract(address wallet, address nftContract) external onlyWalletOwnerOrWallet(wallet) {
-        _allowedNFTContracts[wallet].remove(nftContract);
+        require(_allowedNFTContracts[wallet].remove(nftContract), "PolicyEngine: NFT contract not allowed");
         emit NFTContractDisallowed(wallet, nftContract);
     }
 

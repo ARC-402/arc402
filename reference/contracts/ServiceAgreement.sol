@@ -10,6 +10,7 @@ import "./IWatchtowerRegistry.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -149,6 +150,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         trustRegistry = _trustRegistry;
         allowedTokens[address(0)] = true;
         emit TokenAllowed(address(0));
+        require(_trustRegistry != address(0), "ServiceAgreement: zero trust registry");
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
@@ -201,6 +203,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     }
 
     function setDisputeArbitration(address da) external onlyOwner {
+        require(da != address(0), "ServiceAgreement: zero address");
         disputeArbitration = da;
         emit DisputeArbitrationUpdated(da);
     }
@@ -211,6 +214,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     }
 
     function setWatchtowerRegistry(address _watchtowerRegistry) external onlyOwner {
+        require(_watchtowerRegistry != address(0), "ServiceAgreement: zero address");
         watchtowerRegistry = _watchtowerRegistry;
         emit WatchtowerRegistryUpdated(_watchtowerRegistry);
     }
@@ -590,7 +594,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
         emit DisputeEvidenceSubmitted(agreementId, _disputeEvidence[agreementId].length - 1, msg.sender, evidenceType, evidenceHash);
     }
 
-    function resolveDisputeDetailed(uint256 agreementId, DisputeOutcome outcome, uint256 providerAward, uint256 clientAward) public onlyOwner nonReentrant {
+    function resolveDisputeDetailed(uint256 agreementId, DisputeOutcome outcome, uint256 providerAward, uint256 clientAward) public nonReentrant onlyOwner {
         Agreement storage ag = _get(agreementId);
         require(ag.status == Status.ESCALATED_TO_HUMAN, "ServiceAgreement: human escalation required");
         require(_disputeCases[agreementId].humanReviewRequested, "ServiceAgreement: human review not requested");
@@ -1049,17 +1053,7 @@ contract ServiceAgreement is IServiceAgreement, ReentrancyGuard {
     }
 
     function _recoverSigner(bytes32 hash, bytes memory sig) internal pure returns (address) {
-        require(sig.length == 65, "ServiceAgreement: invalid sig length");
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-        assembly {
-            r := mload(add(sig, 32))
-            s := mload(add(sig, 64))
-            v := byte(0, mload(add(sig, 96)))
-        }
-        if (v < 27) v += 27;
-        return ecrecover(hash, v, r, s);
+        return ECDSA.recover(hash, sig);
     }
 
     receive() external payable {}

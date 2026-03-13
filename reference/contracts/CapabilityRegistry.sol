@@ -57,9 +57,9 @@ contract CapabilityRegistry is Ownable2Step {
     event CapabilityClaimed(address indexed agent, bytes32 indexed capabilityId, string capability);
     event CapabilityRevoked(address indexed agent, bytes32 indexed capabilityId, string capability);
 
-    constructor(address _agentRegistry, address _owner) Ownable(_owner) {
+    constructor(address _agentRegistry, address owner_) Ownable(owner_) {
         require(_agentRegistry != address(0), "CapabilityRegistry: zero agent registry");
-        require(_owner != address(0), "CapabilityRegistry: zero owner");
+        require(owner_ != address(0), "CapabilityRegistry: zero owner");
         agentRegistry = IAgentDirectory(_agentRegistry);
     }
 
@@ -105,7 +105,7 @@ contract CapabilityRegistry is Ownable2Step {
         if (bytes(_canonicalCapability[capabilityId]).length == 0) {
             _canonicalCapability[capabilityId] = capability;
         }
-        _capabilityAgents[capabilityId].add(msg.sender);
+        require(_capabilityAgents[capabilityId].add(msg.sender), "CapabilityRegistry: add failed");
 
         emit CapabilityClaimed(msg.sender, capabilityId, capability);
     }
@@ -115,7 +115,7 @@ contract CapabilityRegistry is Ownable2Step {
         require(hasCapability[msg.sender][capabilityId], "CapabilityRegistry: not claimed");
 
         hasCapability[msg.sender][capabilityId] = false;
-        _capabilityAgents[capabilityId].remove(msg.sender);
+        require(_capabilityAgents[capabilityId].remove(msg.sender), "CapabilityRegistry: remove failed");
         bytes32[] storage ids = _agentCapabilityIds[msg.sender];
         uint256 length = ids.length;
         for (uint256 i = 0; i < length; i++) {

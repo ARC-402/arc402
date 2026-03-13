@@ -40,9 +40,9 @@ contract AgreementTree is IAgreementTree, Ownable2Step {
 
     // ─── Constructor ─────────────────────────────────────────────────────────
 
-    constructor(address _serviceAgreement, address _owner) Ownable(_owner) {
+    constructor(address _serviceAgreement, address owner_) Ownable(owner_) {
         require(_serviceAgreement != address(0), "AgreementTree: zero service agreement");
-        require(_owner != address(0), "AgreementTree: zero owner");
+        require(owner_ != address(0), "AgreementTree: zero owner");
         serviceAgreement = IServiceAgreement(_serviceAgreement);
     }
 

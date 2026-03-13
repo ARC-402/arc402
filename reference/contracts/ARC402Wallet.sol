@@ -447,9 +447,9 @@ contract ARC402Wallet is ReentrancyGuard {
     /// @dev nonReentrant prevents callback exploits. onlyOwner restricts to wallet owner.
     function executeContractCall(ContractCallParams calldata params)
         external
+        nonReentrant
         onlyOwner
         notFrozen
-        nonReentrant
         returns (bytes memory returnData)
     {
         // 1. Validate via PolicyEngine DeFi access tier

@@ -75,6 +75,7 @@ contract ReputationOracle {
 
     constructor(address _trustRegistry, address _serviceAgreement) {
         require(_trustRegistry != address(0), "ReputationOracle: zero trust registry");
+        require(_serviceAgreement != address(0), "ReputationOracle: zero service agreement");
         trustRegistry = ITrustRegistry(_trustRegistry);
         serviceAgreement = _serviceAgreement;
     }
