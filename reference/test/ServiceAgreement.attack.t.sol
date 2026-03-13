@@ -291,7 +291,7 @@ contract ServiceAgreementAttackTest is Test {
         // The reentrancy guard must block the nested fulfill() call,
         // causing the ETH transfer to fail, reverting resolveDispute entirely
         vm.expectRevert();
-        sa.resolveDisputeDetailed(id1, IServiceAgreement.DisputeOutcome.PROVIDER_WINS, sa.getAgreement(id1).price, 0);
+        sa.resolveDisputeDetailed(id1, IServiceAgreement.DisputeOutcome.PROVIDER_WINS, PRICE, 0);
 
         // Verify state: human-backstop stage unchanged, no ETH moved
         IServiceAgreement.Agreement memory ag1 = sa.getAgreement(id1);
@@ -531,14 +531,14 @@ contract ServiceAgreementAttackTest is Test {
 
         // Status is PROPOSED, not DISPUTED
         vm.expectRevert(ServiceAgreement.HumanEscalationRequired.selector);
-        sa.resolveDisputeDetailed(id, IServiceAgreement.DisputeOutcome.PROVIDER_WINS, sa.getAgreement(id).price, 0); // owner calls this (test contract is owner)
+        sa.resolveDisputeDetailed(id, IServiceAgreement.DisputeOutcome.PROVIDER_WINS, PRICE, 0); // owner calls this (test contract is owner)
 
         // Also test on ACCEPTED state
         vm.prank(provider);
         sa.accept(id);
 
         vm.expectRevert(ServiceAgreement.HumanEscalationRequired.selector);
-        sa.resolveDisputeDetailed(id, IServiceAgreement.DisputeOutcome.PROVIDER_WINS, sa.getAgreement(id).price, 0);
+        sa.resolveDisputeDetailed(id, IServiceAgreement.DisputeOutcome.PROVIDER_WINS, PRICE, 0);
 
         // Escrow intact
         assertEq(address(sa).balance, PRICE, "Owner cannot drain non-disputed escrow");

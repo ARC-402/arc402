@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 import "../contracts/ServiceAgreement.sol";
+import "../contracts/SessionChannels.sol";
 import "../contracts/TrustRegistry.sol";
 
 /**
@@ -44,6 +45,11 @@ contract DeployServiceAgreement is Script {
         console.log("ServiceAgreement:          ", address(serviceAgreement));
         console.log("Owner (arbiter):           ", serviceAgreement.owner());
 
+        // Deploy SessionChannels and wire to ServiceAgreement
+        SessionChannels sessionChannels = new SessionChannels(address(serviceAgreement));
+        serviceAgreement.setSessionChannels(address(sessionChannels));
+        console.log("SessionChannels:           ", address(sessionChannels));
+
         // T-02: ServiceAgreement is the ONLY authorized trust updater.
         //       Add it to the registry and remove the deployer's own updater access.
         TrustRegistry(trustRegistryAddr).addUpdater(address(serviceAgreement));
@@ -56,5 +62,6 @@ contract DeployServiceAgreement is Script {
         console.log("The deployer is the initial dispute arbiter.");
         console.log("Transfer ownership via transferOwnership() (Ownable2Step on TrustRegistry).");
         console.log(unicode"Only ServiceAgreement can update trust scores \u2014 farming vector closed.");
+        console.log("SessionChannels wired to ServiceAgreement.");
     }
 }
