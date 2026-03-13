@@ -23,10 +23,15 @@ It is the ownable symbol of the protocol. Every CLI session begins and ends with
 Displayed on first run and `arc init`. Not shown on subsequent commands.
 
 ```
- ┌─────────────────────────────────────┐
- │  ◈  ARC-402 Protocol CLI v0.1.0    │
- │     Agent Resource Contracts        │
- └─────────────────────────────────────┘
+ ██████╗ ██████╗  ██████╗      ██╗  ██╗ ██████╗ ██████╗
+ ██╔══██╗██╔══██╗██╔════╝      ██║  ██║██╔═══██╗╚════██╗
+ ███████║██████╔╝██║     █████╗███████║██║   ██║ █████╔╝
+ ██╔══██║██╔══██╗██║     ╚════╝╚════██║██║   ██║██╔═══╝
+ ██║  ██║██║  ██║╚██████╗           ██║╚██████╔╝███████╗
+ ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝          ╚═╝ ╚═════╝ ╚══════╝
+
+ Agent Resource Contracts · v0.1.0
+ ◈ ─────────────────────────────────────────────
 
  Network   Base Sepolia
  Wallet    0xa214...620
@@ -35,12 +40,21 @@ Displayed on first run and `arc init`. Not shown on subsequent commands.
  Type 'arc help' to get started
 ```
 
-**Rules:**
-- Box drawn with `┌ ─ ┐ │ └ ┘`
-- `◈` in cyan, title in white, subtitle in dim
-- Network line: dim label, white value
-- Wallet line: dim label, dim address (truncated `0x1234...abcd`)
-- Balance line: dim label, white ETH, dim `·`, white token amounts
+**Color rules:**
+- ASCII art: **cyan**
+- Tagline `Agent Resource Contracts · v0.1.0`: dim white
+- `◈` separator: bright cyan
+- `─────` line: dim
+- Network/Wallet/Balance labels: dim
+- Network/Wallet/Balance values: white
+
+---
+
+### Banner Implementation Note
+
+The ASCII art is a hardcoded string in `ui/banner.ts`. Every `█` and `╗` character is literal — do not generate it programmatically. Copy the exact block above. Render in cyan using the color system below.
+
+The `◈ ─────────────` separator line is always exactly 47 chars wide (one `◈`, one space, then `─` repeated to fill 80-char terminal width).
 
 ---
 
