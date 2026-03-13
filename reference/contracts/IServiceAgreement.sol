@@ -72,16 +72,7 @@ interface IServiceAgreement {
         HUMAN_REVIEW_REQUIRED
     }
 
-    enum DisputeMode {
-        UNILATERAL, // opener pays full fee; win = 50% refund, lose = consumed
-        MUTUAL      // each party pays 50%; no winner reimbursement
-    }
-
-    enum DisputeClass {
-        HARD_FAILURE,      // 1.0x fee multiplier
-        AMBIGUITY_QUALITY, // 1.25x fee multiplier
-        HIGH_SENSITIVITY   // 1.5x fee multiplier
-    }
+    // DisputeMode and DisputeClass are defined in IDisputeArbitration.sol
 
     struct Agreement {
         uint256 id;
@@ -184,8 +175,10 @@ interface IServiceAgreement {
     function commitDeliverable(uint256 agreementId, bytes32 deliverableHash) external;
     function verifyDeliverable(uint256 agreementId) external;
     function autoRelease(uint256 agreementId) external;
-    function dispute(uint256 agreementId, string calldata reason) external;
-    function directDispute(uint256 agreementId, DirectDisputeReason directReason, string calldata reason) external;
+    function dispute(uint256 agreementId, string calldata reason) external payable;
+    function directDispute(uint256 agreementId, DirectDisputeReason directReason, string calldata reason) external payable;
+    // openDisputeWithMode is callable on the concrete ServiceAgreement — not declared here to avoid
+    // cross-interface type ambiguity with IDisputeArbitration.DisputeMode/DisputeClass.
     function cancel(uint256 agreementId) external;
 
     function requestRevision(
@@ -204,7 +197,7 @@ interface IServiceAgreement {
         bytes32 previousTranscriptHash
     ) external;
 
-    function escalateToDispute(uint256 agreementId, string calldata reason) external;
+    function escalateToDispute(uint256 agreementId, string calldata reason) external payable;
     function canDirectDispute(uint256 agreementId, DirectDisputeReason directReason) external view returns (bool);
 
     function submitDisputeEvidence(

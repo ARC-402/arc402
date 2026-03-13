@@ -361,6 +361,9 @@ contract BrokenTrustRegistry is ITrustRegistry {
     function recordAnomaly(address, address, string calldata, uint256) external pure override {
         revert("TrustRegistry: permanent failure");
     }
+    function recordArbitratorSlash(address, string calldata) external pure override {
+        revert("TrustRegistry: permanent failure");
+    }
     function getScore(address) external pure override returns (uint256) {
         return 0;
     }

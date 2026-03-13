@@ -389,4 +389,19 @@ contract TrustRegistryV2 is ITrustRegistryV2, ITrustRegistry, Ownable2Step {
         }
         return y;
     }
+
+    /// @inheritdoc ITrustRegistry
+    function recordArbitratorSlash(
+        address arbitrator,
+        string calldata reason
+    ) external override(ITrustRegistry) onlyUpdater {
+        _ensureInitialized(arbitrator);
+        TrustProfile storage p = profiles[arbitrator];
+        uint256 oldGlobal = p.globalScore;
+        uint256 penalty = ANOMALY_PENALTY * 2; // Arbitrator slash is heavier than standard anomaly
+        uint256 newGlobal = oldGlobal >= penalty ? oldGlobal - penalty : 0;
+        p.globalScore = newGlobal;
+        p.lastUpdated = block.timestamp;
+        emit ScoreUpdated(arbitrator, newGlobal, reason, -int256(penalty));
+    }
 }
