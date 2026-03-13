@@ -328,6 +328,8 @@ export interface GovernanceTransaction {
 export interface NegotiationMessageBase {
   from: Address;
   to: Address;
+  timestamp: number;  // Unix seconds — receiver rejects if |now - timestamp| > 60
+  sig: Hex;           // ECDSA signature over message digest (see signNegotiationMessage)
 }
 
 export interface NegotiationProposal extends NegotiationMessageBase {
@@ -339,6 +341,7 @@ export interface NegotiationProposal extends NegotiationMessageBase {
   spec: string;
   specHash: Hex;
   nonce: Hex;
+  expiresAt: number;  // Unix seconds, required, max timestamp + 86400
 }
 
 export interface NegotiationCounter extends NegotiationMessageBase {
@@ -367,6 +370,27 @@ export type NegotiationMessage =
   | NegotiationCounter
   | NegotiationAccept
   | NegotiationReject;
+
+export interface SignedNegotiationMessage<T extends NegotiationMessage = NegotiationMessage> {
+  message: T;
+  recoveredSigner: Address;
+}
+
+export type NegotiationVerificationError =
+  | "INVALID_SIGNATURE"
+  | "SIGNER_NOT_REGISTERED"
+  | "TIMESTAMP_TOO_OLD"
+  | "TIMESTAMP_IN_FUTURE"
+  | "NONCE_REPLAYED"
+  | "MESSAGE_EXPIRED"
+  | "MESSAGE_TOO_LARGE"
+  | "SCHEMA_INVALID";
+
+export interface NegotiationVerificationResult {
+  valid: boolean;
+  error?: NegotiationVerificationError;
+  recoveredSigner?: Address;
+}
 
 
 // ─── DisputeArbitration types ─────────────────────────────────────────────────

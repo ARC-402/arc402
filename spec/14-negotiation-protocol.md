@@ -147,6 +147,63 @@ Total evaluation time: <100ms. The negotiation diagram in the design session too
 
 ---
 
+## Message Authentication (Required — v1)
+
+Every negotiation message MUST include a signature and timestamp. Receivers MUST verify before processing.
+
+### Required fields on all messages
+
+All four message types (PROPOSE, COUNTER, ACCEPT, REJECT) now require:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `timestamp` | number | Unix seconds. Receiver rejects if \|now - timestamp\| > 60s |
+| `sig` | string | ECDSA signature over `keccak256(abi.encodePacked(type, from, to, nonce, timestamp))` |
+
+PROPOSE additionally requires:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `expiresAt` | number | Unix seconds. Max: timestamp + 86400 (24h). Receiver rejects expired proposals. |
+
+### Signature computation
+
+```
+digest = keccak256(abi.encodePacked(
+  message.type,    // "PROPOSE", "COUNTER", etc.
+  message.from,    // address
+  message.to,      // address
+  nonce,           // message.nonce (PROPOSE) or message.refNonce (COUNTER/ACCEPT/REJECT) or bytes32(0)
+  message.timestamp
+))
+sig = agentKey.sign(digest)
+```
+
+### Receiver verification (required)
+
+Before processing any negotiation message, receivers MUST:
+
+1. Verify message size ≤ 64KB — drop oversized messages
+2. Verify `|now - timestamp| ≤ 60s` — reject (408) if stale
+3. Verify `now ≤ expiresAt` (PROPOSE only) — reject (410) if expired
+4. Recover signer from `sig` — reject (401) if recovery fails
+5. Verify recovered signer == `from` field — reject (401) if mismatch
+6. Verify `from` is registered in AgentRegistry — reject (401) if not found
+7. Verify nonce not seen before (24h cache, keyed by from + nonce + timestamp) — reject (409) if replay
+
+### SDK support
+
+The `@arc402/sdk` provides:
+- `createSignedProposal`, `createSignedCounter`, `createSignedAccept`, `createSignedReject` — factory functions that sign automatically
+- `NegotiationGuard` — receiver-side verification class with nonce cache
+- `parseNegotiationMessage` — validates size limit before parsing
+
+### Why fail open on registry downtime
+
+Step 6 (registry check) fails open: if AgentRegistry is unreachable, signature verification alone is used. This prevents protocol-wide negotiation outage from a single registry downtime event. The tradeoff: deregistered agents can still negotiate during registry downtime. Acceptable for v1.
+
+---
+
 ## Future Extensions
 
 **Auction mode:** Client broadcasts PROPOSE to N providers simultaneously. First ACCEPT wins. Useful for commodity services.
