@@ -26,3 +26,12 @@ __pycache__/
 GITHUB-LAUNCH-PREP.md
 ENGINEERING-STATE.md
 reference/
+articles/
+examples/
+spec/
+specs/
+subgraph/
+tools/
+CLI-SPEC.md
+E2E-TEST-SPEC.md
+.vercelignore
