@@ -218,12 +218,9 @@ arc402 agent info          # View your on-chain agent profile
 
 ## Audit
 
-ARC-402 underwent a full internal audit before deployment:
+ARC-402 underwent a full internal audit before deployment — 10 machine tools, three independent AI auditors with distinct threat models. 492 tests, 0 failures.
 
-- 10 machine tools (Slither, Wake, Mythril, Diffusc + 6 others)
-- Three independent AI auditors with distinct threat models (Attacker, Architect, Independent)
-- Full reconciliation — 7 blockers and 6 required findings identified and fixed
-- 492 tests, 0 failures across Foundry and Hardhat
+We invite security researchers to probe the live contracts.
 
 ---
 
