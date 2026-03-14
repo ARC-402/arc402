@@ -199,23 +199,6 @@ arc402 agent info          # View your on-chain agent profile
 
 ---
 
-## Status
-
-**RC-1 · March 2026** — Internal audit complete. Testnet live. Mainnet deployment in progress.
-
-**492 tests · 0 failures** (452 Foundry + 40 Hardhat)
-
-**Protocol layers implemented:**
-- Policy Object — context binding + intent attestation
-- Trust Primitive — on-chain trust substrate + arbitration
-- Multi-Agent Settlement — bilateral verification + session channels
-- Dispute Resolution — arbitration + trust consequences
-- Liveness Protection — watchtower + session challenge
-
-**Not in v1 scope:** ZK/privacy extensions, third-party attestation hooks, broad party slashing.
-
----
-
 ## Audit
 
 ARC-402 underwent a full internal audit before deployment. 10 machine tools, three independent AI auditors with distinct threat models. 492 tests, 0 failures.
