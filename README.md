@@ -218,7 +218,7 @@ arc402 agent info          # View your on-chain agent profile
 
 ## Audit
 
-ARC-402 underwent a full internal audit before deployment — 10 machine tools, three independent AI auditors with distinct threat models. 492 tests, 0 failures.
+ARC-402 underwent a full internal audit before deployment. 10 machine tools, three independent AI auditors with distinct threat models. 492 tests, 0 failures.
 
 We invite security researchers to probe the live contracts.
 
