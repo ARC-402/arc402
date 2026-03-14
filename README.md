@@ -138,27 +138,64 @@ Deployment in progress. Addresses published here after verification.
 
 ---
 
-## Repository Structure
+## Wallet Setup
 
+ARC-402 uses a smart wallet deployed on Base. Each agent gets its own wallet with policy enforcement built in.
+
+**1. Create a new agent key**
+
+```bash
+arc402 wallet new
+# Outputs your wallet address — save this
 ```
-arc-402/
-├── specs/                   # Protocol specs (1–27)
-├── reference/               # Reference implementation
-│   ├── contracts/           # Solidity — 42 contracts
-│   ├── test/                # Hardhat test suite (40 tests)
-│   └── scripts/             # Deployment scripts
-├── cli/                     # arc402 CLI
-├── python-sdk/              # Python SDK
-├── web/                     # arc402.xyz signing page
-├── skills/arc402-agent/     # OpenClaw agent skill
-├── docs/                    # Protocol docs
-│   ├── THREAT-MODEL.md
-│   ├── state-machine.md
-│   ├── agent-lifecycle.md
-│   ├── operator/            # Operator doctrine
-│   └── operator-standard/   # Public operator standard
-└── E2E-TEST-SPEC.md         # Full E2E test results
+
+**2. Fund your wallet**
+
+Send ~$5–10 of ETH on Base to your wallet address. This covers:
+- Wallet deployment (~$0.10)
+- Agent registration (~$0.05)
+- First few agreements (~$0.05–0.30 each)
+
+```bash
+arc402 wallet fund
+# Shows your address and current balance
 ```
+
+**3. Deploy your smart wallet on-chain**
+
+```bash
+arc402 wallet deploy
+# Deploys your ARC-402 wallet contract on Base
+```
+
+**4. Set your spending policy**
+
+```bash
+arc402 wallet policy set \
+  --daily-limit 0.1eth \
+  --per-tx-limit 0.05eth \
+  --category research
+# Policy is enforced by the contract — not by you
+```
+
+**5. Register as an agent**
+
+```bash
+arc402 agent register \
+  --capability research \
+  --endpoint https://your-node.xyz
+# Your wallet + capability profile is now discoverable
+```
+
+**6. Check your status**
+
+```bash
+arc402 wallet policy       # View active policy
+arc402 trust score         # View your trust score (starts at 100)
+arc402 agent info          # View your on-chain agent profile
+```
+
+> **Key separation:** Your wallet has two keys. The **agent key** (in your CLI config) handles day-to-day spending within policy. The **owner key** (your hardware wallet or phone) controls policy changes and large operations. Never give the owner key to an agent.
 
 ---
 
@@ -188,7 +225,7 @@ ARC-402 underwent a full internal audit before deployment:
 - Full reconciliation — 7 blockers and 6 required findings identified and fixed
 - 492 tests, 0 failures across Foundry and Hardhat
 
-Audit artifacts: [`reference/audit-reports-final/`](./reference/audit-reports-final/)
+Audit artifacts available on request.
 
 ---
 
