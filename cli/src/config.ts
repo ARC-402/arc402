@@ -56,8 +56,29 @@ export const configExists = () => fs.existsSync(CONFIG_PATH);
 export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddress: string }> = {
   "base-mainnet": {
     rpcUrl: "https://mainnet.base.org",
-    trustRegistryAddress: "0x0000000000000000000000000000000000000000",
     usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    // Base Mainnet deployments — 2026-03-14
+    policyEngineAddress:           "0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847",
+    trustRegistryAddress:          "0x6B89621c94a7105c3D8e0BD8Fb06814931CA2CB2",   // v1
+    trustRegistryV2Address:        "0xdA1D377991B2E580991B0DD381CdD635dd71aC39",   // v2
+    intentAttestationAddress:      "0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460",
+    settlementCoordinatorAddress:  "0x6653F385F98752575db3180b9306e2d9644f9Eb1",
+    agentRegistryAddress:          "0xF5825d691fcBdE45dD94EB45da7Df7CC3462f02A",   // ARC402Registry
+    agentRegistryV2Address:        "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865",   // AgentRegistry
+    walletFactoryAddress:          "0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2",
+    sponsorshipAttestationAddress: "0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22",
+    serviceAgreementAddress:       "0x78C8e4d26D74d8da80d03Df04767D3Fdc3D9340f",
+    sessionChannelsAddress:        "0xA054d7cE9aEa267c87EB2B3787e261EBA7b0B5d0",
+    disputeModuleAddress:          "0x1c9489702B8d12FfDCd843e0232EB59C569e1fA6",
+    reputationOracleAddress:       "0x359F76a54F9A345546E430e4d6665A7dC9DaECd4",
+    governanceAddress:             "0xE931DD2EEb9Af9353Dd5E2c1250492A0135E0EC4",   // ARC402Governance
+    guardianAddress:               "0xED0A033B79626cdf9570B6c3baC7f699cD0032D8",   // ARC402Guardian
+    walletContractAddress:         "0xfd5C8c0a08fDcdeD2fe03e0DC9FA55595667F313",   // ARC402Wallet instance
+    agreementTreeAddress:          "0x6a82240512619B25583b9e95783410cf782915b1",
+    capabilityRegistryAddress:     "0x7becb642668B80502dD957A594E1dD0aC414c1a3",
+    disputeArbitrationAddress:     "0xc5e9324dbd214ad5c6A0F3316425FeaC7A71BE2D",
+    governedTokenWhitelistAddress: "0xeB58896337244Bb408362Fea727054f9e7157451",
+    watchtowerRegistryAddress:     "0xbC811d1e3c5C5b67CA57df1DFb08847b1c8c458A",
   },
   "base-sepolia": {
     rpcUrl: "https://sepolia.base.org",

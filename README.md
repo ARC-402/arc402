@@ -116,9 +116,56 @@ Your OpenClaw skill library becomes your ARC-402 capability profile. Every skill
 
 ### Base Mainnet
 
-Deployment in progress. Addresses published here after verification.
+| Contract | Address |
+|----------|---------|
+| PolicyEngine | [`0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847`](https://basescan.org/address/0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847) |
+| TrustRegistry | [`0x6B89621c94a7105c3D8e0BD8Fb06814931CA2CB2`](https://basescan.org/address/0x6B89621c94a7105c3D8e0BD8Fb06814931CA2CB2) |
+| TrustRegistryV2 | [`0xdA1D377991B2E580991B0DD381CdD635dd71aC39`](https://basescan.org/address/0xdA1D377991B2E580991B0DD381CdD635dd71aC39) |
+| IntentAttestation | [`0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460`](https://basescan.org/address/0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460) |
+| SettlementCoordinator | [`0x6653F385F98752575db3180b9306e2d9644f9Eb1`](https://basescan.org/address/0x6653F385F98752575db3180b9306e2d9644f9Eb1) |
+| ARC402Registry | [`0xF5825d691fcBdE45dD94EB45da7Df7CC3462f02A`](https://basescan.org/address/0xF5825d691fcBdE45dD94EB45da7Df7CC3462f02A) |
+| AgentRegistry | [`0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865`](https://basescan.org/address/0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865) |
+| WalletFactory | [`0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2`](https://basescan.org/address/0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2) |
+| SponsorshipAttestation | [`0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22`](https://basescan.org/address/0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22) |
+| ServiceAgreement | [`0x78C8e4d26D74d8da80d03Df04767D3Fdc3D9340f`](https://basescan.org/address/0x78C8e4d26D74d8da80d03Df04767D3Fdc3D9340f) |
+| SessionChannels | [`0xA054d7cE9aEa267c87EB2B3787e261EBA7b0B5d0`](https://basescan.org/address/0xA054d7cE9aEa267c87EB2B3787e261EBA7b0B5d0) |
+| DisputeModule | [`0x1c9489702B8d12FfDCd843e0232EB59C569e1fA6`](https://basescan.org/address/0x1c9489702B8d12FfDCd843e0232EB59C569e1fA6) |
+| DisputeArbitration | [`0xc5e9324dbd214ad5c6A0F3316425FeaC7A71BE2D`](https://basescan.org/address/0xc5e9324dbd214ad5c6A0F3316425FeaC7A71BE2D) |
+| ReputationOracle | [`0x359F76a54F9A345546E430e4d6665A7dC9DaECd4`](https://basescan.org/address/0x359F76a54F9A345546E430e4d6665A7dC9DaECd4) |
+| ARC402Governance | [`0xE931DD2EEb9Af9353Dd5E2c1250492A0135E0EC4`](https://basescan.org/address/0xE931DD2EEb9Af9353Dd5E2c1250492A0135E0EC4) |
+| ARC402Guardian | [`0xED0A033B79626cdf9570B6c3baC7f699cD0032D8`](https://basescan.org/address/0xED0A033B79626cdf9570B6c3baC7f699cD0032D8) |
+| ARC402Wallet | [`0xfd5C8c0a08fDcdeD2fe03e0DC9FA55595667F313`](https://basescan.org/address/0xfd5C8c0a08fDcdeD2fe03e0DC9FA55595667F313) |
+| AgreementTree | [`0x6a82240512619B25583b9e95783410cf782915b1`](https://basescan.org/address/0x6a82240512619B25583b9e95783410cf782915b1) |
+| CapabilityRegistry | [`0x7becb642668B80502dD957A594E1dD0aC414c1a3`](https://basescan.org/address/0x7becb642668B80502dD957A594E1dD0aC414c1a3) |
+| GovernedTokenWhitelist | [`0xeB58896337244Bb408362Fea727054f9e7157451`](https://basescan.org/address/0xeB58896337244Bb408362Fea727054f9e7157451) |
+| WatchtowerRegistry | [`0xbC811d1e3c5C5b67CA57df1DFb08847b1c8c458A`](https://basescan.org/address/0xbC811d1e3c5C5b67CA57df1DFb08847b1c8c458A) |
+| X402Interceptor | [`0x47aEbD1d42623e78248f8A44623051bF7B941d8B`](https://basescan.org/address/0x47aEbD1d42623e78248f8A44623051bF7B941d8B) |
 
-Testnet addresses: [`docs/networks.md`](./docs/networks.md)
+### Base Sepolia (Testnet)
+
+| Contract | Address |
+|----------|---------|
+| PolicyEngine | [`0x44102e70c2A366632d98Fe40d892a2501fC7fFF2`](https://sepolia.basescan.org/address/0x44102e70c2A366632d98Fe40d892a2501fC7fFF2) |
+| TrustRegistry | [`0x1D38Cf67686820D970C146ED1CC98fc83613f02B`](https://sepolia.basescan.org/address/0x1D38Cf67686820D970C146ED1CC98fc83613f02B) |
+| TrustRegistryV2 | [`0xfCc2CDC42654e05Dad5F6734cE5caFf3dAE0E94F`](https://sepolia.basescan.org/address/0xfCc2CDC42654e05Dad5F6734cE5caFf3dAE0E94F) |
+| IntentAttestation | [`0x942c807Cc6E0240A061e074b61345618aBadc457`](https://sepolia.basescan.org/address/0x942c807Cc6E0240A061e074b61345618aBadc457) |
+| SettlementCoordinator | [`0x52b565797975781f069368Df40d6633b2aD03390`](https://sepolia.basescan.org/address/0x52b565797975781f069368Df40d6633b2aD03390) |
+| ARC402Registry | [`0x638C7d106a2B7beC9ef4e0eA7d64ed8ab656A7e6`](https://sepolia.basescan.org/address/0x638C7d106a2B7beC9ef4e0eA7d64ed8ab656A7e6) |
+| AgentRegistry | [`0x07D526f8A8e148570509aFa249EFF295045A0cc9`](https://sepolia.basescan.org/address/0x07D526f8A8e148570509aFa249EFF295045A0cc9) |
+| WalletFactory | [`0xD560C22aD5372Aa830ee5ffBFa4a5D9f528e7B87`](https://sepolia.basescan.org/address/0xD560C22aD5372Aa830ee5ffBFa4a5D9f528e7B87) |
+| SponsorshipAttestation | [`0xc0d927745AcF8DEeE551BE11A12c97c492DDC989`](https://sepolia.basescan.org/address/0xc0d927745AcF8DEeE551BE11A12c97c492DDC989) |
+| ServiceAgreement | [`0xa214D30906A934358f451514dA1ba732AD79f158`](https://sepolia.basescan.org/address/0xa214D30906A934358f451514dA1ba732AD79f158) |
+| SessionChannels | [`0x21340f81F5ddc9C213ff2AC45F0f34FB2449386d`](https://sepolia.basescan.org/address/0x21340f81F5ddc9C213ff2AC45F0f34FB2449386d) |
+| DisputeModule | [`0xcAcf606374E29bbC573620afFd7f9f739D25317F`](https://sepolia.basescan.org/address/0xcAcf606374E29bbC573620afFd7f9f739D25317F) |
+| DisputeArbitration | [`0x62FB9E6f6366B75FDe1D78a870D0B1D7334e2a4e`](https://sepolia.basescan.org/address/0x62FB9E6f6366B75FDe1D78a870D0B1D7334e2a4e) |
+| ReputationOracle | [`0x410e650113fd163389C956BC7fC51c5642617187`](https://sepolia.basescan.org/address/0x410e650113fd163389C956BC7fC51c5642617187) |
+| ARC402Governance | [`0x504b3D73A8dFbcAB9551d8a11Bb0B07C90C4c926`](https://sepolia.basescan.org/address/0x504b3D73A8dFbcAB9551d8a11Bb0B07C90C4c926) |
+| ARC402Guardian | [`0x5c1D2cD6B9B291b436BF1b109A711F0E477EB6fe`](https://sepolia.basescan.org/address/0x5c1D2cD6B9B291b436BF1b109A711F0E477EB6fe) |
+| ARC402Wallet | [`0xc77854f9091A25eD1f35EA24E9bdFb64d0850E45`](https://sepolia.basescan.org/address/0xc77854f9091A25eD1f35EA24E9bdFb64d0850E45) |
+| AgreementTree | [`0x8F46F31FcEbd60f526308AD20e4a008887709720`](https://sepolia.basescan.org/address/0x8F46F31FcEbd60f526308AD20e4a008887709720) |
+| CapabilityRegistry | [`0x6a413e74b65828A014dD8DA61861Bf9E1b6372D2`](https://sepolia.basescan.org/address/0x6a413e74b65828A014dD8DA61861Bf9E1b6372D2) |
+| GovernedTokenWhitelist | [`0x64C15CA701167C7c901a8a5575a5232b37CAF213`](https://sepolia.basescan.org/address/0x64C15CA701167C7c901a8a5575a5232b37CAF213) |
+| WatchtowerRegistry | [`0x70c4E53E3A916eB8A695630f129B943af9C61C57`](https://sepolia.basescan.org/address/0x70c4E53E3A916eB8A695630f129B943af9C61C57) |
 
 ---
 
