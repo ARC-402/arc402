@@ -28,6 +28,8 @@ export interface Arc402Config {
   policyEngineAddress?: string;
   walletFactoryAddress?: string;
   walletContractAddress?: string;
+  watchtowerRegistryAddress?: string;
+  governedTokenWhitelistAddress?: string;
 }
 
 const CONFIG_DIR = path.join(os.homedir(), ".arc402");
@@ -74,6 +76,15 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     sessionChannelsAddress: "0x21340f81f5ddc9c213ff2ac45f0f34fb2449386d",
     disputeModuleAddress: "0xcacf606374e29bbc573620affd7f9f739d25317f",
     reputationOracleAddress: "0x410e650113fd163389C956BC7fC51c5642617187",
+    // New contracts deployed 2026-03-14 (8 missing, post-audit)
+    governanceAddress: "0x504b3D73A8dFbcAB9551d8a11Bb0B07C90C4c926",             // ARC402Governance
+    guardianAddress: "0x5c1D2cD6B9B291b436BF1b109A711F0E477EB6fe",               // ARC402Guardian
+    walletContractAddress: "0xc77854f9091A25eD1f35EA24E9bdFb64d0850E45",         // ARC402Wallet instance
+    agreementTreeAddress: "0x8F46F31FcEbd60f526308AD20e4a008887709720",          // AgreementTree
+    capabilityRegistryAddress: "0x6a413e74b65828A014dD8DA61861Bf9E1b6372D2",    // CapabilityRegistry
+    disputeArbitrationAddress: "0x62FB9E6f6366B75FDe1D78a870D0B1D7334e2a4e",    // DisputeArbitration
+    governedTokenWhitelistAddress: "0x64C15CA701167C7c901a8a5575a5232b37CAF213", // GovernedTokenWhitelist
+    watchtowerRegistryAddress: "0x70c4E53E3A916eB8A695630f129B943af9C61C57",    // WatchtowerRegistry
   },
 };
 
