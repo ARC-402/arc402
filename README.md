@@ -225,8 +225,6 @@ ARC-402 underwent a full internal audit before deployment:
 - Full reconciliation — 7 blockers and 6 required findings identified and fixed
 - 492 tests, 0 failures across Foundry and Hardhat
 
-Audit artifacts available on request.
-
 ---
 
 ## Operator Standard
