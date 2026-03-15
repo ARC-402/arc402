@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { PolicyClient, TrustClient } from "@arc402/sdk";
 import { ethers } from "ethers";
+import prompts from "prompts";
 import { Arc402Config, getConfigPath, getUsdcAddress, loadConfig, NETWORK_DEFAULTS, saveConfig } from "../config";
 import { getClient, requireSigner } from "../client";
 import { getTrustTier } from "../utils/format";
@@ -1182,5 +1183,229 @@ export function registerWalletCommands(program: Command): void {
 
       console.log(`\n✓ Registry upgrade cancelled`);
       console.log(`  Tx: ${txHash}`);
+    });
+
+  // ─── governance setup ──────────────────────────────────────────────────────
+  //
+  // Interactive wizard that collects velocity limit, guardian key, and category
+  // limits in one session, then batches all transactions through a single
+  // WalletConnect session (wallet_sendCalls if supported, else sequential).
+
+  const governance = wallet.command("governance").description("Wallet governance management");
+
+  governance.command("setup")
+    .description("Interactive governance setup — velocity limit, guardian key, and spending limits in one WalletConnect session")
+    .action(async () => {
+      const config = loadConfig();
+      if (!config.walletContractAddress) {
+        console.error("walletContractAddress not set in config. Run `arc402 wallet deploy` first.");
+        process.exit(1);
+      }
+      if (!config.walletConnectProjectId) {
+        console.error("walletConnectProjectId not set in config. Run `arc402 config set walletConnectProjectId <id>`.");
+        process.exit(1);
+      }
+
+      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const chainId = config.network === "base-mainnet" ? 8453 : 84532;
+
+      // ── Step 1: velocity limit ────────────────────────────────────────────
+      const { velocityEth } = await prompts({
+        type: "text",
+        name: "velocityEth",
+        message: "Velocity limit (max ETH per rolling window)",
+        initial: "0.05",
+        validate: (v: string) => {
+          try { ethers.parseEther(v); return true; } catch { return "Enter a valid ETH amount (e.g. 0.05)"; }
+        },
+      });
+      if (velocityEth === undefined) { console.log("Aborted."); return; }
+
+      // ── Step 2: guardian key ──────────────────────────────────────────────
+      const { wantGuardian } = await prompts({
+        type: "confirm",
+        name: "wantGuardian",
+        message: "Set guardian key?",
+        initial: true,
+      });
+      if (wantGuardian === undefined) { console.log("Aborted."); return; }
+
+      let guardianWallet: ethers.Wallet | null = null;
+      if (wantGuardian) {
+        guardianWallet = new ethers.Wallet(ethers.Wallet.createRandom().privateKey);
+        console.log(`  Generated guardian address: ${guardianWallet.address}`);
+      }
+
+      // ── Step 3: spending categories ───────────────────────────────────────
+      type CategoryEntry = { category: string; amountEth: string };
+      const categories: CategoryEntry[] = [];
+
+      const defaultCategories = [
+        { label: "general", default: "0.02" },
+        { label: "research", default: "0.05" },
+        { label: "compute", default: "0.10" },
+      ];
+
+      console.log("\nSpending categories — press Enter to skip any:");
+
+      for (const { label, default: def } of defaultCategories) {
+        const { amountRaw } = await prompts({
+          type: "text",
+          name: "amountRaw",
+          message: `  ${label} limit in ETH`,
+          initial: def,
+        });
+        if (amountRaw === undefined) { console.log("Aborted."); return; }
+        if (amountRaw.trim() !== "") {
+          categories.push({ category: label, amountEth: amountRaw.trim() });
+        }
+      }
+
+      // Custom categories loop
+      while (true) {
+        const { customName } = await prompts({
+          type: "text",
+          name: "customName",
+          message: "  Add custom category? [name or Enter to skip]",
+          initial: "",
+        });
+        if (customName === undefined || customName.trim() === "") break;
+        const { customAmount } = await prompts({
+          type: "text",
+          name: "customAmount",
+          message: `  ${customName.trim()} limit in ETH`,
+          initial: "0.05",
+          validate: (v: string) => {
+            try { ethers.parseEther(v); return true; } catch { return "Enter a valid ETH amount"; }
+          },
+        });
+        if (customAmount === undefined) { console.log("Aborted."); return; }
+        categories.push({ category: customName.trim(), amountEth: customAmount.trim() });
+      }
+
+      // ── Step 4: summary ───────────────────────────────────────────────────
+      console.log("\n─────────────────────────────────────────────────────");
+      console.log("Changes to be made:");
+      console.log(`  Wallet:         ${config.walletContractAddress}`);
+      console.log(`  Velocity limit: ${velocityEth} ETH per rolling window`);
+      if (guardianWallet) {
+        console.log(`  Guardian key:   ${guardianWallet.address} (new — private key will be saved to config)`);
+      }
+      if (categories.length > 0) {
+        console.log("  Spending limits:");
+        for (const { category, amountEth } of categories) {
+          console.log(`    ${category.padEnd(12)} ${amountEth} ETH`);
+        }
+      }
+      console.log(`  Transactions:   ${1 + (guardianWallet ? 1 : 0) + categories.length} total`);
+      console.log("─────────────────────────────────────────────────────");
+
+      // ── Step 5: confirm ───────────────────────────────────────────────────
+      const { confirmed } = await prompts({
+        type: "confirm",
+        name: "confirmed",
+        message: "Confirm and sign with your wallet?",
+        initial: true,
+      });
+      if (!confirmed) { console.log("Aborted."); return; }
+
+      // ── Step 6: connect WalletConnect once, send all transactions ─────────
+      const telegramOpts = config.telegramBotToken && config.telegramChatId
+        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
+        : undefined;
+
+      console.log("\nConnecting wallet...");
+      const { client, session, account } = await connectPhoneWallet(
+        config.walletConnectProjectId,
+        chainId,
+        config,
+        { telegramOpts, prompt: "Approve governance setup transactions on ARC402Wallet" }
+      );
+
+      const ownerInterface = new ethers.Interface(ARC402_WALLET_OWNER_ABI);
+      const guardianInterface = new ethers.Interface(ARC402_WALLET_GUARDIAN_ABI);
+      const policyInterface = new ethers.Interface(POLICY_ENGINE_LIMITS_ABI);
+
+      // Build the list of calls
+      type TxCall = { to: string; data: string; value: string };
+      const calls: TxCall[] = [];
+
+      // velocity limit
+      calls.push({
+        to: config.walletContractAddress!,
+        data: ownerInterface.encodeFunctionData("setVelocityLimit", [ethers.parseEther(velocityEth)]),
+        value: "0x0",
+      });
+
+      // guardian
+      if (guardianWallet) {
+        calls.push({
+          to: config.walletContractAddress!,
+          data: guardianInterface.encodeFunctionData("setGuardian", [guardianWallet.address]),
+          value: "0x0",
+        });
+      }
+
+      // category limits — called directly on PolicyEngine by owner key
+      for (const { category, amountEth } of categories) {
+        calls.push({
+          to: policyAddress,
+          data: policyInterface.encodeFunctionData("setCategoryLimitFor", [
+            config.walletContractAddress!,
+            category,
+            ethers.parseEther(amountEth),
+          ]),
+          value: "0x0",
+        });
+      }
+
+      // Try wallet_sendCalls (EIP-5792) first, fall back to sequential eth_sendTransaction
+      let txHashes: string[] = [];
+      let usedBatch = false;
+
+      try {
+        const batchResult = await client.request<{ id: string }>({
+          topic: session.topic,
+          chainId: `eip155:${chainId}`,
+          request: {
+            method: "wallet_sendCalls",
+            params: [{
+              version: "1.0",
+              chainId: `0x${chainId.toString(16)}`,
+              from: account,
+              calls: calls.map(c => ({ to: c.to, data: c.data, value: c.value })),
+            }],
+          },
+        });
+        txHashes = [typeof batchResult === "string" ? batchResult : batchResult.id];
+        usedBatch = true;
+      } catch {
+        // wallet_sendCalls not supported — send sequentially
+        console.log("  (wallet_sendCalls not supported — sending sequentially)");
+        for (let i = 0; i < calls.length; i++) {
+          console.log(`  Sending transaction ${i + 1}/${calls.length}...`);
+          const txHash = await sendTransactionWithSession(client, session, account, chainId, calls[i]);
+          txHashes.push(txHash);
+        }
+      }
+
+      // Persist guardian key if generated
+      if (guardianWallet) {
+        config.guardianPrivateKey = guardianWallet.privateKey;
+        config.guardianAddress = guardianWallet.address;
+        saveConfig(config);
+      }
+
+      console.log(`\n✓ Governance setup complete`);
+      if (usedBatch) {
+        console.log(`  Batch tx: ${txHashes[0]}`);
+      } else {
+        txHashes.forEach((h, i) => console.log(`  Tx ${i + 1}: ${h}`));
+      }
+      if (guardianWallet) {
+        console.log(`  Guardian key saved to config — address: ${guardianWallet.address}`);
+        console.log(`  WARN: Store the guardian private key separately from your hot key.`);
+      }
+      console.log(`\nVerify with: arc402 wallet status && arc402 wallet policy show`);
     });
 }

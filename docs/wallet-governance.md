@@ -4,6 +4,47 @@ Your `ARC402Wallet` is a governed smart contract. Every function that changes ho
 
 ---
 
+## Quick Setup
+
+Run everything in one command:
+
+```bash
+arc402 wallet governance setup
+```
+
+This interactive wizard prompts for your velocity limit, guardian key, and per-category spending limits, then sends all transactions in a single WalletConnect session (batched via `wallet_sendCalls` if your wallet supports EIP-5792, otherwise sequentially). One phone approval covers the full setup.
+
+```
+Velocity limit (max ETH per rolling window) [0.05]:
+Set guardian key? [Y/n]:
+Spending categories — press Enter to skip any:
+  general limit in ETH [0.02]:
+  research limit in ETH [0.05]:
+  compute limit in ETH [0.10]:
+  Add custom category? [name or Enter to skip]:
+
+Changes to be made:
+  Wallet:         0xYourWalletAddress
+  Velocity limit: 0.05 ETH per rolling window
+  Guardian key:   0x... (new — private key will be saved to config)
+  Spending limits:
+    general      0.02 ETH
+    research     0.05 ETH
+    compute      0.10 ETH
+  Transactions:   4 total
+
+Confirm and sign with your wallet? [Y/n]:
+```
+
+After confirming, verify everything is set:
+
+```bash
+arc402 wallet status
+arc402 wallet policy show
+```
+
+---
+
 ## The Governance Model
 
 Three roles operate on your wallet:
