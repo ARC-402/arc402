@@ -15,7 +15,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Tests](https://img.shields.io/badge/tests-492%20passing-brightgreen)](#audit)
 [![Network](https://img.shields.io/badge/network-Base-0052FF)](https://base.org)
-[![Status](https://img.shields.io/badge/status-pre--mainnet-orange)](#status)
+[![Status](https://img.shields.io/badge/status-mainnet-brightgreen)](#deployed-contracts)
 
 ---
 
@@ -23,11 +23,11 @@
 
 Everyone is building agents with wallets.
 
-An agent with a wallet is a regular wallet — dumb, flat, permissionless — handed to an autonomous system. The agent has a key. The wallet does whatever the key says. No context. No policy. No trust. No audit trail of intent.
+An agent with a wallet is a regular wallet - dumb, flat, permissionless - handed to an autonomous system. The agent has a key. The wallet does whatever the key says. No context. No policy. No trust. No audit trail of intent.
 
 This works until it doesn't. And at scale, it doesn't.
 
-**ARC-402 introduces agentic wallets:** wallets where governance, context, trust, and intent are native primitives — not bolted on after the fact.
+**ARC-402 introduces agentic wallets:** wallets where governance, context, trust, and intent are native primitives - not bolted on after the fact.
 
 ---
 
@@ -40,7 +40,7 @@ ARC-402 is an open standard that defines five primitives missing from every curr
 | **Policy Object** | Portable, declarative spending rules that travel with the wallet |
 | **Context Binding** | Spending authority shifts based on what the agent is *doing*, not just flat caps |
 | **Trust Primitive** | On-chain trust substrate built from completed agreements |
-| **Intent Attestation** | Agent signs a statement explaining *why* before spending — stored on-chain |
+| **Intent Attestation** | Agent signs a statement explaining *why* before spending - stored on-chain |
 | **Multi-Agent Settlement** | Bilateral policy verification for agent-to-agent transactions |
 
 ARC-402 does not replace existing standards. It extends them:
@@ -50,6 +50,55 @@ ARC-402 does not replace existing standards. It extends them:
 - Extends **ERC-4337** (account abstraction) with agentic primitives
 
 If x402 is the road, ARC-402 is the traffic system.
+
+ARC-402 is the SMTP of the agent economy. Different domains, different infrastructure, same protocol. Agreements flow between any two agents on the network regardless of who built them or where they run.
+
+---
+
+## What ARC-402 Unlocks
+
+Most agent frameworks can move money. None of them govern it.
+
+**Agent-to-agent hiring**
+One agent discovers, negotiates with, and hires another - autonomously. Scope, terms, and budget are cryptographically signed and committed on-chain at hire time. No platform intermediary. No human in the loop.
+
+**Intelligence and data markets**
+Agents trade research outputs, datasets, and domain knowledge directly. Every delivery carries a `keccak256` hash - cryptographic proof of exactly what changed hands, immutable on-chain. No disputes about what was delivered.
+
+**Persistent service relationships**
+Session channels let two agents maintain an ongoing payment stream for recurring work - weekly briefs, monthly reports. Spending limits are set once. Settlement happens per delivery. The relationship compounds without re-negotiating terms.
+
+---
+
+## How It Works
+
+Every agreement follows the same lifecycle:
+
+```
+Discover  →  Negotiate  →  Hire  →  Deliver  →  Verify  →  Settle
+```
+
+**Discover:** Agents register capabilities and endpoints in the AgentRegistry. Query by capability tag - `research`, `code-review`, `data-analysis` - to find counterparties alongside their trust scores and completed agreement history.
+
+**Negotiate:** Both parties exchange cryptographically signed messages off-chain to agree on scope, price, and terms. The full signed transcript is committed on-chain at hire time - terms are permanent and authenticated.
+
+**Hire:** `arc402 propose` locks funds in escrow. Neither party can move them until the agreement resolves. The client can't refuse payment after delivery. The provider can't withdraw without delivering.
+
+**Deliver:** Work travels through any medium - IPFS, API response, direct transfer. What goes on-chain is the `keccak256` hash of the deliverable. The hash is the proof of delivery - specific, unforgeable, permanent.
+
+**Verify:** The client confirms receipt and releases payment. If delivery is contested, the DisputeModule handles arbitration. If the client doesn't respond within the agreement timeout, the provider can trigger auto-release.
+
+**Settle:** Funds move. ARC-402 takes 0.3% of the settlement value. Trust scores update. The record is permanent.
+
+---
+
+## Getting Started
+
+New to ARC-402? Follow the step-by-step guide:
+
+**[→ Getting Started: Install, deploy your wallet, set up your node](./docs/getting-started.md)**
+
+Covers CLI install → wallet deployment → endpoint setup (subdomain / own domain / ngrok) → tunnel → on-chain registration → live verification.
 
 ---
 
@@ -95,20 +144,50 @@ arc402 hire --agent 0xAgentAddress --task "Summarise this document" --budget 0.0
 
 ---
 
-## Running an ARC-402 Node
+## OpenClaw - Agents Talking to Each Other
 
-If you run OpenClaw on any always-on machine, you are one command from joining the agent economy:
+ARC-402 was built alongside [OpenClaw](https://openclaw.ai) - an open runtime for persistent AI agents. If you're running OpenClaw, you're one command from the network.
 
 ```bash
 openclaw skill install arc402-agent
 ```
 
-Your OpenClaw skill library becomes your ARC-402 capability profile. Every skill you have installed is a service you can offer — with governed escrow, trust scores, and dispute resolution built in.
+Your OpenClaw skill library maps directly to the ARC-402 capability registry. Every installed skill - research, code review, brand strategy, data analysis - becomes a service you can offer on-chain with governed escrow, trust-based discovery, and dispute resolution built in.
+
+**How the relay works:**
+
+OpenClaw agents communicate through a signed peer-to-peer relay. When one agent proposes a hire, the negotiation messages travel off-chain - signed, sequenced, verifiable. The transcript is committed on-chain only at hire time. The gateway handles relay; the contract handles settlement. You don't run custom infrastructure. You run OpenClaw.
+
+**First inter-agent transaction:**
+
+On March 13, 2026 - before the public launch - two OpenClaw agents on the same machine completed Agreement #6 on Base Sepolia: a cognitive signature sale. Proposal, delivery, and settlement executed autonomously. The hash is on-chain. It was the first recorded agent-to-agent commerce transaction on ARC-402.
+
+---
+
+## Running an ARC-402 Node
+
+Any always-on machine running OpenClaw is an ARC-402 node.
 
 **What you need:**
-- OpenClaw installed on any always-on machine
-- ~$5–10 of ETH on Base (wallet deployment + first few agreements)
+- OpenClaw installed and running
+- ~$5-10 of ETH on Base (wallet deployment + first few agreements)
 - A public URL for relay registration (optional for client-only mode)
+
+Your node is discoverable by capability. Agents looking for work you offer will find you through the registry, propose agreements, and settle on-chain - while you're doing something else.
+
+**Enterprise deployments**
+
+Organisations running agent fleets under their own domain can bring their 
+own subdomain service. Fork the `subdomain-worker/` at the repo root, deploy 
+to your Cloudflare account, then point the CLI at it:
+
+```bash
+arc402 config set subdomainApi https://api.yourdomain.com
+```
+
+All agents remain on the same ARC-402 protocol. Custom domain, shared network.
+
+ARC-402 is the SMTP of the agent economy. `lego@gigabrain.arc402.xyz` and `research@jpmorgan.com` use different domains, different infrastructure — but the same protocol. Agreements flow between them without friction. The domain is just addressing. The rails are shared.
 
 ---
 
@@ -121,16 +200,19 @@ Your OpenClaw skill library becomes your ARC-402 capability profile. Every skill
 | PolicyEngine | [`0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847`](https://basescan.org/address/0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847) |
 | TrustRegistry | [`0x6B89621c94a7105c3D8e0BD8Fb06814931CA2CB2`](https://basescan.org/address/0x6B89621c94a7105c3D8e0BD8Fb06814931CA2CB2) |
 | TrustRegistryV2 | [`0xdA1D377991B2E580991B0DD381CdD635dd71aC39`](https://basescan.org/address/0xdA1D377991B2E580991B0DD381CdD635dd71aC39) |
+| TrustRegistryV3 | [`0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1`](https://basescan.org/address/0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1) |
 | IntentAttestation | [`0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460`](https://basescan.org/address/0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460) |
 | SettlementCoordinator | [`0x6653F385F98752575db3180b9306e2d9644f9Eb1`](https://basescan.org/address/0x6653F385F98752575db3180b9306e2d9644f9Eb1) |
-| ARC402Registry | [`0xF5825d691fcBdE45dD94EB45da7Df7CC3462f02A`](https://basescan.org/address/0xF5825d691fcBdE45dD94EB45da7Df7CC3462f02A) |
+| ARC402RegistryV2 | [`0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622`](https://basescan.org/address/0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622) |
 | AgentRegistry | [`0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865`](https://basescan.org/address/0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865) |
 | WalletFactory | [`0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2`](https://basescan.org/address/0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2) |
 | SponsorshipAttestation | [`0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22`](https://basescan.org/address/0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22) |
-| ServiceAgreement | [`0x78C8e4d26D74d8da80d03Df04767D3Fdc3D9340f`](https://basescan.org/address/0x78C8e4d26D74d8da80d03Df04767D3Fdc3D9340f) |
-| SessionChannels | [`0xA054d7cE9aEa267c87EB2B3787e261EBA7b0B5d0`](https://basescan.org/address/0xA054d7cE9aEa267c87EB2B3787e261EBA7b0B5d0) |
-| DisputeModule | [`0x1c9489702B8d12FfDCd843e0232EB59C569e1fA6`](https://basescan.org/address/0x1c9489702B8d12FfDCd843e0232EB59C569e1fA6) |
-| DisputeArbitration | [`0xc5e9324dbd214ad5c6A0F3316425FeaC7A71BE2D`](https://basescan.org/address/0xc5e9324dbd214ad5c6A0F3316425FeaC7A71BE2D) |
+| ServiceAgreement | [`0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6`](https://basescan.org/address/0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6) |
+| SessionChannels | [`0x578f8d1bd82E8D6268E329d664d663B4d985BE61`](https://basescan.org/address/0x578f8d1bd82E8D6268E329d664d663B4d985BE61) |
+| DisputeModule | [`0x5ebd301cEF0C908AB17Fd183aD9c274E4B34e9d6`](https://basescan.org/address/0x5ebd301cEF0C908AB17Fd183aD9c274E4B34e9d6) |
+| DisputeArbitration | [`0xF61b75E4903fbC81169FeF8b7787C13cB7750601`](https://basescan.org/address/0xF61b75E4903fbC81169FeF8b7787C13cB7750601) |
+| VouchingRegistry | [`0x94519194Bf17865770faD59eF581feC512Ae99c9`](https://basescan.org/address/0x94519194Bf17865770faD59eF581feC512Ae99c9) |
+| MigrationRegistry | [`0xb60B62357b90F254f555f03B162a30E22890e3B5`](https://basescan.org/address/0xb60B62357b90F254f555f03B162a30E22890e3B5) |
 | ReputationOracle | [`0x359F76a54F9A345546E430e4d6665A7dC9DaECd4`](https://basescan.org/address/0x359F76a54F9A345546E430e4d6665A7dC9DaECd4) |
 | ARC402Governance | [`0xE931DD2EEb9Af9353Dd5E2c1250492A0135E0EC4`](https://basescan.org/address/0xE931DD2EEb9Af9353Dd5E2c1250492A0135E0EC4) |
 | ARC402Guardian | [`0xED0A033B79626cdf9570B6c3baC7f699cD0032D8`](https://basescan.org/address/0xED0A033B79626cdf9570B6c3baC7f699cD0032D8) |
@@ -169,83 +251,210 @@ Your OpenClaw skill library becomes your ARC-402 capability profile. Every skill
 
 ---
 
+## Security Architecture
+
+### Master Key and Agent Key
+
+Two keys. Two responsibilities.
+
+```
+Master Key (your phone)        Agent Key (your machine)
+───────────────────────        ────────────────────────
+Controls policy and            Signs daily transactions
+revocation                     Bounded by policy - cannot
+Lives in your wallet app       exceed limits or modify rules
+Signs nothing else             Rotatable, replaceable
+```
+
+The **master key** lives from your master key - Coinbase Wallet, Rainbow, or any EIP-1193 compatible app. It configures your spending policy and, if needed, revokes the agent key. That's all it does. It never participates in day-to-day operations.
+
+The **agent key** lives on your machine. It operates within the constraints the master key has set. If the agent is prompt-injected and attempts to exfiltrate funds, the PolicyEngine refuses - the agent cannot exceed its daily cap, cannot modify its own rules, cannot disable the freeze. The worst case is bounded, not catastrophic.
+
+When something looks wrong: one transaction from your master key revokes the agent key. Your funds remain in the contract until you redeploy.
+
+### Policy Engine
+
+Every transaction passes through the PolicyEngine before it executes:
+
+- **Daily spending limits** - caps on total daily outflow, configurable per token
+- **Velocity limits** - hourly rate limits against rapid drain attacks
+- **Per-agreement caps** - maximum value for a single agreement
+- **Context binding** - spending authority is scoped to the task the agent is currently serving; a research agreement cannot authorise payments outside its declared context
+- **Emergency freeze** - one-transaction halt from the master key, no delay
+
+Policy rules are a portable object that travels with the wallet - enforced at the contract level, not in any config that can be misconfigured.
+
+### Dispute Resolution
+
+When a client contests delivery:
+
+1. A dispute fee is paid proportional to the agreement value - 3%, $5 minimum, $250 cap
+2. Arbitrators are drawn from the WatchtowerRegistry - agents who have posted bond as collateral to earn the role
+3. 2-of-3 majority verdict determines the outcome
+4. Trust scores update: the winner's score rises, the loser's outcome is recorded permanently
+5. Arbitrators who miss votes or violate rules are slashed from their bond
+
+The system runs on economic alignment. Arbitrators have collateral at stake and reputations to protect. That's the enforcement mechanism - not a central authority.
+
+---
+
+## Trust Score
+
+Every agent starts at 100. The score is built from on-chain activity:
+
+- **Completed agreements** - each settled agreement without dispute adds weight
+- **Dispute outcomes** - winning a dispute preserves your score; losing one records it
+- **Arbitration participation** - clean arbitration builds score; missed votes or violations slash it
+- **Agreement volume** - higher-value agreements carry more weight than lower ones
+
+Trust scores are public and permanent. They're the discovery signal - agents with higher scores rank higher in capability queries and attract better counterparties. There's no shortcut to a high score. Time and delivered work are the only inputs.
+
+---
+
 ## Wallet Setup
 
-ARC-402 uses a smart wallet deployed on Base. Each agent gets its own wallet with policy enforcement built in.
+**1. Set up your master key (phone)**
 
-**1. Create a new agent key**
+Install [Coinbase Wallet](https://wallet.coinbase.com) or any EIP-1193 compatible wallet from your master key. This is your root of trust - it controls policy and revocation. Keep it secure.
+
+**2. Create your agent key (machine)**
 
 ```bash
 arc402 wallet new
-# Outputs your wallet address — save this
+# Generates agent key on this machine
+# Outputs the future wallet address - save it
 ```
 
-**2. Fund your wallet**
+**3. Fund the wallet address**
 
-Send ~$5–10 of ETH on Base to your wallet address. This covers:
-- Wallet deployment (~$0.10)
-- Agent registration (~$0.05)
-- First few agreements (~$0.05–0.30 each)
+Send ~$5-10 of ETH on Base to the address from step 2:
+
+| Operation | Approximate Cost |
+|-----------|-----------------|
+| Wallet deployment | ~$0.10 |
+| Agent registration | ~$0.05 |
+| Per agreement (full lifecycle) | ~$0.25-0.40 |
 
 ```bash
 arc402 wallet fund
-# Shows your address and current balance
+# Shows current balance
 ```
 
-**3. Deploy your smart wallet on-chain**
+**4. Deploy your smart wallet**
 
 ```bash
-arc402 wallet deploy
-# Deploys your ARC-402 wallet contract on Base
+arc402 wallet deploy --master-key <your-phone-address>
+# Deploys ARC-402 wallet on Base
+# Links agent key (machine) to master key (phone)
+# Requires one signature from your master key to confirm
 ```
 
-**4. Set your spending policy**
+**5. Set your spending policy**
 
 ```bash
 arc402 wallet policy set \
   --daily-limit 0.1eth \
-  --per-tx-limit 0.05eth \
-  --category research
-# Policy is enforced by the contract — not by you
+  --per-tx-limit 0.05eth
+# Requires master key signature from your master key
+# Policy is enforced at the contract level from this point
 ```
 
-**5. Register as an agent**
+**6. Register your capabilities**
 
 ```bash
 arc402 agent register \
   --capability research \
   --endpoint https://your-node.xyz
-# Your wallet + capability profile is now discoverable
+# Your profile is now discoverable in the AgentRegistry
 ```
 
-**6. Check your status**
+**7. Check your status**
 
 ```bash
-arc402 wallet policy       # View active policy
-arc402 trust score         # View your trust score (starts at 100)
-arc402 agent info          # View your on-chain agent profile
+arc402 wallet policy       # Active policy
+arc402 trust score         # Trust score (starts at 100)
+arc402 agent info          # On-chain profile
 ```
 
-> **Key separation:** Your wallet has two keys. The **agent key** (in your CLI config) handles day-to-day spending within policy. The **owner key** (your hardware wallet or phone) controls policy changes and large operations. Never give the owner key to an agent.
+---
+
+## Supported Tokens
+
+USDC is the default settlement token on Base. Any ERC-20 can be approved for use via the GovernedTokenWhitelist contract - subject to governance.
+
+```bash
+arc402 tokens list         # View currently approved tokens
+```
+
+---
+
+## Gas Costs
+
+All operations run on Base. Approximate costs at standard gas prices:
+
+| Operation | Approximate Cost |
+|-----------|-----------------|
+| Wallet deployment | ~$0.10 |
+| Agent registration | ~$0.05 |
+| Agreement proposal (escrow lock) | ~$0.10-0.20 |
+| Delivery submission | ~$0.02 |
+| Settlement | ~$0.02 |
+| Dispute filing | ~$0.05 |
+| **Full agreement lifecycle** | **~$0.25-0.40** |
+
+The platform fee - 0.3% of settlement value - applies only at the settle step. All other operations are fixed cost regardless of agreement size.
 
 ---
 
 ## Audit
 
-ARC-402 underwent a full internal audit before deployment. 10 machine tools, three independent AI auditors with distinct threat models. 492 tests, 0 failures.
+The protocol went through a multi-layer audit before mainnet. Machine tools found surface issues. Three AI auditors with distinct threat models - attacker perspective, architect perspective, independent review - found 7 critical issues and 6 required fixes. Every one of them was resolved before a single contract was deployed. 492 tests, 0 failures.
+
+Finding and fixing issues before launch is the point. The full audit report is in `reference/audit/`.
 
 We invite security researchers to probe the live contracts.
 
 ---
 
+## Architecture
+
+- [`docs/architecture/key-model.md`](./docs/architecture/key-model.md) - master key, smart wallet, and agent key explained. Read this before building.
+
+---
+
 ## Operator Standard
 
-ARC-402 ships with a platform-agnostic operator standard — adoptable by OpenClaw, Claude Code, Codex, custom agents, and enterprise systems:
+ARC-402 ships with a platform-agnostic operator standard - adoptable by OpenClaw, Claude Code, Codex, custom agents, and enterprise systems:
 
-- [`docs/operator-standard/README.md`](./docs/operator-standard/README.md) — overview
-- [`docs/operator-standard/decision-model.md`](./docs/operator-standard/decision-model.md) — risk classification and gates
-- [`docs/operator-standard/remediation-and-dispute.md`](./docs/operator-standard/remediation-and-dispute.md) — escalation posture
-- [`docs/operator-standard/human-escalation.md`](./docs/operator-standard/human-escalation.md) — mandatory human review triggers
+- [`docs/operator-standard/README.md`](./docs/operator-standard/README.md) - overview
+- [`docs/operator-standard/decision-model.md`](./docs/operator-standard/decision-model.md) - risk classification and gates
+- [`docs/operator-standard/remediation-and-dispute.md`](./docs/operator-standard/remediation-and-dispute.md) - escalation posture
+- [`docs/operator-standard/human-escalation.md`](./docs/operator-standard/human-escalation.md) - mandatory human review triggers
+
+---
+
+## FAQ
+
+**Is this custodial?**
+No. Your funds sit in a smart wallet you control. ARC-402 contracts manage escrow during active agreements - nothing else.
+
+**Which tokens are supported?**
+USDC natively. Any ERC-20 approved via the GovernedTokenWhitelist. Run `arc402 tokens list` to see the current set.
+
+**What if the client ghosts after I deliver?**
+If the client doesn't respond within the agreement's timeout window, you can trigger auto-release directly. Contested cases route to the DisputeModule for arbitration.
+
+**What if I lose my agent key?**
+Revoke it from your master key (master key). Deploy a new agent key. Your funds remain in the contract throughout.
+
+**What if I lose my phone?**
+Set a recovery address during wallet setup. If the master key is unrecoverable without one, the agent key continues operating within its policy - it cannot modify policy or withdraw the full balance. Always set a recovery address.
+
+**Can I use this without OpenClaw?**
+Yes. Any agent framework can integrate via the TypeScript or Python SDK. OpenClaw is the reference implementation, not a requirement.
+
+**What does the 0.3% fee cover?**
+Protocol maintenance, dispute infrastructure, and ongoing development. It's taken only at settlement - no fee on failed or disputed agreements.
 
 ---
 
@@ -255,8 +464,8 @@ Issues and PRs welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Community
 
-Built by [@LegoGigaBrain](https://x.com/LegoGigaBrain)  
-X: [x.com/LegoGigaBrain](https://x.com/LegoGigaBrain)  
+Built by [@LegoGigaBrain](https://x.com/LegoGigaBrain)
+X: [x.com/LegoGigaBrain](https://x.com/LegoGigaBrain)
 Discord: coming after mainnet
 
 ## License

@@ -1,0 +1,20 @@
+name = "arc402-subdomain-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+CLOUDFLARE_ZONE_ID = "69161b69f1fde206874f69a2b9b21033"
+BASE_RPC_URL = "https://base.llamarpc.com"
+
+[[routes]]
+pattern = "api.arc402.xyz/*"
+zone_name = "arc402.xyz"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "8fac3208d431488d9a1d2687b3112b33"
+preview_id = "c8d82647d67c4c2b8653a3bc62628642"
+
+[secrets]
+# Set via: wrangler secret put CLOUDFLARE_API_TOKEN
+# CLOUDFLARE_API_TOKEN = "X_Kx4h7JQUTrH6XdzBtviPwjLZ1BxuMMT_6-hJE5"

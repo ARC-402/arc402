@@ -62,9 +62,9 @@ The protocol does **not** claim to prevent adversarial sybil with disposable ide
 ### Mitigations in Place
 
 1. **Value weighting** (`minimumTrustValue`): The contract owner can set a minimum agreement price below which trust updates are ignored. This raises the cost of score-farming via 1-wei agreements.
-2. **Counterparty diversity** (TrustRegistryV2): Score gains from the same counterparty face diminishing returns. Farming score from a single colluding wallet is bounded.
+2. **Counterparty diversity** (TrustRegistryV3): Score gains from the same counterparty face diminishing returns. Farming score from a single colluding wallet is bounded.
 3. **Minimum value gate**: `recordSuccess` only fires if `ag.price >= minimumTrustValue`. Sub-threshold agreements are silently skipped for trust purposes.
-4. **Time decay** (TrustRegistryV2): Scores decay with a 180-day half-life, limiting the value of long-abandoned sybil identities.
+4. **Time decay** (TrustRegistryV3): Scores decay with a 180-day half-life, limiting the value of long-abandoned sybil identities.
 
 ### Explicit Scope Statement
 

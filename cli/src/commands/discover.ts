@@ -76,9 +76,11 @@ export function registerDiscoverCommand(program: Command): void {
     .option("--capability <cap>",        "Exact canonical capability (e.g. legal.patent-analysis.us.v1)")
     .option("--capability-prefix <pfx>", "Prefix match against registered capabilities")
     .option("--service-type <type>",     "Filter by serviceType substring")
+    .option("--type <type>",             "Filter by serviceType substring (alias for --service-type)")
     .option("--min-trust <score>",       "Minimum trust score", "0")
     .option("--max-price <usd>",         "Maximum price in USD (from agent metadataURI, best-effort)", "0")
     .option("--min-stake <wei>",         "Minimum stake in wei", "0")
+    .option("--top <n>",                 "Show top N agents by trust score")
     .option("--sort <field>",            "Sort by: trust | price | jobs | stake | composite", "composite")
     .option("--limit <n>",               "Max results", "20")
     .option("--json",                    "Machine-parseable output")
@@ -98,10 +100,14 @@ export function registerDiscoverCommand(program: Command): void {
         ? new ReputationOracleClient(config.reputationOracleAddress, provider)
         : null;
 
-      const limit       = Number(opts.limit);
-      const minTrust    = Number(opts.minTrust);
-      const maxPriceUsd = Number(opts.maxPrice);   // 0 = no filter
-      const minStakeWei = BigInt(opts.minStake);
+      // --top <n> sets sort to trust and overrides limit
+      const effectiveSort  = opts.top ? "trust" : opts.sort;
+      const limit          = opts.top ? Number(opts.top) : Number(opts.limit);
+      const minTrust       = Number(opts.minTrust);
+      const maxPriceUsd    = Number(opts.maxPrice);   // 0 = no filter
+      const minStakeWei    = BigInt(opts.minStake);
+      // --type is an alias for --service-type
+      if (opts.type && !opts.serviceType) opts.serviceType = opts.type;
 
       // ── Step 1: Get candidate addresses ─────────────────────────────────────
 
@@ -232,7 +238,7 @@ export function registerDiscoverCommand(program: Command): void {
       let scored = computeCompositeScores(validAgents);
 
       // Sort
-      switch (opts.sort) {
+      switch (effectiveSort) {
         case "trust":
           scored.sort((a, b) => b.trustScore - a.trustScore);
           break;

@@ -167,10 +167,8 @@ arc402 agreement 7
 
 | Network | TrustRegistry | AgentRegistry | ServiceAgreement |
 |---|---|---|---|
-| base-sepolia | `0xdA1D377991B2E580991B0DD381CdD635dd71aC39` | TBD | TBD |
-| base-mainnet | TBD | TBD | TBD |
-
-> AgentRegistry and ServiceAgreement are not yet deployed. Set placeholder addresses in your config until deployment.
+| base-sepolia | `0xf2aE072BB8575c23B0efbF44bDc8188aA900cA7a` | `0x0461b2b7A1E50866962CB07326000A94009c58Ff` | `0xbbb1DA355D810E9baEF1a7D072B2132E4755976B` |
+| base-mainnet | `0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1` | `0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622` | `0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6` |
 
 USDC addresses:
 - Base Sepolia: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`

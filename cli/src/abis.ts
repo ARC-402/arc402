@@ -87,7 +87,9 @@ export const ERC20_ABI = [
 ] as const;
 
 export const WALLET_FACTORY_ABI = [
-  "function createWallet(address owner) external returns (address wallet)",
+  "function createWallet() external returns (address)",
+  "function getWallets(address owner) external view returns (address[] memory)",
+  "function totalWallets() external view returns (uint256)",
   "event WalletCreated(address indexed owner, address indexed wallet)",
 ] as const;
 
