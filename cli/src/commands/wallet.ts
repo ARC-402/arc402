@@ -1,4 +1,3 @@
-import * as readline from "readline";
 import { Command } from "commander";
 import { PolicyClient, TrustClient } from "@arc402/sdk";
 import { ethers } from "ethers";
@@ -339,12 +338,7 @@ export function registerWalletCommands(program: Command): void {
         }
 
         // ── Step 2: Confirm & Deploy ───────────────────────────────────────────
-        console.log("\nPress Enter to deploy wallet, or Ctrl+C to cancel");
-        await new Promise<void>((resolve) => {
-          const rl = readline.createInterface({ input: process.stdin });
-          const timer = setTimeout(() => { rl.close(); resolve(); }, 5 * 60 * 1000);
-          rl.once("line", () => { clearTimeout(timer); rl.close(); resolve(); });
-        });
+        // WalletConnect approval already confirmed intent — sending automatically
 
         console.log("Deploying...");
         const txHash = await sendTransactionWithSession(client, session, account, chainId, {
@@ -656,12 +650,7 @@ export function registerWalletCommands(program: Command): void {
       const shortAddr = `${account.slice(0, 6)}...${account.slice(-5)}`;
       console.log(`\n✓ Connected: ${shortAddr} on ${networkName}`);
       console.log(`\nWallet to unfreeze: ${config.walletContractAddress}`);
-      console.log("\nPress Enter to send unfreeze(), or Ctrl+C to cancel");
-      await new Promise<void>((resolve) => {
-        const rl = readline.createInterface({ input: process.stdin });
-        const timer = setTimeout(() => { rl.close(); resolve(); }, 5 * 60 * 1000);
-        rl.once("line", () => { clearTimeout(timer); rl.close(); resolve(); });
-      });
+      // WalletConnect approval already confirmed intent — sending automatically
 
       console.log("Sending transaction...");
       const txHash = await sendTransactionWithSession(client, session, account, chainId, {
@@ -733,12 +722,7 @@ export function registerWalletCommands(program: Command): void {
       const networkName = chainId === 8453 ? "Base" : "Base Sepolia";
       const shortAddr = `${account.slice(0, 6)}...${account.slice(-5)}`;
       console.log(`\n✓ Connected: ${shortAddr} on ${networkName}`);
-      console.log("\nPress Enter to send setGuardian(), or Ctrl+C to cancel");
-      await new Promise<void>((resolve) => {
-        const rl = readline.createInterface({ input: process.stdin });
-        const timer = setTimeout(() => { rl.close(); resolve(); }, 5 * 60 * 1000);
-        rl.once("line", () => { clearTimeout(timer); rl.close(); resolve(); });
-      });
+      // WalletConnect approval already confirmed intent — sending automatically
 
       console.log("Sending transaction...");
       const txHash = await sendTransactionWithSession(client, session, account, chainId, {
@@ -853,12 +837,7 @@ export function registerWalletCommands(program: Command): void {
       const shortAddr = `${account.slice(0, 6)}...${account.slice(-5)}`;
       console.log(`\n✓ Connected: ${shortAddr} on ${networkName}`);
 
-      console.log("\nPress Enter to send proposeRegistryUpdate(), or Ctrl+C to cancel");
-      await new Promise<void>((resolve) => {
-        const rl = readline.createInterface({ input: process.stdin });
-        const timer = setTimeout(() => { rl.close(); resolve(); }, 5 * 60 * 1000);
-        rl.once("line", () => { clearTimeout(timer); rl.close(); resolve(); });
-      });
+      // WalletConnect approval already confirmed intent — sending automatically
 
       console.log("Sending transaction...");
       const txHash = await sendTransactionWithSession(client, session, account, chainId, {

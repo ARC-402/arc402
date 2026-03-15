@@ -1,7 +1,10 @@
 import { SignClient } from "@walletconnect/sign-client";
+import { KeyValueStorage } from "@walletconnect/keyvaluestorage";
 import qrcode from "qrcode-terminal";
+import path from "path";
+import os from "os";
 import { Arc402Config } from "./config";
-import { loadWCSession, saveWCSession } from "./walletconnect-session";
+import { loadWCSession, saveWCSession, clearWCSession } from "./walletconnect-session";
 import { sendWalletConnectApprovalButton } from "./telegram-notify";
 
 // Suppress unhandled rejections from stale WalletConnect sessions (known SDK issue)
@@ -22,6 +25,8 @@ type SignClientT = Awaited<ReturnType<typeof SignClient.init>>;
 type WCSession = ReturnType<SignClientT["session"]["get"]>;
 
 async function makeSignClient(projectId: string): Promise<SignClientT> {
+  const storageDir = path.join(os.homedir(), ".arc402");
+  const storagePath = path.join(storageDir, "wc-storage.json");
   return SignClient.init({
     projectId,
     metadata: {
@@ -30,6 +35,7 @@ async function makeSignClient(projectId: string): Promise<SignClientT> {
       url: "https://arc402.xyz",
       icons: [],
     },
+    storage: new KeyValueStorage({ database: storagePath }),
   });
 }
 
@@ -63,7 +69,8 @@ export async function connectPhoneWallet(
       const session = client.session.get(stored.topic);
       return { client, session, account: stored.account };
     } catch {
-      // Not found in WC storage — fall through to fresh pairing
+      // Session expired in WC storage — clear it and do fresh pairing
+      clearWCSession(config);
     }
   }
 
