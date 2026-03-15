@@ -92,7 +92,7 @@ async function checkRateLimit(ip: string, kv?: KVNamespace): Promise<boolean> {
   return true;
 }
 
-// --- Ethereum / AgentRegistry ---
+// --- Ethereum / AgentRegistry / Owner ---
 
 function encodeIsRegisteredCall(address: string): string {
   // Function selector for isRegistered(address): keccak256 first 4 bytes
@@ -101,6 +101,38 @@ function encodeIsRegisteredCall(address: string): string {
   // ABI-encode the address: pad to 32 bytes
   const paddedAddress = address.slice(2).toLowerCase().padStart(64, "0");
   return selector + paddedAddress;
+}
+
+// owner() selector: keccak256("owner()") first 4 bytes = 0x8da5cb5b
+async function readOwner(walletAddress: string, rpcUrl: string): Promise<string> {
+  const response = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      method: "eth_call",
+      params: [{ to: walletAddress, data: "0x8da5cb5b" }, "latest"],
+      id: 1,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`RPC request failed: ${response.status}`);
+  }
+
+  const result = await response.json() as { result?: string; error?: { message: string } };
+
+  if (result.error) {
+    throw new Error(`RPC error: ${result.error.message}`);
+  }
+
+  const hex = result.result ?? "0x";
+  if (hex === "0x" || hex.length < 66) {
+    throw new Error("Invalid owner() response");
+  }
+
+  // ABI-encoded address: 32 bytes, last 20 = address
+  return "0x" + hex.slice(-40);
 }
 
 async function isWalletRegistered(walletAddress: string, rpcUrl: string): Promise<boolean> {
@@ -310,6 +342,64 @@ async function handleCheck(subdomain: string, env: Env): Promise<Response> {
   return json({ available: !exists });
 }
 
+async function handleTransfer(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return err("Invalid JSON body");
+  }
+
+  const { subdomain, newWalletAddress } = body as Record<string, unknown>;
+
+  if (typeof subdomain !== "string" || !isValidSubdomain(subdomain.toLowerCase())) {
+    return err("Invalid subdomain");
+  }
+  if (typeof newWalletAddress !== "string" || !isValidEthAddress(newWalletAddress)) {
+    return err("Invalid newWalletAddress: must be a valid Ethereum address (0x...)");
+  }
+
+  const normalizedSubdomain = subdomain.toLowerCase();
+  const ownerKey = `owner:${normalizedSubdomain}`;
+
+  if (!env.RATE_LIMIT_KV) {
+    return err("KV unavailable", 503);
+  }
+
+  const oldWalletAddress = await env.RATE_LIMIT_KV.get(ownerKey);
+  if (!oldWalletAddress) {
+    return err("Subdomain not registered", 404);
+  }
+
+  if (oldWalletAddress.toLowerCase() === newWalletAddress.toLowerCase()) {
+    return err("Already owned by this wallet", 409);
+  }
+
+  const rpcUrl = env.BASE_RPC_URL ?? DEFAULT_BASE_RPC_URL;
+
+  let oldOwner: string;
+  let newOwner: string;
+  try {
+    [oldOwner, newOwner] = await Promise.all([
+      readOwner(oldWalletAddress, rpcUrl),
+      readOwner(newWalletAddress, rpcUrl),
+    ]);
+  } catch (e) {
+    return err(`Failed to read wallet owner: ${(e as Error).message}`, 502);
+  }
+
+  if (oldOwner.toLowerCase() !== newOwner.toLowerCase()) {
+    return err(
+      `Transfer denied: old wallet owner (${oldOwner}) does not match new wallet owner (${newOwner})`,
+      403,
+    );
+  }
+
+  await env.RATE_LIMIT_KV.put(ownerKey, newWalletAddress);
+
+  return json({ subdomain: `${normalizedSubdomain}.arc402.xyz`, newWalletAddress, status: "transferred" });
+}
+
 // --- Main handler ---
 
 export default {
@@ -330,6 +420,10 @@ export default {
 
     if (path === "/register" && method === "POST") {
       return handleRegister(request, env);
+    }
+
+    if (path === "/transfer" && method === "POST") {
+      return handleTransfer(request, env);
     }
 
     const checkMatch = path.match(/^\/check\/([^/]+)$/);

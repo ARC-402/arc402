@@ -234,6 +234,50 @@ export function registerSetupCommands(program: Command): void {
     .description("Onboarding wizards for first-time node operators");
 
   setup
+    .command("transfer-subdomain <subdomain>")
+    .description("Transfer a subdomain to your current wallet (verified by shared owner())")
+    .action(async (subdomain: string) => {
+      let config;
+      try {
+        config = loadConfig();
+      } catch {
+        console.log(chalk.red("No config found. Run `arc402 config init` first."));
+        process.exit(1);
+      }
+
+      const newWalletAddress = config.walletContractAddress;
+      if (!newWalletAddress) {
+        console.log(chalk.red("No walletContractAddress in config. Run `arc402 config init` first."));
+        process.exit(1);
+      }
+
+      const apiBase = getSubdomainApi(config);
+      const short = newWalletAddress.slice(0, 8) + "…" + newWalletAddress.slice(-4);
+      console.log(chalk.bold(`\nTransferring ${subdomain}.arc402.xyz → ${short}\n`));
+
+      let res: Response;
+      try {
+        res = await fetch(`${apiBase}/transfer`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subdomain, newWalletAddress }),
+        });
+      } catch (e) {
+        console.log(chalk.red(`\n✗ Request failed: ${e instanceof Error ? e.message : String(e)}`));
+        process.exit(1);
+      }
+
+      const data = await res.json() as { status?: string; newWalletAddress?: string; error?: string };
+
+      if (!res.ok) {
+        console.log(chalk.red(`\n✗ Transfer failed: ${data.error ?? res.statusText}`));
+        process.exit(1);
+      }
+
+      console.log(chalk.green(`✅ ${subdomain}.arc402.xyz now points to ${short}`));
+    });
+
+  setup
     .command("endpoint")
     .description(
       "Interactive wizard: start the relay daemon → create a public tunnel → " +
