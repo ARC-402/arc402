@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { Arc402Config, getConfigPath, getUsdcAddress, loadConfig, NETWORK_DEFAULTS, saveConfig } from "../config";
 import { getClient, requireSigner } from "../client";
 import { getTrustTier } from "../utils/format";
-import { ARC402_WALLET_GUARDIAN_ABI, ARC402_WALLET_OWNER_ABI, ARC402_WALLET_REGISTRY_ABI, POLICY_ENGINE_LIMITS_ABI, TRUST_REGISTRY_ABI, WALLET_FACTORY_ABI } from "../abis";
+import { ARC402_WALLET_EXECUTE_ABI, ARC402_WALLET_GUARDIAN_ABI, ARC402_WALLET_OWNER_ABI, ARC402_WALLET_REGISTRY_ABI, POLICY_ENGINE_LIMITS_ABI, TRUST_REGISTRY_ABI, WALLET_FACTORY_ABI } from "../abis";
 import { connectPhoneWallet, sendTransactionWithSession, requestPhoneWalletSignature } from "../walletconnect";
 import { requestCoinbaseSmartWalletSignature } from "../coinbase-smart-wallet";
 import { sendTelegramMessage } from "../telegram-notify";
@@ -440,25 +440,25 @@ export function registerWalletCommands(program: Command): void {
   const walletPolicy = wallet.command("policy").description("View and set spending policy on ARC402Wallet");
 
   walletPolicy.command("show")
-    .description("List current spending limits")
-    .action(async () => {
+    .description("Show per-tx and daily spending limits for a category")
+    .requiredOption("--category <cat>", "Category name (e.g. code.review)")
+    .action(async (opts) => {
       const config = loadConfig();
       const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
-      const { provider, address } = await getClient(config);
-      if (!address) throw new Error("No wallet configured");
-      const contract = new ethers.Contract(policyAddress, POLICY_ENGINE_LIMITS_ABI, provider);
-      const categories: string[] = await contract.getCategories(address);
-      if (categories.length === 0) {
-        console.log("No spending limits configured");
-        return;
+      const walletAddr = config.walletContractAddress;
+      if (!walletAddr) {
+        console.error("walletContractAddress not set in config. Run `arc402 wallet deploy` first.");
+        process.exit(1);
       }
-      const limits = await Promise.all(
-        categories.map(async (cat) => {
-          const limit: bigint = await contract.getSpendLimit(address, cat);
-          return { category: cat, limit: ethers.formatEther(limit) };
-        })
-      );
-      limits.forEach(({ category, limit }) => console.log(`${category}: ${limit} ETH`));
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+      const contract = new ethers.Contract(policyAddress, POLICY_ENGINE_LIMITS_ABI, provider);
+      const [perTxLimit, dailyLimit]: [bigint, bigint] = await Promise.all([
+        contract.categoryLimits(walletAddr, opts.category),
+        contract.dailyCategoryLimit(walletAddr, opts.category),
+      ]);
+      console.log(`Category:  ${opts.category}`);
+      console.log(`Per-tx:    ${perTxLimit === 0n ? "(not set)" : ethers.formatEther(perTxLimit) + " ETH"}`);
+      console.log(`Daily:     ${dailyLimit === 0n ? "(not set)" : ethers.formatEther(dailyLimit) + " ETH"}`);
     });
 
   walletPolicy.command("set-limit")
@@ -484,7 +484,7 @@ export function registerWalletCommands(program: Command): void {
           chainId,
           (account) => ({
             to: policyAddress,
-            data: policyInterface.encodeFunctionData("setSpendLimit", [walletAddr, opts.category, amount]),
+            data: policyInterface.encodeFunctionData("setCategoryLimitFor", [walletAddr, opts.category, amount]),
             value: "0x0",
           }),
           `Approve spend limit: ${opts.category} → ${opts.amount} ETH`,
@@ -503,7 +503,7 @@ export function registerWalletCommands(program: Command): void {
         console.warn("  Run `arc402 config set walletConnectProjectId <id>` to enable phone wallet signing.");
         const { signer, address } = await requireSigner(config);
         const contract = new ethers.Contract(policyAddress, POLICY_ENGINE_LIMITS_ABI, signer);
-        await (await contract.setSpendLimit(address, opts.category, amount)).wait();
+        await (await contract.setCategoryLimitFor(address, opts.category, amount)).wait();
         console.log(`Spend limit for ${opts.category} set to ${opts.amount} ETH`);
       }
     });
@@ -1052,6 +1052,80 @@ export function registerWalletCommands(program: Command): void {
       console.log(`\n✓ Velocity limit updated`);
       console.log(`  Tx: ${txHash}`);
       console.log(`  New limit: ${limitEth} ETH per rolling window`);
+    });
+
+  // ─── register-policy ───────────────────────────────────────────────────────
+  //
+  // Calls registerWallet(walletAddress, ownerAddress) on PolicyEngine via
+  // executeContractCall on the ARC402Wallet. PolicyEngine requires msg.sender == wallet,
+  // so this must go through the wallet contract — not called directly by the owner key.
+
+  wallet.command("register-policy")
+    .description("Register this wallet on PolicyEngine (required before spend limits can be set)")
+    .option("--hardware", "Hardware wallet mode: show raw wc: URI only")
+    .action(async (opts) => {
+      const config = loadConfig();
+      if (!config.walletContractAddress) {
+        console.error("walletContractAddress not set in config. Run `arc402 wallet deploy` first.");
+        process.exit(1);
+      }
+      if (!config.walletConnectProjectId) {
+        console.error("walletConnectProjectId not set in config. Run `arc402 config set walletConnectProjectId <id>`.");
+        process.exit(1);
+      }
+      const ownerAddress = config.ownerAddress;
+      if (!ownerAddress) {
+        console.error("ownerAddress not set in config. Run `arc402 wallet deploy` first.");
+        process.exit(1);
+      }
+
+      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const chainId = config.network === "base-mainnet" ? 8453 : 84532;
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+
+      // Encode registerWallet(wallet, owner) calldata — called on PolicyEngine
+      const policyInterface = new ethers.Interface([
+        "function registerWallet(address wallet, address owner) external",
+      ]);
+      const registerCalldata = policyInterface.encodeFunctionData("registerWallet", [
+        config.walletContractAddress,
+        ownerAddress,
+      ]);
+
+      const executeInterface = new ethers.Interface(ARC402_WALLET_EXECUTE_ABI);
+
+      console.log(`\nWallet:       ${config.walletContractAddress}`);
+      console.log(`PolicyEngine: ${policyAddress}`);
+      console.log(`Owner:        ${ownerAddress}`);
+
+      const telegramOpts = config.telegramBotToken && config.telegramChatId
+        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
+        : undefined;
+
+      const { txHash } = await requestPhoneWalletSignature(
+        config.walletConnectProjectId,
+        chainId,
+        () => ({
+          to: config.walletContractAddress!,
+          data: executeInterface.encodeFunctionData("executeContractCall", [{
+            target: policyAddress,
+            data: registerCalldata,
+            value: 0n,
+            minReturnValue: 0n,
+            maxApprovalAmount: 0n,
+            approvalToken: ethers.ZeroAddress,
+          }]),
+          value: "0x0",
+        }),
+        `Approve: register wallet on PolicyEngine`,
+        telegramOpts,
+        config
+      );
+
+      await provider.waitForTransaction(txHash);
+      console.log(`\n✓ Wallet registered on PolicyEngine`);
+      console.log(`  Tx: ${txHash}`);
+      console.log(`\nNext: run 'arc402 wallet policy set-limit' to configure spending limits.`);
     });
 
   // ─── cancel-registry-upgrade ───────────────────────────────────────────────

@@ -18,7 +18,8 @@ See [README.md](../README.md) for the current mainnet contract addresses.
 | SettlementCoordinator | [`0x52b565797975781f069368Df40d6633b2aD03390`](https://sepolia.basescan.org/address/0x52b565797975781f069368Df40d6633b2aD03390) |
 | ServiceAgreement | [`0xa214D30906A934358f451514dA1ba732AD79f158`](https://sepolia.basescan.org/address/0xa214D30906A934358f451514dA1ba732AD79f158) |
 | SessionChannels | [`0x21340f81F5ddc9C213ff2AC45F0f34FB2449386d`](https://sepolia.basescan.org/address/0x21340f81F5ddc9C213ff2AC45F0f34FB2449386d) |
-| WalletFactory | [`0xD560C22aD5372Aa830ee5ffBFa4a5D9f528e7B87`](https://sepolia.basescan.org/address/0xD560C22aD5372Aa830ee5ffBFa4a5D9f528e7B87) |
+| WalletFactory v1 | [`0xD560C22aD5372Aa830ee5ffBFa4a5D9f528e7B87`](https://sepolia.basescan.org/address/0xD560C22aD5372Aa830ee5ffBFa4a5D9f528e7B87) |
+| WalletFactory v2 | [`0xbC73FBf023fc34b18a33D201e1ba339986EcE0Ee`](https://sepolia.basescan.org/address/0xbC73FBf023fc34b18a33D201e1ba339986EcE0Ee) |
 | AgentRegistry | [`0x07D526f8A8e148570509aFa249EFF295045A0cc9`](https://sepolia.basescan.org/address/0x07D526f8A8e148570509aFa249EFF295045A0cc9) |
 | ARC402Registry | [`0x638C7d106a2B7beC9ef4e0eA7d64ed8ab656A7e6`](https://sepolia.basescan.org/address/0x638C7d106a2B7beC9ef4e0eA7d64ed8ab656A7e6) |
 | DisputeModule | [`0xcAcf606374E29bbC573620afFd7f9f739D25317F`](https://sepolia.basescan.org/address/0xcAcf606374E29bbC573620afFd7f9f739D25317F) |

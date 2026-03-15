@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head><title>ARC-402: Register Wallet on PolicyEngine</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
+<style>body{font-family:monospace;max-width:600px;margin:40px auto;padding:20px;background:#111;color:#eee}
+button{font-size:16px;padding:12px 24px;background:#4CAF50;color:white;border:none;cursor:pointer;border-radius:4px;margin:8px 4px;display:block;width:100%}
+button:hover{background:#45a049}button:disabled{background:#666;cursor:not-allowed}
+.warn{color:#ff9800}pre{background:#222;padding:10px;border-radius:4px}
+#status{margin-top:20px;padding:10px;border-radius:4px;background:#222}
+.step{padding:8px;margin:4px 0;border-radius:4px}.done{color:#4CAF50}.pending{color:#ff9800}.err{color:#f44336}</style>
+</head>
+<body>
+<h1>🔗 ARC-402 Wallet Setup</h1>
+<p>Wallet: <code>0xB7840152eB82bBdA0Ca9f6012bd42C63C96dCD2b</code></p>
+<p>PolicyEngine: <code>0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847</code></p>
+<p class="warn">⚠ Make sure Rabby is on <strong>Base</strong> network</p>
+
+<button onclick="runAll()">Run All 3 Steps</button>
+<div id="status">Click the button to start</div>
+
+<script>
+const WALLET = '0xB7840152eB82bBdA0Ca9f6012bd42C63C96dCD2b';
+const PE = '0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847';
+const OWNER = '0x7745772d67cd52c1f38706bf5550adcd925c7c00';
+
+async function runAll() {
+  const s = document.getElementById('status');
+  try {
+    if (!window.ethereum) { s.innerHTML = '<span class="err">❌ No wallet extension found</span>'; return; }
+    
+    s.innerHTML = '<div class="step pending">⏳ Connecting...</div>';
+    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+    
+    // Check chain
+    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+    if (chainId !== '0x2105') {
+      s.innerHTML = '<div class="step pending">⏳ Switching to Base...</div>';
+      try {
+        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x2105' }] });
+      } catch(e) {
+        await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{ chainId: '0x2105', chainName: 'Base', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://mainnet.base.org'], blockExplorerUrls: ['https://basescan.org'] }] });
+      }
+    }
+    
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const signer = await provider.getSigner();
+    const from = await signer.getAddress();
+    
+    const pe = new ethers.Contract(PE, [
+      'function enableDefiAccess(address wallet) external',
+      'function whitelistContract(address wallet, address target) external',
+      'function registerWallet(address wallet, address owner) external',
+      'function defiAccessEnabled(address) view returns (bool)',
+      'function walletOwners(address) view returns (address)',
+    ], signer);
+    
+    // Step 1: Enable DeFi access
+    s.innerHTML = '<div class="step pending">⏳ Step 1/3: Enable DeFi access on PolicyEngine... (confirm in wallet)</div>';
+    const tx1 = await pe.enableDefiAccess(WALLET);
+    await tx1.wait();
+    s.innerHTML = '<div class="step done">✅ Step 1/3: DeFi access enabled</div>';
+    
+    // Step 2: Whitelist PolicyEngine itself as a call target
+    s.innerHTML += '<div class="step pending">⏳ Step 2/3: Whitelist PolicyEngine as call target... (confirm in wallet)</div>';
+    const tx2 = await pe.whitelistContract(WALLET, PE);
+    await tx2.wait();
+    s.innerHTML = s.innerHTML.replace('⏳ Step 2', '✅ Step 2');
+    
+    // Step 3: Now call registerWallet via executeContractCall on the wallet
+    s.innerHTML += '<div class="step pending">⏳ Step 3/3: Register wallet on PolicyEngine... (confirm in wallet)</div>';
+    
+    const registerData = pe.interface.encodeFunctionData('registerWallet', [WALLET, OWNER]);
+    const walletIface = new ethers.Interface([
+      'function executeContractCall(tuple(address target, bytes data, uint256 value, uint256 minReturnValue, uint256 maxApprovalAmount, address approvalToken) params) external returns (bytes)'
+    ]);
+    const execData = walletIface.encodeFunctionData('executeContractCall', [{
+      target: PE, data: registerData, value: 0n, minReturnValue: 0n, maxApprovalAmount: 0n, approvalToken: ethers.ZeroAddress
+    }]);
+    
+    const tx3 = await signer.sendTransaction({ to: WALLET, data: execData, value: 0n });
+    await tx3.wait();
+    
+    // Verify
+    const registeredOwner = await pe.walletOwners(WALLET);
+    const isRegistered = registeredOwner.toLowerCase() !== '0x0000000000000000000000000000000000000000';
+    
+    s.innerHTML = `
+      <div class="step done">✅ Step 1/3: DeFi access enabled</div>
+      <div class="step done">✅ Step 2/3: PolicyEngine whitelisted</div>
+      <div class="step done">✅ Step 3/3: Wallet registered (owner: ${registeredOwner})</div>
+      <br><strong style="color:#4CAF50">All done! Spending limits can now be set.</strong>
+      <br><br>Tx: <a href="https://basescan.org/tx/${tx3.hash}" target="_blank" style="color:#4CAF50">${tx3.hash}</a>
+    `;
+    
+  } catch(e) {
+    s.innerHTML += '<div class="step err">❌ ' + (e.reason || e.message || e) + '</div>';
+    console.error(e);
+  }
+}
+</script>
+</body>
+</html>

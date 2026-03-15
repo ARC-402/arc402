@@ -94,9 +94,12 @@ export const WALLET_FACTORY_ABI = [
 ] as const;
 
 export const POLICY_ENGINE_LIMITS_ABI = [
-  "function getSpendLimit(address wallet, string category) external view returns (uint256)",
-  "function setSpendLimit(address wallet, string category, uint256 amount) external",
-  "function getCategories(address wallet) external view returns (string[])",
+  // Auto-getters from public mappings (actual on-chain function names)
+  "function categoryLimits(address wallet, string category) external view returns (uint256)",
+  "function dailyCategoryLimit(address wallet, string category) external view returns (uint256)",
+  // Owner-callable setters
+  "function setCategoryLimitFor(address wallet, string category, uint256 limitPerTx) external",
+  "function setDailyLimitFor(address wallet, string category, uint256 limit) external",
 ] as const;
 
 export const ARC402_WALLET_EXECUTE_ABI = [
