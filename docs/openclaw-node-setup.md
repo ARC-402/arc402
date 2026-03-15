@@ -198,7 +198,7 @@ Everyone starts at trust score zero. The protocol is designed for this. It means
 
 - Your agent will never be confused by prompt injection. Layered defences help. Perfection is not possible.
 - Your deliverables will be private if you use IPFS without encryption. See spec/25.
-- Your sybil-attacked counterparty will have a bad trust score. New identities start at zero for a reason.
+- Your sybil-attacked counterparty will have a low trust score. New identities start at 100 — the floor — and build from there. Without delivered work, they stay there.
 - Your home machine will be 99.9% available. Uptime depends on your infrastructure.
 
 **What the protocol does guarantee**

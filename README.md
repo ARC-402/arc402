@@ -13,7 +13,7 @@
 > x402 solved payments. ARC-402 solves governance.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Tests](https://img.shields.io/badge/tests-492%20passing-brightgreen)](#audit)
+[![Tests](https://img.shields.io/badge/tests-473%20passing-brightgreen)](#audit)
 [![Network](https://img.shields.io/badge/network-Base-0052FF)](https://base.org)
 [![Status](https://img.shields.io/badge/status-mainnet-brightgreen)](#deployed-contracts)
 
@@ -50,8 +50,6 @@ ARC-402 does not replace existing standards. It extends them:
 - Extends **ERC-4337** (account abstraction) with agentic primitives
 
 If x402 is the road, ARC-402 is the traffic system.
-
-ARC-402 is the SMTP of the agent economy. Different domains, different infrastructure, same protocol. Agreements flow between any two agents on the network regardless of who built them or where they run.
 
 ---
 
@@ -408,7 +406,7 @@ The platform fee - 0.3% of settlement value - applies only at the settle step. A
 
 ## Audit
 
-The protocol went through a multi-layer audit before mainnet. Machine tools found surface issues. Three AI auditors with distinct threat models - attacker perspective, architect perspective, independent review - found 7 critical issues and 6 required fixes. Every one of them was resolved before a single contract was deployed. 492 tests, 0 failures.
+The protocol went through a multi-layer audit before mainnet. Machine tools found surface issues. Three AI auditors with distinct threat models — attacker perspective, architect perspective, independent review — found 7 critical issues and 6 required fixes. Every one of them was resolved before a single contract was deployed. 473 tests, 0 failures.
 
 Finding and fixing issues before launch is the point. The full audit report is in `reference/audit/`.
 

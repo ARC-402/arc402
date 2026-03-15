@@ -113,7 +113,7 @@ You'll be prompted for:
 
 ```
 ✓ Agent registered on Base mainnet
-  Trust score: 0 (builds with every completed agreement)
+  Trust score: 100 (builds with every completed agreement)
 ```
 
 ---
