@@ -293,6 +293,8 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
 
     /// @dev Verify a WebAuthn P256 (secp256r1) signature using the Base RIP-7212 precompile at 0x100.
     ///      sig must be ABI-encoded: (bytes32 r, bytes32 s, bytes authenticatorData, bytes clientDataJSON).
+    ///      Verifies that clientDataJSON.challenge == base64url(userOpHash) to bind this assertion
+    ///      to the specific UserOp being validated (prevents governance signature replay).
     ///      Reconstructs the WebAuthn-signed hash: sha256(authenticatorData || sha256(clientDataJSON)).
     ///      Returns SIG_VALIDATION_SUCCESS (0) or SIG_VALIDATION_FAILED (1).
     ///      Safe-degrades on non-Base chains (precompile absent → staticcall fails → FAILED).
@@ -309,9 +311,11 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         (bytes32 r, bytes32 s, bytes memory authData, bytes memory clientDataJSON) =
             abi.decode(sig, (bytes32, bytes32, bytes, bytes));
 
-        // Suppress unused-variable warning for userOpHash — callers may use it for challenge
-        // verification off-chain; on-chain we verify the WebAuthn-reconstructed hash instead.
-        (userOpHash);
+        // AUD-PK-FIX-01: Verify clientDataJSON contains userOpHash as the base64url-encoded challenge.
+        // This cryptographically binds the WebAuthn assertion to this specific UserOp, preventing
+        // an attacker from replaying a previously observed governance signature against a new op.
+        bytes32 challenge = P256VerifierLib.extractChallenge(clientDataJSON);
+        if (challenge != userOpHash) return SIG_VALIDATION_FAILED;
 
         // Reconstruct the hash the WebAuthn authenticator actually signed:
         // sha256(authenticatorData || sha256(clientDataJSON))
