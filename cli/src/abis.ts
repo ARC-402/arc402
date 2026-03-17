@@ -156,4 +156,9 @@ export const ARC402_WALLET_MACHINE_KEY_ABI = [
 
 export const ARC402_WALLET_PASSKEY_ABI = [
   "function setPasskey(bytes32 pubKeyX, bytes32 pubKeyY) external",
+  "function clearPasskey() external",
+  "function emergencyOwnerOverride(bytes32 newPubKeyX, bytes32 newPubKeyY) external",
+  "function emergencyOwnerOverride() external",
+  "function ownerAuth() external view returns (uint8 signerType, bytes32 pubKeyX, bytes32 pubKeyY)",
+  "event PasskeySet(bytes32 indexed pubKeyX, bytes32 pubKeyY)",
 ] as const;

@@ -1,0 +1,40 @@
+[profile.default]
+src = "contracts"
+out = "out"
+libs = ["lib"]
+solc = "0.8.24"
+optimizer = false
+optimizer_runs = 200
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+]
+
+# Optimizer profile for size-critical contracts (ARC402Wallet, etc.)
+# Use: FOUNDRY_PROFILE=deploy forge build
+[profile.deploy]
+src = "contracts"
+out = "out"
+libs = ["lib"]
+solc = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+via_ir = false
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+]
+
+# Size-check profile: optimizer on, no tests (avoids test immutable optimizer issue)
+# Use: FOUNDRY_PROFILE=sizecheck forge build --sizes
+[profile.sizecheck]
+src = "contracts"
+test = "test_disabled"
+script = "script_disabled"
+out = "out-sizecheck"
+libs = ["lib"]
+solc = "0.8.24"
+optimizer = true
+optimizer_runs = 200
+via_ir = false
+remappings = [
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+]
