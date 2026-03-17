@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>ARC-402: Register Passkey</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0a0a0a;color:#f0f0f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+.card{background:#111;border:1px solid #222;border-radius:16px;padding:32px;max-width:480px;width:100%}
+h1{font-size:1.4rem;font-weight:600;margin-bottom:8px}
+.sub{color:#888;font-size:0.9rem;margin-bottom:28px}
+.wallet{font-family:monospace;font-size:0.75rem;background:#1a1a1a;padding:8px 12px;border-radius:8px;color:#888;margin-bottom:24px;word-break:break-all}
+button{width:100%;padding:14px;background:#3b82f6;color:white;border:none;border-radius:10px;font-size:1rem;font-weight:500;cursor:pointer;transition:background 0.2s}
+button:hover{background:#2563eb}
+button:disabled{background:#333;color:#666;cursor:not-allowed}
+#status{margin-top:20px;padding:14px;border-radius:10px;background:#1a1a1a;font-size:0.85rem;display:none}
+.done{color:#22c55e}.err{color:#ef4444}.info{color:#888}
+code{font-family:monospace;font-size:0.75rem;background:#222;padding:2px 6px;border-radius:4px;word-break:break-all}
+.result{margin-top:16px;padding:14px;background:#0f1f0f;border:1px solid #1a3a1a;border-radius:10px}
+.result p{margin-bottom:8px;font-size:0.8rem}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔑 Register Passkey</h1>
+  <p class="sub">One-time setup. Your Face ID / fingerprint will replace MetaMask for all governance operations.</p>
+
+  <div class="wallet" id="walletAddr">Loading wallet...</div>
+
+  <button id="btn" onclick="setup()">Register with Face ID / Fingerprint</button>
+  <div id="status"></div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const wallet = params.get("wallet") || "0x0000...";
+document.getElementById("walletAddr").textContent = wallet;
+
+function b64url(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g,"-").replace(/\//g,"_").replace(/=/g,"");
+}
+
+function parseP256Key(spki) {
+  const b = new Uint8Array(spki);
+  let off = -1;
+  for (let i = 0; i < b.length - 65; i++) {
+    if (b[i] === 0x04 && i > 20) { off = i + 1; break; }
+  }
+  if (off === -1) throw new Error("P256 point not found");
+  return {
+    x: "0x" + Array.from(b.slice(off, off+32)).map(v=>v.toString(16).padStart(2,"0")).join(""),
+    y: "0x" + Array.from(b.slice(off+32, off+64)).map(v=>v.toString(16).padStart(2,"0")).join(""),
+  };
+}
+
+async function setup() {
+  const s = document.getElementById("status");
+  const btn = document.getElementById("btn");
+  s.style.display = "block";
+  btn.disabled = true;
+
+  try {
+    s.innerHTML = '<span class="info">⏳ Waiting for Face ID / fingerprint...</span>';
+
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const rpId = location.hostname === "localhost" ? "localhost" : "arc402.xyz";
+
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge,
+      rp: { name: "ARC-402", id: rpId },
+      user: { id: new TextEncoder().encode(wallet), name: wallet, displayName: "ARC-402 Wallet" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+      authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "preferred" },
+      timeout: 60000,
+    }});
+
+    const spki = cred.response.getPublicKey();
+    const { x, y } = parseP256Key(spki);
+    const credId = b64url(cred.rawId);
+
+    s.innerHTML = `
+      <div class="done">✅ Passkey registered</div>
+      <div class="result">
+        <p><strong>Credential ID</strong> (save to daemon.toml):</p>
+        <code>${credId}</code>
+        <p style="margin-top:12px"><strong>pubKeyX:</strong></p>
+        <code>${x}</code>
+        <p style="margin-top:8px"><strong>pubKeyY:</strong></p>
+        <code>${y}</code>
+        <p style="margin-top:12px;color:#888">Now run: <code>arc402 wallet set-passkey ${x} ${y}</code></p>
+      </div>
+    `;
+  } catch(e) {
+    s.innerHTML = `<span class="err">❌ ${e.message}</span>`;
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>

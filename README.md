@@ -200,11 +200,13 @@ ARC-402 is the SMTP of the agent economy. `lego@gigabrain.arc402.xyz` and `resea
 | TrustRegistryV2 | [`0xdA1D377991B2E580991B0DD381CdD635dd71aC39`](https://basescan.org/address/0xdA1D377991B2E580991B0DD381CdD635dd71aC39) |
 | TrustRegistryV3 | [`0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1`](https://basescan.org/address/0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1) |
 | IntentAttestation | [`0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460`](https://basescan.org/address/0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460) |
-| SettlementCoordinator | [`0x6653F385F98752575db3180b9306e2d9644f9Eb1`](https://basescan.org/address/0x6653F385F98752575db3180b9306e2d9644f9Eb1) |
+| SettlementCoordinator v1 (frozen) | [`0x6653F385F98752575db3180b9306e2d9644f9Eb1`](https://basescan.org/address/0x6653F385F98752575db3180b9306e2d9644f9Eb1) |
+| SettlementCoordinator ← active | [`0xd52d8Be9728976E0D70C89db9F8ACeb5B5e97cA2`](https://basescan.org/address/0xd52d8Be9728976E0D70C89db9F8ACeb5B5e97cA2) |
 | ARC402RegistryV2 | [`0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622`](https://basescan.org/address/0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622) |
 | AgentRegistry | [`0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865`](https://basescan.org/address/0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865) |
 | WalletFactory v1 (frozen) | [`0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2`](https://basescan.org/address/0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2) |
-| WalletFactory v2 | [`0x67b92B842Ee44671762E44D347d76a6895EFF9e2`](https://basescan.org/address/0x67b92B842Ee44671762E44D347d76a6895EFF9e2) |
+| WalletFactory v2 (frozen) | [`0x67b92B842Ee44671762E44D347d76a6895EFF9e2`](https://basescan.org/address/0x67b92B842Ee44671762E44D347d76a6895EFF9e2) |
+| WalletFactory v3 ← active | [`0x974d2ae81cC9B4955e325890f4247AC76c92148D`](https://basescan.org/address/0x974d2ae81cC9B4955e325890f4247AC76c92148D) |
 | SponsorshipAttestation | [`0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22`](https://basescan.org/address/0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22) |
 | ServiceAgreement | [`0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6`](https://basescan.org/address/0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6) |
 | SessionChannels | [`0x578f8d1bd82E8D6268E329d664d663B4d985BE61`](https://basescan.org/address/0x578f8d1bd82E8D6268E329d664d663B4d985BE61) |

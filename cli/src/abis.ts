@@ -147,3 +147,9 @@ export const ARC402_WALLET_OWNER_ABI = [
   "function velocityLimit() external view returns (uint256)",
   "function activePolicyId() external view returns (bytes32)",
 ] as const;
+
+export const ARC402_WALLET_MACHINE_KEY_ABI = [
+  "function authorizeMachineKey(address key) external",
+  "function revokeMachineKey(address key) external",
+  "function authorizedMachineKeys(address key) external view returns (bool)",
+] as const;

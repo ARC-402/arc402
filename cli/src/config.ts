@@ -74,10 +74,10 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     trustRegistryAddress:          "0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1",   // TrustRegistryV3 — v2
     trustRegistryV2Address:        "0xdA1D377991B2E580991B0DD381CdD635dd71aC39",   // old v2, kept for reference
     intentAttestationAddress:      "0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460",
-    settlementCoordinatorAddress:  "0x6653F385F98752575db3180b9306e2d9644f9Eb1",
+    settlementCoordinatorAddress: "0xd52d8Be9728976E0D70C89db9F8ACeb5B5e97cA2",  // SettlementCoordinatorV2
     agentRegistryAddress:          "0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622",   // ARC402RegistryV2
     agentRegistryV2Address:        "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865",   // AgentRegistry
-    walletFactoryAddress:          "0x67b92B842Ee44671762E44D347d76a6895EFF9e2",   // WalletFactory v2
+    walletFactoryAddress:          "0x974d2ae81cC9B4955e325890f4247AC76c92148D",   // WalletFactoryV3 — deployed 2026-03-17 (SSTORE2 split-chunk, correct bytecode)
     sponsorshipAttestationAddress: "0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22",
     serviceAgreementAddress:       "0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6",
     sessionChannelsAddress:        "0x578f8d1bd82E8D6268E329d664d663B4d985BE61",

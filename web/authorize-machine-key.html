@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head><title>ARC-402: Authorize Machine Key</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.1/ethers.umd.min.js"></script>
+<style>
+body{font-family:monospace;max-width:600px;margin:40px auto;padding:20px;background:#111;color:#eee}
+button{font-size:16px;padding:12px 24px;background:#4CAF50;color:white;border:none;cursor:pointer;border-radius:4px;margin:8px 4px;display:block;width:100%}
+button:hover{background:#45a049}button:disabled{background:#666;cursor:not-allowed}
+.warn{color:#ff9800}code{background:#222;padding:2px 6px;border-radius:3px}
+#status{margin-top:20px;padding:10px;border-radius:4px;background:#222}
+.done{color:#4CAF50}.pending{color:#ff9800}.err{color:#f44336}
+a{color:#4CAF50}
+</style>
+</head>
+<body>
+<h1>🔑 Authorize Machine Key</h1>
+<p>Wallet: <code>0xC3207bFe22cba39AeC4e8540c97c29B028103c7F</code></p>
+<p>Machine key: <code>0x747024C2e59C523E3B1621A4b3F92366C1E28A30</code></p>
+<br>
+<p class="warn">⚠ Make sure Rabby is on <strong>Base</strong> network before clicking</p>
+<br>
+<button onclick="authorize()">Authorize Machine Key</button>
+<div id="status">Ready. Click the button to proceed.</div>
+
+<script>
+const WALLET     = '0xC3207bFe22cba39AeC4e8540c97c29B028103c7F';
+const MACHINE_KEY = '0x747024C2e59C523E3B1621A4b3F92366C1E28A30';
+
+async function authorize() {
+  const s = document.getElementById('status');
+  const btn = document.querySelector('button');
+  btn.disabled = true;
+
+  try {
+    if (!window.ethereum) {
+      s.innerHTML = '<span class="err">❌ No wallet extension found. Install Rabby or MetaMask.</span>';
+      btn.disabled = false;
+      return;
+    }
+
+    s.innerHTML = '<div class="pending">⏳ Connecting wallet...</div>';
+    await window.ethereum.request({ method: 'eth_requestAccounts' });
+
+    // Enforce Base
+    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+    if (chainId !== '0x2105') {
+      s.innerHTML = '<div class="pending">⏳ Switching to Base network...</div>';
+      try {
+        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x2105' }] });
+      } catch(e) {
+        await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{
+          chainId: '0x2105',
+          chainName: 'Base',
+          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+          rpcUrls: ['https://mainnet.base.org'],
+          blockExplorerUrls: ['https://basescan.org']
+        }]});
+      }
+    }
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const signer   = await provider.getSigner();
+    const from     = await signer.getAddress();
+    s.innerHTML = `<div class="pending">⏳ Connected: ${from}<br>Sending authorizeMachineKey... (confirm in Rabby)</div>`;
+
+    const walletContract = new ethers.Contract(WALLET, [
+      'function authorizeMachineKey(address key) external',
+      'function authorizedMachineKeys(address) view returns (bool)',
+    ], signer);
+
+    const tx = await walletContract.authorizeMachineKey(MACHINE_KEY);
+    s.innerHTML = `<div class="pending">⏳ Tx submitted: <a href="https://basescan.org/tx/${tx.hash}" target="_blank">${tx.hash.slice(0,18)}...</a><br>Waiting for confirmation...</div>`;
+
+    await tx.wait();
+
+    // Verify on-chain
+    const isAuthorized = await walletContract.authorizedMachineKeys(MACHINE_KEY);
+
+    if (isAuthorized) {
+      s.innerHTML = `
+        <div class="done">✅ Machine key authorized on-chain!</div>
+        <br>
+        <div>Tx: <a href="https://basescan.org/tx/${tx.hash}" target="_blank">${tx.hash}</a></div>
+        <br>
+        <div class="done">The hot key can now sign transactions autonomously.</div>
+      `;
+    } else {
+      s.innerHTML = `<div class="err">⚠ Tx confirmed but key not showing as authorized. Check Basescan.</div>`;
+    }
+
+  } catch(e) {
+    s.innerHTML += `<div class="err">❌ ${e.reason || e.message || String(e)}</div>`;
+    console.error(e);
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>
