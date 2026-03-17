@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ethers } from 'ethers'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -143,6 +143,68 @@ export default function OnboardContent() {
   const [passkeyResult, setPasskeyResult]       = useState<PasskeyResult | null>(null)
   const [passkeyActivated, setPasskeyActivated] = useState(false)
   const [policyDone, setPolicyDone]             = useState(false)
+
+  // ── On-chain state detection — skip completed steps on refresh ──────────
+  useEffect(() => {
+    async function detectState() {
+      // Check URL params for pre-filled wallet
+      const urlWallet = new URLSearchParams(window.location.search).get('wallet')
+      const urlOwner = new URLSearchParams(window.location.search).get('owner')
+      if (!urlWallet && !urlOwner) return
+
+      try {
+        const rpc = new ethers.JsonRpcProvider(BASE_RPC)
+        const ownerAddr = urlOwner ?? ''
+        let walletAddr = urlWallet ?? ''
+
+        // If owner given but no wallet, look it up
+        if (!walletAddr && ownerAddr) {
+          const res = await fetch(BASE_RPC, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call',
+              params: [{ to: WALLET_FACTORY, data: '0x422c29a4' + ownerAddr.slice(2).toLowerCase().padStart(64, '0') }, 'latest'] }),
+          })
+          const json = await res.json() as { result?: string }
+          if (json.result && json.result !== '0x') {
+            const hex = json.result.slice(2)
+            const count = parseInt(hex.slice(64, 128), 16)
+            if (count > 0) walletAddr = '0x' + hex.slice(128 + 24, 128 + 64).toLowerCase()
+          }
+        }
+        if (!walletAddr) return
+
+        setArc402Wallet(walletAddr)
+        if (ownerAddr) setAccount(ownerAddr)
+
+        // Check passkey
+        const wallet = new ethers.Contract(walletAddr, [
+          'function ownerAuth() view returns (uint8, bytes32, bytes32)',
+        ], rpc)
+        const [signerType] = await wallet.ownerAuth().catch(() => [0n])
+        if (Number(signerType) === 1) {
+          setPasskeyActivated(true)
+          setPolicyDone(true) // assume policy was set if passkey is active
+        }
+
+        // Check agent registration
+        const reg = new ethers.Contract(AGENT_REGISTRY, [
+          'function isRegistered(address) view returns (bool)',
+        ], rpc)
+        const registered = await reg.isRegistered(walletAddr).catch(() => false)
+
+        // Skip to the right step
+        if (registered) {
+          setAgentDone(true)
+          setStep('done')
+        } else if (Number(signerType) === 1) {
+          setStep('agent')
+        } else {
+          setStep('passkey')
+        }
+      } catch { /* detection failed — start from beginning */ }
+    }
+    detectState()
+  }, [])
   const [agentDone, setAgentDone]               = useState(false)
 
   // WC / loading UI
