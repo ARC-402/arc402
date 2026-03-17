@@ -289,9 +289,37 @@ export default function OnboardContent() {
       setExistingWallets(wallets)
 
       if (wallets.length > 0) {
-        setArc402Wallet(wallets[0])
+        const w = wallets[0]
+        setArc402Wallet(w)
         await disconnectWC(wc)
-        setStep('passkey')
+
+        // Detect on-chain state to skip completed steps
+        try {
+          const rpc = new ethers.JsonRpcProvider(BASE_RPC)
+          const walletC = new ethers.Contract(w, [
+            'function ownerAuth() view returns (uint8, bytes32, bytes32)',
+          ], rpc)
+          const [signerType] = await walletC.ownerAuth().catch(() => [0n])
+          const reg = new ethers.Contract(AGENT_REGISTRY, [
+            'function isRegistered(address) view returns (bool)',
+          ], rpc)
+          const registered = await reg.isRegistered(w).catch(() => false)
+
+          if (registered) {
+            setAgentDone(true)
+            setPasskeyActivated(Number(signerType) === 1)
+            setPolicyDone(true)
+            setStep('done')
+          } else if (Number(signerType) === 1) {
+            setPasskeyActivated(true)
+            setPolicyDone(true)
+            setStep('agent')
+          } else {
+            setStep('passkey')
+          }
+        } catch {
+          setStep('passkey')
+        }
         return
       }
 
