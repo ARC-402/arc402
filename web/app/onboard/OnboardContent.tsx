@@ -256,6 +256,24 @@ export default function OnboardContent() {
     const session = await approval()
     const s = session as unknown as { topic: string; namespaces: { eip155: { accounts: string[] } } }
     const acc = s.namespaces.eip155.accounts[0].split(':')[2]
+
+    // Switch MetaMask to Base
+    const hexChainId = '0x' + CHAIN_ID.toString(16)
+    try {
+      await client.request({ topic: s.topic, chainId: `eip155:1`, request: {
+        method: 'wallet_addEthereumChain',
+        params: [{ chainId: hexChainId, chainName: 'Base', nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://mainnet.base.org'], blockExplorerUrls: ['https://basescan.org'] }],
+      }}).catch(() => {})
+    } catch {}
+    for (let i = 0; i < 3; i++) {
+      try {
+        await client.request({ topic: s.topic, chainId: `eip155:${CHAIN_ID}`, request: {
+          method: 'wallet_switchEthereumChain', params: [{ chainId: hexChainId }],
+        }})
+        break
+      } catch { await new Promise(r => setTimeout(r, 1000)) }
+    }
+
     setWaiting(false)
     resetWc()
     return { client, topic: s.topic, account: acc }
