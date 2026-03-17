@@ -81,7 +81,7 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     settlementCoordinatorAddress: "0xd52d8Be9728976E0D70C89db9F8ACeb5B5e97cA2",  // SettlementCoordinatorV2
     agentRegistryAddress:          "0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622",   // ARC402RegistryV2
     agentRegistryV2Address:        "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865",   // AgentRegistry
-    walletFactoryAddress:          "0x974d2ae81cC9B4955e325890f4247AC76c92148D",   // WalletFactoryV3 — deployed 2026-03-17 (SSTORE2 split-chunk, correct bytecode)
+    walletFactoryAddress:          "0x35075D293E39d271860fe942cDA208A907990Cc0",   // WalletFactoryV4 — deployed 2026-03-17 (passkey P256 support)
     sponsorshipAttestationAddress: "0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22",
     serviceAgreementAddress:       "0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6",
     sessionChannelsAddress:        "0x578f8d1bd82E8D6268E329d664d663B4d985BE61",

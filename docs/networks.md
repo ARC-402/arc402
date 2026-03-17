@@ -2,7 +2,17 @@
 
 ## Base Mainnet
 
-See [README.md](../README.md) for the current mainnet contract addresses.
+See [README.md](../README.md) for the full mainnet contract address table.
+
+### WalletFactory (mainnet)
+
+| Version | Address |
+|---------|---------|
+| WalletFactory v1 (frozen) | [`0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2`](https://basescan.org/address/0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2) |
+| WalletFactory v2 (frozen) | [`0x67b92B842Ee44671762E44D347d76a6895EFF9e2`](https://basescan.org/address/0x67b92B842Ee44671762E44D347d76a6895EFF9e2) |
+| WalletFactory v3 (frozen) | [`0x974d2ae81cC9B4955e325890f4247AC76c92148D`](https://basescan.org/address/0x974d2ae81cC9B4955e325890f4247AC76c92148D) |
+| WalletFactory v4 ← active | [`0x35075D293E39d271860fe942cDA208A907990Cc0`](https://basescan.org/address/0x35075D293E39d271860fe942cDA208A907990Cc0) |
+| WalletCodeOracle v4 | [`0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592`](https://basescan.org/address/0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592) |
 
 ---
 

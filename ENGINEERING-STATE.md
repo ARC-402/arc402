@@ -1,5 +1,5 @@
 # ARC-402 Engineering State
-*Last updated: 2026-03-17 23:59 SAST*
+*Last updated: 2026-03-17 (WalletFactory v4 deployed — passkey P256 live)*
 
 ---
 
@@ -11,7 +11,7 @@ Deployed 2026-03-14 at 03:56 SAST. 22 contracts live. Agreement flow functional.
 ### v2 — LIVE ON BASE MAINNET ✅
 Deployed 2026-03-15. 8 new/redeployed contracts live.
 
-### v3 (ERC-4337) — LIVE ON BASE MAINNET ✅
+### v3 (ERC-4337) — LIVE ON BASE MAINNET ✅ (frozen)
 WalletFactory v3 deployed 2026-03-17 using SSTORE2 split-chunk pattern.
 Wallet bytecode is 24,300 bytes (runtime) — under EIP-170 limit.
 `authorizeMachineKey` confirmed in deployed bytecode.
@@ -19,9 +19,15 @@ E2E tested on Base Sepolia before mainnet deploy.
 
 - `WalletFactory_v3_chunk1`: `0x113C2Fc826c6989D03110Ee6bB1357f526e8DE75`
 - `WalletFactory_v3_chunk2`: `0x05CCeC2EbD262752cb033F5a73ca0601E7DbcEd8`
-- `WalletFactoryV3` ← active: `0x974d2ae81cC9B4955e325890f4247AC76c92148D`
+- `WalletFactoryV3` (frozen): `0x974d2ae81cC9B4955e325890f4247AC76c92148D`
 - Registry: ARC402RegistryV2 `0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622`
 - EntryPoint v0.7: `0x0000000071727De22E5E9d8BAf0edAc6f37da032`
+
+### v4 (Passkey P256) — LIVE ON BASE MAINNET ✅
+WalletFactory v4 deployed 2026-03-17 with native passkey (Face ID) P256 signature support.
+
+- `WalletFactoryV4` ← active: `0x35075D293E39d271860fe942cDA208A907990Cc0`
+- `WalletCodeOracle v4`: `0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592`
 
 ### GigaBrain Agent Wallet — DEPLOYED ✅
 `0xb4aF8760d349a6A4C8495Ae4da9089bC84994eE6`
@@ -51,9 +57,11 @@ Active v2 contracts (use these):
 | AgentRegistry | `0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865` |
 | WalletFactory v1 (frozen) | `0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2` |
 | WalletFactory v2 (frozen) | `0x67b92B842Ee44671762E44D347d76a6895EFF9e2` |
-| WalletFactory v3 ← active | `0x974d2ae81cC9B4955e325890f4247AC76c92148D` |
+| WalletFactory v3 (frozen) | `0x974d2ae81cC9B4955e325890f4247AC76c92148D` |
 | WalletFactory v3 chunk1 | `0x113C2Fc826c6989D03110Ee6bB1357f526e8DE75` |
 | WalletFactory v3 chunk2 | `0x05CCeC2EbD262752cb033F5a73ca0601E7DbcEd8` |
+| WalletFactory v4 ← active | `0x35075D293E39d271860fe942cDA208A907990Cc0` |
+| WalletCodeOracle v4 | `0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592` |
 | SponsorshipAttestation | `0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22` |
 | ServiceAgreement (v1, frozen) | `0x78C8e4d26D74d8da80d03Df04767D3Fdc3D9340f` |
 | ServiceAgreement ← active | `0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6` |
@@ -180,12 +188,13 @@ Active v2 contracts (use these):
 15. ✅ Cloudflare tunnel live — `7a101bba`, 4 connections (cpt01 + jnb01)
 16. ✅ Daemon config written (`~/.arc402/daemon.toml`)
 17. ✅ wc-reset command shipped (stale session fix + ping-before-resume)
-18. → Start daemon (`arc402 daemon start`)
-19. → Lego: `proposeRegistryUpdate(ARC402RegistryV2)` on `0xB7840152` — OVERDUE
-20. → Passkey governance test (`/passkey-setup` + `/passkey-sign`)
-21. → ERC-4337 full mega audit (before tagging v1.0)
-22. → Article: "Agents with Wallets is Not Enough" — first draft
-23. → Docs, README polish, v1.0 tag
+18. ✅ WalletFactory v4 deployed to mainnet — passkey P256 support live — 2026-03-17
+19. → Start daemon (`arc402 daemon start`)
+20. → Lego: `proposeRegistryUpdate(ARC402RegistryV2)` on `0xB7840152` — OVERDUE
+21. → Passkey governance test (`/passkey-setup` + `/passkey-sign`)
+22. → ERC-4337 full mega audit (before tagging v1.0)
+23. → Article: "Agents with Wallets is Not Enough" — first draft
+24. → Docs, README polish, v1.0 tag
 ```
 
 **HARD RULE:** No deployments happen without explicit Lego approval.
@@ -259,6 +268,7 @@ Active v2 contracts (use these):
 | 32 | Daemon | ✅ 2026-03-16 |
 | 33 | Passkey authentication | ✅ 2026-03-16 |
 | 34 | OpenShell integration | ✅ 2026-03-17 — blocked on OpenShell public docs |
+| 35 | Website (arc402.xyz) | ✅ 2026-03-17 — ready to build |
 | 12 | Privacy model | 🔲 Post-launch |
 | 13 | ZK extensions | 🔲 Post-launch (ceremony) |
 | 15 | Transport agnostic | 🔲 Post-launch |
