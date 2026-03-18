@@ -194,7 +194,7 @@ cast send <TrustRegistryV3_address> "addUpdater(address)" <new_factory_address> 
 
 **Current authorized factories:**
 - WalletFactoryV3: `0x974d2ae81cC9B4955e325890f4247AC76c92148D` (frozen)
-- WalletFactoryV4: `0x35075D293E39d271860fe942cDA208A907990Cc0` (active) — added tx `0xbb0590f3`
+- WalletFactoryV5: `0x35075D293E39d271860fe942cDA208A907990Cc0` (active) — added tx `0xbb0590f3`
 
 **TrustRegistryV3:** `0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1`
 

@@ -24,16 +24,16 @@ E2E tested on Base Sepolia before mainnet deploy.
 - EntryPoint v0.7: `0x0000000071727De22E5E9d8BAf0edAc6f37da032`
 
 ### v4 (Passkey P256) — LIVE ON BASE MAINNET ✅
-WalletFactory v4 deployed 2026-03-17 with native passkey (Face ID) P256 signature support.
+WalletFactory v5 deployed 2026-03-17 with native passkey (Face ID) P256 signature support.
 
-- `WalletFactoryV4` ← active: `0x35075D293E39d271860fe942cDA208A907990Cc0`
+- `WalletFactoryV5` ← active: `0x35075D293E39d271860fe942cDA208A907990Cc0`
 - `WalletCodeOracle v4`: `0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592`
 
 ### GigaBrain Agent Wallet v5 (ACTIVE) — FULLY OPERATIONAL ✅
 `0xCC0Ee5899787607C01D2a97fC4c488f64694bbb1`
 - Deployed 2026-03-17 (protocol bypass fix — no whitelist needed for core protocol contracts)
 - Owner: `0x7745772d67Cd52c1F38706bF5550AdcD925c7c00` (Lego's MetaMask)
-- Factory: WalletFactoryV4 `0x35075D293E39d271860fe942cDA208A907990Cc0`
+- Factory: WalletFactoryV5 `0x35075D293E39d271860fe942cDA208A907990Cc0`
 - Machine key: ✅ AUTHORIZED — `0x747024C2e59C523E3B1621A4b3F92366C1E28A30`
 - PE registered: ✅ | DeFi enabled: ✅ | general limit: 0.001 ETH ✅
 - AgentRegistry: ✅ registered (name: GigaBrain, type: intelligence)
@@ -71,7 +71,7 @@ Active v2 contracts (use these):
 | WalletFactory v3 (frozen) | `0x974d2ae81cC9B4955e325890f4247AC76c92148D` |
 | WalletFactory v3 chunk1 | `0x113C2Fc826c6989D03110Ee6bB1357f526e8DE75` |
 | WalletFactory v3 chunk2 | `0x05CCeC2EbD262752cb033F5a73ca0601E7DbcEd8` |
-| WalletFactory v4 ← active | `0x35075D293E39d271860fe942cDA208A907990Cc0` |
+| WalletFactory v5 ← active | `0x35075D293E39d271860fe942cDA208A907990Cc0` |
 | WalletCodeOracle v4 | `0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592` |
 | SponsorshipAttestation | `0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22` |
 | ServiceAgreement (v1, frozen) | `0x78C8e4d26D74d8da80d03Df04767D3Fdc3D9340f` |
@@ -199,7 +199,7 @@ Active v2 contracts (use these):
 15. ✅ Cloudflare tunnel live — `7a101bba`, 4 connections (cpt01 + jnb01)
 16. ✅ Daemon config written (`~/.arc402/daemon.toml`)
 17. ✅ wc-reset command shipped (stale session fix + ping-before-resume)
-18. ✅ WalletFactory v4 deployed to mainnet — passkey P256 support live — 2026-03-17
+18. ✅ WalletFactory v5 deployed to mainnet — passkey P256 support live — 2026-03-17
 19. → Start daemon (`arc402 daemon start`)
 20. ~~Lego: `proposeRegistryUpdate(ARC402RegistryV2)` on `0xB7840152`~~ — OBSOLETE (personal wallet deprecated)
 21. → Passkey governance test (`/passkey-setup` + `/passkey-sign`)

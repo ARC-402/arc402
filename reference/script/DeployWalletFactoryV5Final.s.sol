@@ -5,9 +5,9 @@ import "forge-std/Script.sol";
 import "../contracts/WalletFactoryV3.sol";
 
 /**
- * @title DeployWalletFactoryV4Final
- * @notice Fallback deploy script for WalletFactory v4 using the SSTORE2 split-chunk pattern.
- *         Use this if the code-oracle approach (DeployWalletFactoryV4.s.sol) fails due to
+ * @title DeployWalletFactoryV5Final
+ * @notice Fallback deploy script for WalletFactory v5 using the SSTORE2 split-chunk pattern.
+ *         Use this if the code-oracle approach (DeployWalletFactoryV5.s.sol) fails due to
  *         ARC402Wallet creation code exceeding the oracle's EIP-170 runtime limit.
  *
  * This script deploys WalletFactoryV3 (the battle-tested two-chunk factory) with the
@@ -23,7 +23,7 @@ import "../contracts/WalletFactoryV3.sol";
  *   DEPLOYER_PRIVATE_KEY   — deployer private key
  *   ARC402_REGISTRY_V2     — ARC402RegistryV2 address on the target chain
  */
-contract DeployWalletFactoryV4Final is Script {
+contract DeployWalletFactoryV5Final is Script {
 
     uint256 constant CHUNK_SIZE = 24000;
 
@@ -36,14 +36,14 @@ contract DeployWalletFactoryV4Final is Script {
 
         bytes memory walletCode = vm.getCode("ARC402Wallet.sol:ARC402Wallet");
         console.log("Wallet code len:  ", walletCode.length);
-        require(walletCode.length > CHUNK_SIZE, "chunk split: code fits in one chunk, use DeployWalletFactoryV4");
+        require(walletCode.length > CHUNK_SIZE, "chunk split: code fits in one chunk, use DeployWalletFactoryV5");
 
         vm.startBroadcast(deployerKey);
         (address chunk1, address chunk2, address factory) = _deploy(registry, walletCode);
         vm.stopBroadcast();
 
         console.log("");
-        console.log("=== WalletFactory v4 (Final/split-chunk) DEPLOYED (passkey P256 support) ===");
+        console.log("=== WalletFactory v5 (Final/split-chunk) DEPLOYED (passkey P256 support) ===");
         console.log("WalletFactoryV3:  ", factory);
         console.log("chunk1:           ", chunk1);
         console.log("chunk2:           ", chunk2);

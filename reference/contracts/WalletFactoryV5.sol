@@ -5,7 +5,7 @@ import "./ARC402RegistryV2.sol";
 // ITrustRegistry import removed (F-10): initWallet call was redundant and is now removed.
 
 /**
- * @title WalletFactoryV4
+ * @title WalletFactoryV5
  * @notice ERC-4337-enabled ARC402Wallet factory using the code-oracle pattern.
  *         Deploys passkey P256-enabled ARC402Wallets (Spec-33).
  *
@@ -16,19 +16,19 @@ import "./ARC402RegistryV2.sol";
  *          equals the ARC402Wallet creation code. The factory reads this via
  *          EXTCODECOPY at wallet-deploy time. The factory itself stays lean (~4 KB).
  *
- * Deployment flow (handled by script/DeployWalletFactoryV4.s.sol):
+ * Deployment flow (handled by script/DeployWalletFactoryV5.s.sol):
  *   1. Deploy code oracle — runtime = ARC402Wallet creation code (passkey-enabled)
- *   2. Deploy WalletFactoryV4(registry, oracle)
+ *   2. Deploy WalletFactoryV5(registry, oracle)
  *
  * Interface is identical to WalletFactoryV3 (createWallet / getWallets / totalWallets).
  */
-contract WalletFactoryV4 {
+contract WalletFactoryV5 {
     /// @notice Base mainnet / Base Sepolia ERC-4337 v0.7 EntryPoint.
     address public constant DEFAULT_ENTRY_POINT = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
 
     address public immutable registry;
 
-    /// @notice Oracle whose runtime code = ARC402Wallet (passkey v4) creation code.
+    /// @notice Oracle whose runtime code = ARC402Wallet (passkey v5) creation code.
     address public immutable oracle;
 
     mapping(address => address[]) public ownerWallets;
@@ -37,8 +37,8 @@ contract WalletFactoryV4 {
     event WalletCreated(address indexed owner, address indexed walletAddress);
 
     constructor(address _registry, address _oracle) {
-        require(_registry != address(0), "WalletFactoryV4: zero registry");
-        require(_oracle  != address(0), "WalletFactoryV4: zero oracle");
+        require(_registry != address(0), "WalletFactoryV5: zero registry");
+        require(_oracle  != address(0), "WalletFactoryV5: zero oracle");
         registry = _registry;
         oracle   = _oracle;
     }

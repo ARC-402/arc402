@@ -2,22 +2,22 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
-import "../contracts/WalletFactoryV4.sol";
+import "../contracts/WalletFactoryV5.sol";
 
 /**
- * @title DeployWalletFactoryV4
- * @notice Deploys WalletFactory v4 using the code-oracle pattern.
+ * @title DeployWalletFactoryV5
+ * @notice Deploys WalletFactory v5 using the code-oracle pattern.
  *         v4 adds passkey P256 (secp256r1 / WebAuthn) support via Spec-33.
  *
  * Two transactions are broadcast:
  *   1. Oracle — a contract whose runtime code = ARC402Wallet creation code (passkey-enabled)
- *   2. WalletFactoryV4 — lean factory that references the oracle (~4 KB ✓)
+ *   2. WalletFactoryV5 — lean factory that references the oracle (~4 KB ✓)
  *
  * Required env vars:
  *   DEPLOYER_PRIVATE_KEY   — deployer private key
  *   ARC402_REGISTRY_V2     — ARC402RegistryV2 address on the target chain
  */
-contract DeployWalletFactoryV4 is Script {
+contract DeployWalletFactoryV5 is Script {
 
     function run() external {
         uint256 deployerKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -34,20 +34,20 @@ contract DeployWalletFactoryV4 is Script {
         vm.stopBroadcast();
 
         console.log("");
-        console.log("=== WalletFactory v4 DEPLOYED (passkey P256 support) ===");
-        console.log("WalletFactoryV4:  ", factory);
+        console.log("=== WalletFactory v5 DEPLOYED (passkey P256 support) ===");
+        console.log("WalletFactoryV5:  ", factory);
         console.log("WalletCodeOracle: ", oracle);
-        console.log("Registry:         ", WalletFactoryV4(factory).registry());
-        console.log("EntryPoint:       ", WalletFactoryV4(factory).DEFAULT_ENTRY_POINT());
+        console.log("Registry:         ", WalletFactoryV5(factory).registry());
+        console.log("EntryPoint:       ", WalletFactoryV5(factory).DEFAULT_ENTRY_POINT());
     }
 
     function _deploy(address registry, bytes memory walletCode)
         internal returns (address oracle, address factory)
     {
         oracle  = _deployCodeOracle(walletCode);
-        factory = address(new WalletFactoryV4(registry, oracle));
+        factory = address(new WalletFactoryV5(registry, oracle));
         console.log("WalletCodeOracle: ", oracle);
-        console.log("WalletFactoryV4:  ", factory);
+        console.log("WalletFactoryV5:  ", factory);
     }
 
     /**
@@ -82,6 +82,6 @@ contract DeployWalletFactoryV4 is Script {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // POST-DEPLOY REQUIRED:
-//   cast send <TrustRegistryV3> "addUpdater(address)" <WalletFactoryV4>
+//   cast send <TrustRegistryV3> "addUpdater(address)" <WalletFactoryV5>
 //   Without this, createWallet() reverts: "TrustRegistryV3: not authorized updater"
 // ──────────────────────────────────────────────────────────────────────────────
