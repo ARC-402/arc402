@@ -11,8 +11,11 @@ See [README.md](../README.md) for the full mainnet contract address table.
 | WalletFactory v1 (frozen) | [`0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2`](https://basescan.org/address/0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2) |
 | WalletFactory v2 (frozen) | [`0x67b92B842Ee44671762E44D347d76a6895EFF9e2`](https://basescan.org/address/0x67b92B842Ee44671762E44D347d76a6895EFF9e2) |
 | WalletFactory v3 (frozen) | [`0x974d2ae81cC9B4955e325890f4247AC76c92148D`](https://basescan.org/address/0x974d2ae81cC9B4955e325890f4247AC76c92148D) |
-| WalletFactory v5 ← active | [`0x35075D293E39d271860fe942cDA208A907990Cc0`](https://basescan.org/address/0x35075D293E39d271860fe942cDA208A907990Cc0) |
-| WalletCodeOracle v4 | [`0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592`](https://basescan.org/address/0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592) |
+| WalletFactory v4 (frozen) | [`0x35075D293E39d271860fe942cDA208A907990Cc0`](https://basescan.org/address/0x35075D293E39d271860fe942cDA208A907990Cc0) |
+| WalletCodeOracle v4 (frozen) | [`0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592`](https://basescan.org/address/0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592) |
+| WalletFactory v5 ← active | [`0x3f4d4b19a69344B04fd9653E1bB12883e97300fE`](https://basescan.org/address/0x3f4d4b19a69344B04fd9653E1bB12883e97300fE) |
+| WalletFactory v5 chunk1 / WalletCodeOracle v5 | [`0xd5e015a3F6A608888fe7d3EEd0A990562F692a43`](https://basescan.org/address/0xd5e015a3F6A608888fe7d3EEd0A990562F692a43) |
+| WalletFactory v5 chunk2 | [`0xca331Db70228875acC57eda60127Af7c38Ab53D2`](https://basescan.org/address/0xca331Db70228875acC57eda60127Af7c38Ab53D2) |
 
 ---
 

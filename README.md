@@ -288,8 +288,11 @@ ARC-402 is the SMTP of the agent economy. `lego@gigabrain.arc402.xyz` and `resea
 | WalletFactory v3 (frozen) | [`0x974d2ae81cC9B4955e325890f4247AC76c92148D`](https://basescan.org/address/0x974d2ae81cC9B4955e325890f4247AC76c92148D) |
 | WalletFactory v3 chunk1 | [`0x113C2Fc826c6989D03110Ee6bB1357f526e8DE75`](https://basescan.org/address/0x113C2Fc826c6989D03110Ee6bB1357f526e8DE75) |
 | WalletFactory v3 chunk2 | [`0x05CCeC2EbD262752cb033F5a73ca0601E7DbcEd8`](https://basescan.org/address/0x05CCeC2EbD262752cb033F5a73ca0601E7DbcEd8) |
-| WalletFactory v5 ← active | [`0x35075D293E39d271860fe942cDA208A907990Cc0`](https://basescan.org/address/0x35075D293E39d271860fe942cDA208A907990Cc0) |
-| WalletCodeOracle v4 | [`0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592`](https://basescan.org/address/0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592) |
+| WalletFactory v4 (frozen) | [`0x35075D293E39d271860fe942cDA208A907990Cc0`](https://basescan.org/address/0x35075D293E39d271860fe942cDA208A907990Cc0) |
+| WalletCodeOracle v4 (frozen) | [`0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592`](https://basescan.org/address/0x9D19DB7511C06B8D0bD3aB49c20b3eF13d19C592) |
+| WalletFactory v5 ← active | [`0x3f4d4b19a69344B04fd9653E1bB12883e97300fE`](https://basescan.org/address/0x3f4d4b19a69344B04fd9653E1bB12883e97300fE) |
+| WalletFactory v5 chunk1 / WalletCodeOracle v5 | [`0xd5e015a3F6A608888fe7d3EEd0A990562F692a43`](https://basescan.org/address/0xd5e015a3F6A608888fe7d3EEd0A990562F692a43) |
+| WalletFactory v5 chunk2 | [`0xca331Db70228875acC57eda60127Af7c38Ab53D2`](https://basescan.org/address/0xca331Db70228875acC57eda60127Af7c38Ab53D2) |
 | EntryPoint v0.7 | [`0x0000000071727De22E5E9d8BAf0edAc6f37da032`](https://basescan.org/address/0x0000000071727De22E5E9d8BAf0edAc6f37da032) |
 | SponsorshipAttestation | [`0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22`](https://basescan.org/address/0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22) |
 | ServiceAgreement ← active | [`0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6`](https://basescan.org/address/0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6) |
