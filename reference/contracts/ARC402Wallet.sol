@@ -115,6 +115,13 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
 
     VelocityLib.Bucket private _walletVelocity;
 
+    // F-06: velocityLimit is applied INDEPENDENTLY to the ETH spending path and the token
+    // spending path. A wallet with velocityLimit = 1 ETH can spend 1 ETH via executeSpend
+    // AND 1 ETH-equivalent via executeTokenSpend in the same window — an effective 2× limit.
+    // This is INTENTIONAL: ETH and token velocities are tracked separately because they
+    // represent different asset types and can have different risk profiles. If you want a
+    // unified cross-asset limit, use PolicyEngine.setMaxSpendPerHour() which tracks all
+    // spend (ETH + token) in a single hourly bucket.
     uint256 public velocityLimit; // 0 = disabled; applied independently to ETH and token paths
 
     // ─── Registry Timelock State ──────────────────────────────────────────────
@@ -220,6 +227,16 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
      * @param userOpHash          Hash of the request, signed by the owner for governance ops.
      * @param missingAccountFunds Amount to prefund to EntryPoint (0 if wallet has a deposit).
      * @return validationData     0 on success, SIG_VALIDATION_FAILED (1) on failure.
+     *
+     * @dev F-09 KNOWN LIMITATION: This implementation does not pack attestation expiry into
+     *      the ERC-4337 v0.7 validationData time-range field (validUntil / validAfter). If a
+     *      UserOp targeting executeSpend contains an attestation with expiresAt set, the
+     *      attestation may expire between bundler simulation and on-chain execution, causing the
+     *      UserOp to revert in execution after passing validation (wasting gas on both sides).
+     *      A full fix requires decoding the attestationId from calldata inside validateUserOp
+     *      and reading IntentAttestation.getAttestation() — this adds significant complexity.
+     *      Mitigation: set short attestation expiry windows (e.g. 60s) and advise bundlers to
+     *      use mempool freshness checks.
      */
     function validateUserOp(
         PackedUserOperation calldata userOp,
@@ -228,10 +245,12 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
     ) external returns (uint256 validationData) {
         if (msg.sender != address(entryPoint)) revert WEp();
 
-        // Prefund EntryPoint FIRST — before any state reads or external calls.
-        // This matches the ERC-4337 reference implementation order and prevents
-        // a reentrancy path where a malicious EntryPoint could re-enter during
-        // the ETH transfer and observe inconsistent validation state.
+        // F-14: Prefund EntryPoint FIRST — before signature validation.
+        // NOTE: This deviates from the ERC-4337 SimpleAccount reference implementation,
+        // which prefunds AFTER signature validation. The deviation is intentional:
+        // msg.sender == entryPoint is already verified above (line ~229), so the EntryPoint
+        // is trusted and reentrancy via the ETH transfer is not a concern. Prefunding first
+        // simplifies the logic flow.  The ERC-4337 spec permits either order.
         // slither-disable-next-line reentrancy-eth
         if (missingAccountFunds > 0) {
             // slither-disable-next-line low-level-calls
@@ -264,8 +283,16 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
 
     /// @dev Returns true if the selector corresponds to a governance operation.
     ///      Governance ops require a master key signature from the owner.
+    ///
+    ///      SECURITY: Every function using onlyEntryPointOrOwner that can move funds or change
+    ///      wallet governance state MUST appear here. If a function is in onlyEntryPointOrOwner
+    ///      but NOT here, it auto-approves in validateUserOp, meaning ANY attacker can call it
+    ///      via ERC-4337 UserOp with no signature. (CRITICAL-1 fix: executeContractCall added.)
     function _isGovernanceOp(bytes4 selector) internal pure returns (bool) {
-        return selector == this.setGuardian.selector
+        return selector == this.executeContractCall.selector    // CRITICAL: was missing — enabled zero-sig drain
+            || selector == this.authorizeMachineKey.selector    // F-07: machine key mgmt is governance
+            || selector == this.revokeMachineKey.selector       // F-07: machine key mgmt is governance
+            || selector == this.setGuardian.selector
             || selector == this.updatePolicy.selector
             || selector == this.proposeRegistryUpdate.selector
             || selector == this.cancelRegistryUpdate.selector
@@ -389,7 +416,10 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
     /// @notice Update guardian address. Only owner can change guardian.
     // ─── Machine Key Management ───────────────────────────────────────────────
 
-    function authorizeMachineKey(address key) external onlyOwner {
+    // F-07: Changed from onlyOwner to onlyEntryPointOrOwner so the owner can authorize
+    // machine keys via signed UserOps. These functions are in _isGovernanceOp, so the
+    // EntryPoint path requires a valid owner signature — no auto-approve risk.
+    function authorizeMachineKey(address key) external onlyEntryPointOrOwner {
         if (key == address(0)) revert WZero();
         if (key == owner) revert WAuth();
         if (key == guardian) revert WAuth();
@@ -398,7 +428,7 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         emit MachineKeyAuthorized(key);
     }
 
-    function revokeMachineKey(address key) external onlyOwner {
+    function revokeMachineKey(address key) external onlyEntryPointOrOwner {
         authorizedMachineKeys[key] = false;
         emit MachineKeyRevoked(key);
     }
@@ -417,6 +447,18 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         frozenAt = block.timestamp;
         frozenBy = msg.sender;
         emit WalletFrozen(msg.sender, reason, block.timestamp);
+        // F-12: Close any open context at freeze time to prevent a compromised machine key
+        // from resuming in the pre-freeze context after unfreeze.
+        if (contextOpen) {
+            bytes32 closedId = activeContextId;
+            activeContextId = bytes32(0);
+            activeTaskType = "";
+            contextOpen = false;
+            emit ContextClosed(closedId, block.timestamp);
+        }
+        // Attacker-LOW-5: Synchronize PolicyEngine's spendFrozen so verifyAndConsumeAttestation
+        // path (which checks PolicyEngine.validateSpend) also sees the frozen state.
+        _policyEngine().freezeSpend(address(this));
     }
 
     /// @notice Emergency freeze. Can only be called by guardian.
@@ -429,6 +471,16 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         frozenAt = block.timestamp;
         frozenBy = msg.sender;
         emit WalletFrozen(msg.sender, "guardian emergency freeze", block.timestamp);
+        // F-12: Close any open context at freeze time.
+        if (contextOpen) {
+            bytes32 closedId = activeContextId;
+            activeContextId = bytes32(0);
+            activeTaskType = "";
+            contextOpen = false;
+            emit ContextClosed(closedId, block.timestamp);
+        }
+        // Attacker-LOW-5: Sync PolicyEngine freeze state.
+        _policyEngine().freezeSpend(address(this));
     }
 
     /// @notice Emergency freeze with fund extraction.
@@ -442,6 +494,16 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         frozenAt = block.timestamp;
         frozenBy = msg.sender;
         emit WalletFrozen(msg.sender, "guardian freeze-and-drain", block.timestamp);
+        // F-12: Close any open context at freeze time.
+        if (contextOpen) {
+            bytes32 closedId = activeContextId;
+            activeContextId = bytes32(0);
+            activeTaskType = "";
+            contextOpen = false;
+            emit ContextClosed(closedId, block.timestamp);
+        }
+        // Attacker-LOW-5: Sync PolicyEngine freeze state.
+        _policyEngine().freezeSpend(address(this));
 
         uint256 balance = address(this).balance;
         if (balance > 0) {
@@ -462,6 +524,8 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         if (!frozen) revert WNotfrozen();
         frozen = false;
         emit WalletUnfrozen(msg.sender, block.timestamp);
+        // Attacker-LOW-5: Sync PolicyEngine unfreeze so spend validation is re-enabled.
+        _policyEngine().unfreeze(address(this));
     }
 
     function setVelocityLimit(uint256 limit) external onlyEntryPointOrOwner {
@@ -549,6 +613,8 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
      * @param expiresAt Unix timestamp after which attestation is invalid (0 = no expiry)
      * @return attestationId The ID passed in (for convenience)
      */
+    // F-03: Added requireOpenContext so attestations can only be created within an active
+    // context. Prevents pre-staging attestations for use across context boundaries.
     function attest(
         bytes32 attestationId,
         string calldata action,
@@ -557,15 +623,18 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         uint256 amount,
         address token,
         uint256 expiresAt
-    ) external onlyOwnerOrMachineKey notFrozen returns (bytes32) {
+    ) external onlyOwnerOrMachineKey notFrozen requireOpenContext returns (bytes32) {
         _intentAttestation().attest(attestationId, action, reason, recipient, amount, token, expiresAt);
         return attestationId;
     }
 
     // ─── Context Management ──────────────────────────────────────────────────
 
+    // Attacker-MEDIUM-1: contextId == 0 disables PolicyEngine deduplication (the guard
+    // `if (contextId != bytes32(0) && ...)` is skipped for the zero sentinel). Require nonzero.
     function openContext(bytes32 contextId, string calldata taskType) external onlyOwnerOrMachineKey notFrozen {
         if (contextOpen) revert WCtx();
+        if (contextId == bytes32(0)) revert WCtx();
         activeContextId = contextId;
         activeTaskType = taskType;
         contextOpen = true;
@@ -579,6 +648,9 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         activeTaskType = "";
         contextOpen = false;
         emit ContextClosed(closedContextId, block.timestamp);
+        // F-01: Notify PolicyEngine that this contextId is now closed (marks it as used).
+        // Prevents the same contextId from being opened again on this wallet.
+        _policyEngine().closeContext(address(this), closedContextId);
         // Trust updates via ServiceAgreement.fulfill() only — see spec/03-trust-primitive.md
     }
 
@@ -613,23 +685,42 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         }
     }
 
-    /// @dev Freeze wallet and revert on velocity breach.
+    /// @dev Freeze wallet on velocity breach.
+    ///
+    ///      DESIGN NOTE (Attacker-CRITICAL-3): The original code called revert WVel() here,
+    ///      which caused Solidity to roll back ALL state changes — including frozen = true.
+    ///      The freeze NEVER persisted. Solidity revert rolls back the entire call frame,
+    ///      so there is no EVM-native way to commit state AND revert the enclosing tx.
+    ///
+    ///      Fix: Remove the revert. The triggering spend is allowed to complete (one final
+    ///      spend at/near the limit), but frozen = true persists, blocking ALL subsequent
+    ///      spends via the notFrozen modifier. The owner receives an on-chain WalletFrozen
+    ///      alert. This is the minimal correct fix without architecture changes.
+    ///
+    ///      Residual risk: the breach-triggering transaction's spend succeeds. Per-tx policy
+    ///      limits (PolicyEngine.categoryLimits) and attestation bindings still cap each
+    ///      individual spend, so the most an attacker gains is one final spend at the limit.
     function _triggerVelocityFreeze() internal {
         frozen = true;
         frozenAt = block.timestamp;
         frozenBy = address(this);
         emit WalletFrozen(address(this), "velocity limit exceeded", block.timestamp);
-        revert WVel();
+        // Intentionally NOT reverting — see design note above.
     }
 
     // ─── ETH Spend Execution ─────────────────────────────────────────────────
 
+    // F-08: Changed from onlyOwnerOrMachineKey to explicit check including EntryPoint.
+    // Previously ETH spends couldn't be submitted as ERC-4337 UserOps (EntryPoint excluded)
+    // while ERC-20 token spends could. Now both ETH and token spend paths accept EntryPoint.
+    // notFrozen checked BEFORE requireOpenContext so frozen wallets return WFrozen, not WCtx.
     function executeSpend(
         address payable recipient,
         uint256 amount,
         string calldata category,
         bytes32 attestationId
-    ) external onlyOwnerOrMachineKey requireOpenContext notFrozen {
+    ) external notFrozen requireOpenContext {
+        if (msg.sender != address(entryPoint) && msg.sender != owner && !authorizedMachineKeys[msg.sender]) revert WAuth();
         if (recipient == address(0)) revert WZero();
         if (!_intentAttestation().verify(attestationId, address(this), recipient, amount, address(0))) revert WAtt();
         _validateSpendPolicy(recipient, amount, category);
@@ -643,14 +734,17 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
 
     // ─── ERC-20 Token Spend Execution (x402 / USDC) ──────────────────────────
 
+    // Attacker-LOW-4: Added authorizedMachineKeys to the auth check. Previously machine keys
+    // could execute ETH spends (onlyOwnerOrMachineKey) but NOT token spends — inconsistent.
+    // notFrozen checked BEFORE requireOpenContext so frozen wallets return WFrozen, not WCtx.
     function executeTokenSpend(
         address token,
         address recipient,
         uint256 amount,
         string calldata category,
         bytes32 attestationId
-    ) external requireOpenContext notFrozen {
-        if (msg.sender != address(entryPoint) && msg.sender != owner && msg.sender != authorizedInterceptor) revert WAuth();
+    ) external notFrozen requireOpenContext {
+        if (msg.sender != address(entryPoint) && msg.sender != owner && msg.sender != authorizedInterceptor && !authorizedMachineKeys[msg.sender]) revert WAuth();
         if (recipient == address(0)) revert WZero();
         if (token == address(0)) revert WZero();
         if (!_intentAttestation().verify(attestationId, address(this), recipient, amount, token)) revert WAtt();
@@ -672,12 +766,15 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
      * @param recipient     Intended settlement recipient.
      * @param amount        Intended settlement amount (ETH, in wei).
      */
+    // F-02 / Attacker-CRITICAL-4: Added notFrozen and requireOpenContext modifiers.
+    // Previously these checks were only in the SettlementCoordinator caller — a future or
+    // compromised coordinator could bypass them. Defense-in-depth: enforce at the wallet level.
     function verifyAndConsumeAttestation(
         bytes32 attestationId,
         address recipient,
         uint256 amount,
         string calldata category
-    ) external {
+    ) external notFrozen requireOpenContext {
         // Only callable by the SettlementCoordinator registered in this wallet's registry
         if (msg.sender != address(_settlementCoordinator())) revert WNotCoord();
         if (!_intentAttestation().verify(attestationId, address(this), recipient, amount, address(0))) revert WAtt();
@@ -728,9 +825,13 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         notFrozen
         returns (bytes memory returnData)
     {
-        // 0. Prevent self-targeting — calling governance functions on the wallet
+        // 0a. F-04: Reject address(0) target. Several optional registry fields default to
+        //     address(0), so `params.target == address(0)` would match as a "protocol contract"
+        //     and bypass PolicyEngine entirely. Burn ETH via address(0) call is also blocked.
+        if (params.target == address(0)) revert WZero();
+
+        // 0b. Prevent self-targeting — calling governance functions on the wallet
         //    through executeContractCall is disallowed as defense-in-depth.
-        //    (Governance functions are onlyOwner; this check clarifies intent.)
         if (params.target == address(this)) revert WSelf();
 
         // 1. Protocol contract bypass + PolicyEngine validation
@@ -764,8 +865,12 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
         }
         // Protocol contracts pass through — they are in the registry, no whitelist needed
 
-        // 1b. Detect ERC-20 approve() calls and validate approval amount against policy.
-        //     approve(address,uint256) selector = 0x095ea7b3
+        // 1b. Detect ERC-20 approval calls and validate amount against policy.
+        //     F-05: Intercept both approve() AND increaseAllowance() — both can grant
+        //     unbounded approvals and bypass the infinite-approval guard if only approve()
+        //     is checked.
+        //     approve(address,uint256)          selector = 0x095ea7b3
+        //     increaseAllowance(address,uint256) selector = 0x39509351
         //     ABI layout: [0:4]=selector [4:36]=spender [36:68]=amount
         if (params.data.length >= 68) {
             bytes4 sel;
@@ -775,7 +880,7 @@ contract ARC402Wallet is IAccount, ReentrancyGuard {
                 sel := calldataload(d.offset)
                 approvalAmount := calldataload(add(d.offset, 36))
             }
-            if (sel == bytes4(0x095ea7b3)) {
+            if (sel == bytes4(0x095ea7b3) || sel == bytes4(0x39509351)) {
                 (bool approveOk, string memory approveReason) = IDefiPolicy(_pe).validateApproval(
                     address(this), params.target, approvalAmount
                 );

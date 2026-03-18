@@ -10,6 +10,12 @@ library P256VerifierLib {
     uint256 internal constant SIG_VALID   = 0;
     uint256 internal constant SIG_INVALID = 1;
 
+    // F-13: P256 (secp256r1) curve order n. Used for low-s normalization.
+    // For any valid signature (r, s), the signature (r, n-s) is also valid (signature malleability).
+    // Enforcing s <= n/2 ensures canonical form, preventing off-chain deduplication issues.
+    uint256 internal constant P256_N =
+        0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
+
     /// @notice Verify a compact P256 signature against a message hash and public key.
     /// @param hash      The 32-byte message hash that was signed.
     /// @param signature 64-byte compact signature: r (32 bytes) || s (32 bytes).
@@ -30,6 +36,12 @@ library P256VerifierLib {
             r := mload(add(signature, 32))
             s := mload(add(signature, 64))
         }
+        // F-13: Enforce low-s normalization. For P256, if s > n/2, the signature is in
+        // "high-s" form and is malleable: (r, n-s) is an equally valid signature for the
+        // same message. Reject high-s signatures to enforce canonical form.
+        // ERC-4337 nonces prevent replay, but canonical-s simplifies off-chain indexing.
+        if (uint256(s) > P256_N / 2) return SIG_INVALID;
+
         // RIP-7212 input: hash (32) || r (32) || s (32) || x (32) || y (32) = 160 bytes
         bytes memory input = abi.encodePacked(hash, r, s, pubKeyX, pubKeyY);
         (bool success, bytes memory result) = VERIFIER.staticcall(input);

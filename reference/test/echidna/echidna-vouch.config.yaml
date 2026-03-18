@@ -1,0 +1,16 @@
+# Echidna configuration for VouchingRegistry invariant testing
+# Run: echidna . --contract VouchingRegistryInvariants --config test/echidna/echidna-vouch.config.yaml
+
+testMode: "property"
+testLimit: 10000
+seqLen: 50
+
+contractAddr: "0x00a329c0648769A73afAc7F9381E08FB43dBEA72"
+deployer: "0x30000"
+
+sender:
+  - "0x10000"
+  - "0x20000"
+  - "0x30000"
+
+solcArgs: "--solc-version 0.8.24"

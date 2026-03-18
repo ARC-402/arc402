@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "./ARC402RegistryV2.sol";
-import "./ITrustRegistry.sol";
+// ITrustRegistry import removed (F-10): initWallet call was redundant and is now removed.
 
 /**
  * @title WalletFactoryV4
@@ -60,15 +60,22 @@ contract WalletFactoryV4 {
             abi.encode(registry, msg.sender, ep)
         );
 
-        // Deploy via CREATE
+        // F-15 KNOWN LIMITATION: Deploy via CREATE (not CREATE2).
+        // CREATE addresses depend on (factory address, factory nonce) and cannot be predicted
+        // before deployment. This prevents ERC-4337 counterfactual wallet deployment where
+        // users pre-fund a wallet address before it exists. A future WalletFactoryV5 can add
+        // CREATE2 support via a salt parameter:
+        //   bytes32 salt = keccak256(abi.encode(msg.sender, ep));
+        //   wallet := create2(0, add(initCode, 0x20), mload(initCode), salt)
+        // No security impact — wallets must simply be deployed before receiving funds.
         assembly {
             wallet := create(0, add(initCode, 0x20), mload(initCode))
             if iszero(wallet) { revert(0, 0) }
         }
 
-        // Initialize trust registry for the new wallet
-        ARC402RegistryV2 reg = ARC402RegistryV2(registry);
-        ITrustRegistry(reg.trustRegistry()).initWallet(wallet);
+        // F-10: Removed redundant initWallet call. ARC402Wallet constructor already calls
+        // _trustRegistry().initWallet(address(this)) during deployment. Calling it again here
+        // wastes ~5,000 gas and is a maintenance hazard if initWallet ever becomes non-idempotent.
 
         // Register wallet
         ownerWallets[msg.sender].push(wallet);
