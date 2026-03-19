@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { ethers } from "ethers";
+import { AgentRegistryClient } from "@arc402/sdk";
 import {
   buildEndpointConfig,
   DEFAULT_LOCAL_INGRESS_TARGET,
@@ -8,14 +9,17 @@ import {
   normalizeAgentName,
   saveEndpointConfig,
 } from "../endpoint-config";
-import { configExists, getSubdomainApi, loadConfig } from "../config";
+import { configExists, getSubdomainApi, loadConfig, NETWORK_DEFAULTS } from "../config";
 import { DAEMON_PID } from "../daemon/config";
 import { detectDockerAccess, readOpenShellConfig, runCmd } from "../openshell-runtime";
+import { getClient } from "../client";
+import * as dns from "dns/promises";
 import * as fs from "fs";
 import * as net from "net";
 import chalk from "chalk";
 
 interface DoctorCheck {
+  layer: string;
   label: string;
   ok: boolean;
   detail: string;
@@ -40,6 +44,16 @@ function readSubdomainApi(): string {
     return getSubdomainApi(loadConfig());
   } catch {
     return "https://api.arc402.xyz";
+  }
+}
+
+function readAgentRegistryAddress(): string | undefined {
+  if (!configExists()) return undefined;
+  try {
+    const config = loadConfig();
+    return config.agentRegistryV2Address ?? NETWORK_DEFAULTS[config.network]?.agentRegistryV2Address;
+  } catch {
+    return undefined;
   }
 }
 
@@ -82,6 +96,7 @@ async function checkLocalTarget(target: string): Promise<{ ok: boolean; detail: 
 function checkDaemon(): DoctorCheck {
   if (!fs.existsSync(DAEMON_PID)) {
     return {
+      layer: "runtime",
       label: "Daemon",
       ok: false,
       detail: "no PID file found",
@@ -93,6 +108,7 @@ function checkDaemon(): DoctorCheck {
   const pid = Number(rawPid);
   if (!Number.isFinite(pid) || pid <= 0) {
     return {
+      layer: "runtime",
       label: "Daemon",
       ok: false,
       detail: `invalid PID file contents: ${JSON.stringify(rawPid)}`,
@@ -102,6 +118,7 @@ function checkDaemon(): DoctorCheck {
 
   if (!isProcessAlive(pid)) {
     return {
+      layer: "runtime",
       label: "Daemon",
       ok: false,
       detail: `stale PID file (${pid})`,
@@ -110,6 +127,7 @@ function checkDaemon(): DoctorCheck {
   }
 
   return {
+    layer: "runtime",
     label: "Daemon",
     ok: true,
     detail: `running (PID ${pid})`,
@@ -121,6 +139,7 @@ function checkOpenShell(): DoctorCheck {
   const docker = detectDockerAccess();
   if (!config?.sandbox?.name) {
     return {
+      layer: "runtime",
       label: "OpenShell runtime",
       ok: false,
       detail: "not configured for launch",
@@ -129,6 +148,7 @@ function checkOpenShell(): DoctorCheck {
   }
   if (!docker.ok) {
     return {
+      layer: "runtime",
       label: "OpenShell runtime",
       ok: false,
       detail: `configured, but Docker/OpenShell substrate is unhealthy: ${docker.detail}`,
@@ -136,16 +156,18 @@ function checkOpenShell(): DoctorCheck {
     };
   }
   return {
+    layer: "runtime",
     label: "OpenShell runtime",
     ok: true,
     detail: `${config.sandbox.name} configured; Docker ${docker.detail}`,
   };
 }
 
-function checkCloudflared(): DoctorCheck {
+function checkCloudflared(endpointTunnelTarget?: string): DoctorCheck {
   const which = runCmd("which", ["cloudflared"]);
   if (!which.ok || !which.stdout) {
     return {
+      layer: "ingress",
       label: "Tunnel binary",
       ok: false,
       detail: "cloudflared not found in PATH",
@@ -156,18 +178,153 @@ function checkCloudflared(): DoctorCheck {
   const ps = runCmd("bash", ["-lc", "ps -ef | grep '[c]loudflared tunnel' | head -1"]);
   if (!ps.ok || !ps.stdout) {
     return {
+      layer: "ingress",
       label: "Tunnel process",
       ok: false,
-      detail: "cloudflared is installed, but no tunnel process was detected",
+      detail: endpointTunnelTarget
+        ? `cloudflared is installed, but no tunnel process was detected for ${endpointTunnelTarget}`
+        : "cloudflared is installed, but no tunnel process was detected",
       fix: "Start your host-managed tunnel (for example `cloudflared tunnel run ...`).",
     };
   }
 
   return {
+    layer: "ingress",
     label: "Tunnel process",
     ok: true,
     detail: `detected: ${ps.stdout}`,
   };
+}
+
+async function checkPublicHostname(endpoint: ReturnType<typeof loadEndpointConfig>): Promise<DoctorCheck> {
+  if (!endpoint) {
+    return {
+      layer: "public",
+      label: "Public hostname",
+      ok: false,
+      detail: "cannot resolve because endpoint config is missing",
+      fix: "Run `arc402 endpoint init <agentname>` first.",
+    };
+  }
+
+  try {
+    const results = await dns.lookup(endpoint.hostname, { all: true });
+    if (!results.length) {
+      return {
+        layer: "public",
+        label: "Public hostname",
+        ok: false,
+        detail: `${endpoint.hostname} did not resolve`,
+        fix: endpoint.claimedAt
+          ? "Verify the claimed hostname is live in DNS / Cloudflare and that propagation is complete."
+          : "Claim the hostname first, then wait for DNS to propagate.",
+      };
+    }
+
+    const addresses = results.map((entry) => entry.address).join(", ");
+    return {
+      layer: "public",
+      label: "Public hostname",
+      ok: true,
+      detail: `${endpoint.hostname} resolves (${addresses})`,
+    };
+  } catch (err) {
+    return {
+      layer: "public",
+      label: "Public hostname",
+      ok: false,
+      detail: `${endpoint.hostname} not resolvable yet (${err instanceof Error ? err.message : String(err)})`,
+      fix: endpoint.claimedAt
+        ? "If the claim succeeded, verify DNS propagation / Cloudflare routing rather than the local runtime."
+        : "Claim the hostname first, then re-run status/doctor.",
+    };
+  }
+}
+
+async function checkAgentRegistryParity(endpoint: ReturnType<typeof loadEndpointConfig>): Promise<DoctorCheck> {
+  if (!endpoint) {
+    return {
+      layer: "registry",
+      label: "AgentRegistry parity",
+      ok: false,
+      detail: "endpoint config missing, so local ↔ registry parity cannot be checked",
+      fix: "Run `arc402 endpoint init <agentname>` first.",
+    };
+  }
+
+  const walletAddress = endpoint.walletAddress ?? readWalletAddress();
+  if (!walletAddress) {
+    return {
+      layer: "registry",
+      label: "AgentRegistry parity",
+      ok: false,
+      detail: "no wallet address resolved from local config, so registry parity proof is partial",
+      fix: "Run `arc402 config init` (or set walletContractAddress/privateKey) so ARC-402 can compare local endpoint identity against AgentRegistry.",
+    };
+  }
+
+  const registryAddress = readAgentRegistryAddress();
+  if (!registryAddress) {
+    return {
+      layer: "registry",
+      label: "AgentRegistry parity",
+      ok: false,
+      detail: "AgentRegistry address missing from config, so on-chain endpoint parity cannot be checked",
+      fix: "Set `agentRegistryV2Address` in ARC-402 config or select a known network config.",
+    };
+  }
+
+  try {
+    const config = loadConfig();
+    const { provider } = await getClient(config);
+    const registry = new AgentRegistryClient(registryAddress, provider);
+    const agent = await registry.getAgent(walletAddress);
+
+    if (!agent.active && !agent.endpoint) {
+      return {
+        layer: "registry",
+        label: "AgentRegistry parity",
+        ok: false,
+        detail: `${walletAddress} is not actively registered with an endpoint in AgentRegistry`,
+        fix: `Register or update AgentRegistry with \`${endpoint.publicUrl}\` once local ingress is ready.`,
+      };
+    }
+
+    if (agent.endpoint === endpoint.publicUrl) {
+      return {
+        layer: "registry",
+        label: "AgentRegistry parity",
+        ok: true,
+        detail: `on-chain endpoint matches local canonical URL (${agent.endpoint || endpoint.publicUrl})`,
+      };
+    }
+
+    if (!agent.endpoint) {
+      return {
+        layer: "registry",
+        label: "AgentRegistry parity",
+        ok: false,
+        detail: `wallet is registered, but no public endpoint is stored on-chain yet (local expects ${endpoint.publicUrl})`,
+        fix: `Run \`arc402 agent update --name <name> --service-type <type> --endpoint ${endpoint.publicUrl}\` when you want AgentRegistry parity.`,
+      };
+    }
+
+    return {
+      layer: "registry",
+      label: "AgentRegistry parity",
+      ok: false,
+      detail: `mismatch: local canonical URL is ${endpoint.publicUrl}, but AgentRegistry has ${agent.endpoint}`,
+      fix: `Update AgentRegistry or re-init local endpoint config so the public identity matches one source of truth.`,
+    };
+  } catch (err) {
+    return {
+      layer: "registry",
+      label: "AgentRegistry parity",
+      ok: false,
+      detail: `could not prove on-chain parity (${err instanceof Error ? err.message : String(err)})`,
+      fix: "Check RPC / wallet / registry config. If local runtime is healthy, this is a registry-proof gap rather than an ingress failure.",
+    };
+  }
 }
 
 async function buildDoctorChecks(endpoint = loadEndpointConfig()): Promise<DoctorCheck[]> {
@@ -175,47 +332,74 @@ async function buildDoctorChecks(endpoint = loadEndpointConfig()): Promise<Docto
 
   if (!endpoint) {
     checks.push({
+      layer: "config",
       label: "Endpoint config",
       ok: false,
       detail: `missing (${ENDPOINT_CONFIG_PATH})`,
       fix: "Run `arc402 endpoint init <agentname>` first.",
     });
+    checks.push(await checkAgentRegistryParity(endpoint));
+    checks.push(await checkPublicHostname(endpoint));
     return checks;
   }
 
   checks.push({
+    layer: "config",
     label: "Endpoint config",
     ok: true,
     detail: `${endpoint.publicUrl} → ${endpoint.localIngressTarget}`,
   });
+
+  if (endpoint.walletAddress) {
+    checks.push({
+      layer: "config",
+      label: "Wallet binding",
+      ok: true,
+      detail: `endpoint config bound to ${endpoint.walletAddress}`,
+    });
+  } else {
+    checks.push({
+      layer: "config",
+      label: "Wallet binding",
+      ok: false,
+      detail: "endpoint config exists, but no wallet address is recorded for parity checks",
+      fix: "Set walletContractAddress/privateKey in ARC-402 config and re-run `arc402 endpoint init --force <agentname>` or claim again.",
+    });
+  }
 
   checks.push(checkOpenShell());
   checks.push(checkDaemon());
 
   const localTarget = await checkLocalTarget(endpoint.localIngressTarget);
   checks.push({
+    layer: "ingress",
     label: "Local ingress target",
     ok: localTarget.ok,
     detail: localTarget.detail,
     fix: localTarget.ok ? undefined : "Ensure your host ingress target is listening and forwards to the ARC-402 surface you intend to expose.",
   });
 
-  checks.push(checkCloudflared());
+  checks.push(checkCloudflared(endpoint.tunnelTarget));
 
   if (endpoint.claimedAt) {
     checks.push({
+      layer: "public",
       label: "Subdomain claim",
       ok: true,
       detail: `claimed at ${endpoint.claimedAt}`,
     });
   } else {
     checks.push({
+      layer: "public",
       label: "Subdomain claim",
       ok: false,
       detail: "not claimed yet",
       fix: `Run \`arc402 endpoint claim ${endpoint.agentName}${endpoint.tunnelTarget ? "" : " --tunnel-target <https://...>"}\`.`,
     });
   }
+
+  checks.push(await checkPublicHostname(endpoint));
+  checks.push(await checkAgentRegistryParity(endpoint));
 
   return checks;
 }
@@ -324,6 +508,7 @@ export function registerEndpointCommands(program: Command): void {
 
       const checks = await buildDoctorChecks(cfg);
       const allGood = checks.every((check) => check.ok);
+      const brokenLayers = Array.from(new Set(checks.filter((check) => !check.ok).map((check) => check.layer)));
 
       console.log("ARC-402 Endpoint Status");
       console.log("─────────────────────");
@@ -335,17 +520,21 @@ export function registerEndpointCommands(program: Command): void {
       console.log(`Tunnel target:   ${cfg.tunnelTarget ?? "not set"}`);
       console.log(`Claimed at:      ${cfg.claimedAt ?? "not yet claimed"}`);
       console.log(`Config file:     ${ENDPOINT_CONFIG_PATH}`);
-      console.log(`\nReadiness: ${allGood ? chalk.green("healthy enough for scaffold stage") : chalk.yellow("incomplete / needs attention")}`);
+      console.log(`\nReadiness: ${allGood ? chalk.green("fully proven for current launch scope") : chalk.yellow("partial proof / needs attention")}`);
+      if (brokenLayers.length) {
+        console.log(`Broken layers:   ${brokenLayers.join(", ")}`);
+      }
       console.log();
 
       for (const check of checks) {
-        console.log(`${check.ok ? chalk.green("✓") : chalk.yellow("!")} ${check.label.padEnd(20)} ${check.detail}`);
+        console.log(`${check.ok ? chalk.green("✓") : chalk.yellow("!")} [${check.layer}] ${check.label.padEnd(20)} ${check.detail}`);
       }
 
       console.log("\nWhat this proves now:");
       console.log("  • canonical endpoint identity is locked locally");
       console.log("  • runtime sandboxing is checked separately from ingress");
-      console.log("  • local ingress target + daemon/tunnel wiring can be diagnosed without pretending DNS is fully automated");
+      console.log("  • local ingress target + daemon/tunnel wiring can be diagnosed without pretending every external layer is automated");
+      console.log("  • AgentRegistry/public-hostname parity is checked when config + RPC + wallet context make proof possible");
     });
 
   endpoint
@@ -398,28 +587,33 @@ export function registerEndpointCommands(program: Command): void {
       console.log("ARC-402 Endpoint Doctor");
       console.log("─────────────────────");
 
+      const failuresByLayer = new Map<string, number>();
       let failures = 0;
       for (const check of checks) {
         if (check.ok) {
-          console.log(`${chalk.green("✓")} ${check.label}: ${check.detail}`);
+          console.log(`${chalk.green("✓")} [${check.layer}] ${check.label}: ${check.detail}`);
           continue;
         }
         failures += 1;
-        console.log(`${chalk.red("✗")} ${check.label}: ${check.detail}`);
+        failuresByLayer.set(check.layer, (failuresByLayer.get(check.layer) ?? 0) + 1);
+        console.log(`${chalk.red("✗")} [${check.layer}] ${check.label}: ${check.detail}`);
         if (check.fix) console.log(`    Fix: ${check.fix}`);
       }
 
       if (failures === 0) {
         console.log(chalk.green("\nNo obvious scaffold-layer breakage detected."));
       } else {
-        console.log(chalk.yellow(`\n${failures} layer(s) need attention.`));
+        console.log(chalk.yellow(`\n${failures} check(s) failed across ${failuresByLayer.size} layer(s): ${Array.from(failuresByLayer.keys()).join(", ")}.`));
       }
 
       console.log("\nLayer model:");
-      console.log("  1. public identity (`agentname.arc402.xyz`)");
-      console.log("  2. host-managed ingress / tunnel");
-      console.log("  3. local ingress target");
-      console.log("  4. ARC-402 runtime inside OpenShell");
-      console.log("  5. sandbox outbound policy (separate; not implied by public ingress)");
+      console.log("  1. config / local source of truth");
+      console.log("  2. public identity (`agentname.arc402.xyz`)");
+      console.log("  3. host-managed ingress / tunnel");
+      console.log("  4. local ingress target");
+      console.log("  5. ARC-402 runtime inside OpenShell");
+      console.log("  6. AgentRegistry/public-endpoint parity");
+      console.log("  7. sandbox outbound policy (separate; not implied by public ingress)");
+      console.log("\nIf only the registry/public checks fail while local runtime is healthy, the proof is partial rather than the stack being fully down.");
     });
 }
