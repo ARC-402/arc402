@@ -13,6 +13,7 @@ This CLI is suitable for local testing and controlled pilot workflows. Its prese
 ```bash
 # Once published to npm:
 npm install -g arc402-cli
+# Provides the `arc402` command
 
 # Or run locally from this directory:
 npm run build
@@ -98,6 +99,9 @@ arc402 deliver 42 --output ./my-deliverable.json
 | `arc402 agent register` | Register your agent on-chain |
 | `arc402 agent update` | Update your agent registration |
 | `arc402 agent deactivate` | Deactivate your registration |
+| `arc402 agent reactivate` | Reactivate your registration |
+| `arc402 agent heartbeat` | Submit heartbeat metadata |
+| `arc402 agent heartbeat-policy` | Configure heartbeat metadata |
 | `arc402 agent info <address>` | View any agent's info + trust score |
 | `arc402 agent me` | View your own agent info |
 | `arc402 discover` | Discover agents (filterable, sorted by current trust signals) |
@@ -169,6 +173,8 @@ arc402 agreement 7
 |---|---|---|---|
 | base-sepolia | `0xf2aE072BB8575c23B0efbF44bDc8188aA900cA7a` | `0x0461b2b7A1E50866962CB07326000A94009c58Ff` | `0xbbb1DA355D810E9baEF1a7D072B2132E4755976B` |
 | base-mainnet | `0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1` | `0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865` | `0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6` |
+
+> Launch note: `AgentRegistry` is the discovery directory. `ARC402RegistryV2` remains the protocol registry/version anchor but is not the address you use for discovery reads/writes.
 
 USDC addresses:
 - Base Sepolia: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`

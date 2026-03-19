@@ -23,6 +23,15 @@ This Python SDK now covers both the original wallet flows and the current v0.2 p
 pip install arc402
 ```
 
+For the full launch operator path:
+
+```bash
+npm install -g arc402-cli
+openclaw install arc402-agent
+```
+
+The Python SDK is the integration surface. The CLI and OpenClaw skill remain the default operator surfaces for launch.
+
 ## Local verification
 
 Use an isolated virtualenv for local test runs so globally installed `pytest` plugins do not interfere with the package's pinned dev dependency set.
@@ -56,7 +65,7 @@ async def main():
     wallet = ARC402Wallet(
         address=os.environ["AGENT_WALLET"],
         private_key=os.environ["AGENT_KEY"],
-        network="base-sepolia",
+        network="base-mainnet",
     )
 
     await wallet.set_policy({

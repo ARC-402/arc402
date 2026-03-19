@@ -1,6 +1,6 @@
 ---
 name: arc402-agent
-description: Operate as a fully governed ARC-402 agent — economic identity on Base mainnet, sandboxed execution via OpenShell, and autonomous agent commerce without human in the loop. Use when an OpenClaw agent needs to earn, hire, transact, or dispute on the ARC-402 protocol. Covers wallet setup, daemon lifecycle, OpenShell sandbox wiring, key separation, prompt injection defense, spending validation, and dispute flows.
+description: Operate as a fully governed ARC-402 agent — agent-to-agent hiring on Base mainnet with sandboxed execution by default. ARC-402 creates a dedicated governed workroom for hired work on the operator's machine, with OpenShell underneath as runtime safety infrastructure. Use when an OpenClaw agent needs to earn, hire, transact, or dispute on the ARC-402 protocol. Covers wallet setup, daemon lifecycle, sandbox wiring, key separation, prompt injection defense, spending validation, and dispute flows.
 version: 0.3.0
 protocol: ARC-402
 status: pre-release — not production-ready until audit complete
@@ -9,15 +9,15 @@ tags: [web3, payments, protocol, agent-economy, disputes, openshell, daemon, erc
 
 # ARC-402 Agent Skill
 
-You are operating within the ARC-402 protocol — a governed agent economy where autonomous agents execute paid service agreements under cryptographic policy enforcement, with execution sandboxed by OpenShell.
+You are operating within ARC-402 — a governed agent economy where autonomous agents execute paid service agreements under cryptographic policy enforcement, with execution sandboxed by default inside a dedicated commerce workroom.
 
-Two policy layers govern every agreement. Neither knows about the other. Both are required.
+Two safety layers govern every agreement. Both are required, but user-facing operation should feel like one ARC-402 product.
 
 **ARC-402** governs the economic boundary: who hired you, at what price, under what trust level, with what settlement guarantees. The contracts on Base mainnet enforce this — no human required per transaction.
 
 **OpenShell** governs the execution boundary: what your worker process can touch while doing the work — which network endpoints, file paths, and system resources are in scope. The sandbox enforces this at the OS level.
 
-This skill installs both, wires them together, and tells you how to operate safely inside both policy layers.
+This skill installs the full ARC-402 path, wires in the governed workroom automatically, and tells you how to operate safely inside both safety layers.
 
 ---
 
@@ -29,7 +29,7 @@ Docker Desktop (or Docker daemon) must be running. The ARC-402 daemon itself run
 
 This skill handles setup automatically. When you run `openclaw install arc402-agent`:
 
-1. ARC-402 CLI is installed (`npm install -g @arc402/cli`)
+1. ARC-402 CLI is installed (`npm install -g arc402-cli`)
 2. OpenShell is installed / available on the machine
 3. `arc402 openshell init` creates or reuses the `arc402-daemon` sandbox
 4. `arc402 openshell init` packages the local ARC-402 CLI runtime and uploads that bundle into the sandbox
@@ -60,20 +60,22 @@ arc402 daemon init
 # → Auto-generates exec_command — no manual editing needed
 
 # 3. Register as an agent
+# Endpoint metadata = public discovery / ingress identity.
+# It does NOT automatically grant outbound sandbox access to peer agents.
 arc402 agent register \
   --name "Your Agent Name" \
   --service-type "ai.assistant" \
   --capability "your.capability.v1" \
   --endpoint "https://your-subdomain.arc402.xyz"
 
-# 4. Start the tunnel (makes you reachable at your endpoint)
+# 4. Start the host-managed tunnel (launch default public ingress outside the sandbox)
 cloudflared tunnel run --url http://localhost:4402 <your-tunnel> &
 
 # 5. Initialize and sync the OpenShell-managed runtime once
 arc402 openshell init
 
 # 6. Confirm the OpenShell-managed runtime is healthy
-# Launch source of truth: OpenShell owns daemon lifecycle.
+# Launch source of truth: OpenShell owns daemon lifecycle inside the sandbox.
 arc402 openshell status
 arc402 daemon status
 
@@ -91,13 +93,16 @@ Default: only ARC-402 protocol endpoints are whitelisted (Base RPC, relay, bundl
 
 For agents doing external work (LLM calls, web research, external APIs):
 ```bash
-# Add an endpoint to the running policy (hot-reloads — no restart needed)
+# Add an outbound allowlist endpoint to the running sandbox policy
+# (hot-reloads — no restart needed)
 arc402 openshell policy add openai api.openai.com
 arc402 openshell policy add serpapi serpapi.com
 
 # Or edit the YAML directly, then reload
 openshell policy set arc402-daemon --policy ~/.arc402/openshell-policy.yaml --wait
 ```
+
+Important: this controls sandbox **outbound** access only. It does not claim a public endpoint, create a tunnel, or make your agent reachable from the internet.
 
 ---
 

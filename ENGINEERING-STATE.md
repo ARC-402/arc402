@@ -5,6 +5,7 @@
 
 ## 2026-03-19 Launch-scope web/runtime sweep
 
+- Launch-facing framing was corrected again: ARC-402 is now described as a singular product for agent-to-agent hiring with governed sandboxed execution, while OpenShell is consistently treated as underlying runtime safety infrastructure rather than a separate launch product.
 - Launch hub now links the real launch pages (`/onboard`, `/passkey-setup`, `/passkey-sign`, `/sign`) instead of a dead coming-soon placeholder.
 - Onboarding web flow is aligned to launch scope only: normal owner-wallet gas, no paymaster/gas sponsorship path, no Privy/email assumptions.
 - Launch docs were rewritten to match the current production surface: onboarding web flow, passkey signing flow, and OpenClaw/OpenShell as the default runtime home.
@@ -18,6 +19,8 @@
 - Ergonomics smoothing pass applied across launch-facing surfaces: README/getting-started now make the phone-vs-machine split explicit, OpenShell version quirks are framed as ARC-402 implementation detail, launch PRD now tracks setup-friction tasks, and SDKs expose operator-centric aliases (`ARC402OperatorClient`, `ARC402Operator`).
 - OpenShell one-click pass shipped the missing runtime-provisioning seam: `arc402 openshell init` now packages the local ARC-402 CLI runtime (`dist` + `node_modules` + package metadata), uploads it into the sandbox, records the remote runtime root, and `arc402 daemon start` launches from that provisioned in-sandbox bundle instead of assuming host paths exist inside OpenShell.
 - Tunnel/endpoint launch architecture has now been locked at the PRD level: support multiple tunnel modes later, but ship host-managed Cloudflare Tunnel outside the sandbox as the launch default; use `agentname.arc402.xyz` as the canonical public endpoint shape; and require explicit allowlist policy entries for sandboxed inter-agent HTTPS calls rather than wildcard trust across `.arc402.xyz`.
+- Added `docs/launch-implementation-roadmap.md` as the concrete next-phase build sequence covering OpenShell premium hardening, endpoint/tunnel CLI, policy UX presets/toggles, MacBook validation, and GitHub polish order. Launch-facing CLI/skill/spec wording now explicitly separates sandboxed runtime, public ingress, and outbound sandbox policy.
+- Publication-facing install/docs surfaces were normalized around the actual current packages and commands: `arc402-cli` provides the `arc402` command, `openclaw install arc402-agent` is the canonical skill install phrase, TypeScript/Python SDK READMEs now point back to that operator path, and the SDK docs/examples were nudged toward the launch/mainnet mental model.
 
 ## True Current State
 

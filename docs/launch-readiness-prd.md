@@ -13,13 +13,15 @@ It exists to turn the current state of the protocol, CLI, SDKs, web onboarding, 
 
 This is not a vision doc. It is an execution tracker.
 
+Companion roadmap: `docs/launch-implementation-roadmap.md`
+
 ---
 
 ## 2. Current truths
 
 ### Already true
 - ARC-402 v1, v2, v3, v4, and active v5 are live on Base mainnet.
-- Launch docs now frame OpenShell as the runtime home.
+- Launch docs now frame ARC-402 as one product with OpenShell underneath as runtime safety infrastructure.
 - Launch web hub, onboarding, passkey pages, and signing pages are live.
 - Device E2E for the onboarding path has been completed once already.
 - Phase 2 items remain excluded from launch:
@@ -28,11 +30,10 @@ This is not a vision doc. It is an execution tracker.
 
 ### Still true
 - We need a clean, explicit launch-readiness pass across docs, runtime, setup, and GitHub-facing surfaces.
-- OpenShell is not installed on the current PC yet.
-- Docker is not installed on the current PC yet.
+- Current PC setup has progressed, but the clean-room validation pass still matters more than local familiarity.
 - We still need a from-scratch OpenClaw/OpenShell setup validation path, especially for the MacBook install.
-- Tunnel / endpoint architecture is not yet specified tightly enough for a premium install story.
-- Inter-agent endpoint reachability and sandbox-to-sandbox communication policy are still underdefined in launch docs.
+- Tunnel / endpoint architecture is now decision-locked, but the endpoint/tunnel CLI does not yet exist as a first-class operator surface.
+- Inter-agent endpoint reachability and sandbox outbound policy now have clear launch rules, but still need first-class UX and validation.
 
 ---
 
@@ -44,7 +45,7 @@ Ship a launch-ready ARC-402 experience where an operator can:
 2. choose a clear onboarding path
 3. deploy and configure an ARC-402 wallet
 4. register a passkey and approve governance actions
-5. run the ARC-402 runtime through OpenClaw inside OpenShell
+5. run the ARC-402 governed workroom through OpenClaw on the operator machine
 6. register an agent and participate in protocol flows
 7. understand supported payment/agreement patterns
 8. verify setup from docs without founder hand-holding
@@ -85,7 +86,7 @@ README and getting-started docs must present these as explicit choices, not an i
 ARC-402 is launch-ready when all of the following are true:
 
 ### Product truth
-- [ ] README accurately explains ARC-402, launch scope, and onboarding choices
+- [ ] README accurately explains ARC-402 as a singular product, launch scope, and onboarding choices
 - [ ] docs explain every launch-scope feature with scenarios
 - [ ] phase 2 and post-launch boundaries are explicit everywhere
 
@@ -199,13 +200,26 @@ The operator should think in one product surface: ARC-402.
 - GitHub-facing docs are strongest when they tell one simple story: choose a path, get a wallet, approve with passkey, run through OpenShell-contained runtime.
 
 ### Smoothing tasks added for launch
-- [ ] Make all operator-facing docs describe OpenShell as an implementation detail absorbed behind ARC-402 commands wherever possible
-- [ ] Add one canonical install phrase for the OpenClaw skill path and use it consistently across README, getting-started, CLI docs, and skill docs
+- [ ] Make all operator-facing docs describe OpenShell as underlying runtime safety infrastructure absorbed behind ARC-402 commands wherever possible
+- [x] Add one canonical install phrase for the OpenClaw skill path and use it consistently across README, getting-started, CLI docs, and skill docs
 - [x] Add a simple "phone vs machine" table to README/getting-started
-- [ ] Keep SDK operator aliases (`ARC402OperatorClient`, `ARC402Operator`) documented and stable through launch
+- [x] Keep SDK operator aliases (`ARC402OperatorClient`, `ARC402Operator`) documented and stable through launch
 - [x] Add a short troubleshooting note for OpenShell 0.0.10+ compatibility so users never need to care which provider/sandbox flags changed
 - [x] Reuse existing ARC-402 CLI config during `arc402 openshell init` so operators do not have to manually export machine-key / Telegram env vars for the common path
 - [x] Make `arc402 openshell status` verify the remote runtime bundle presence, not just local config files
+
+## 5B. Implementation roadmap now linked
+
+The tracked execution order for the remaining launch phase lives in `docs/launch-implementation-roadmap.md`.
+
+That roadmap is now the concrete build sequence for:
+- OpenShell premium hardening
+- endpoint / tunnel CLI
+- policy UX presets and toggles
+- MacBook clean-room validation
+- GitHub polish order
+
+This PRD remains the tracker; the roadmap is the sharper implementation artifact.
 
 ## 6B. Premium one-click OpenShell
 
@@ -259,15 +273,15 @@ The operator should think in one product surface: ARC-402.
 **Launch endpoint decision:** ARC-402 should also own endpoint scaffolding. The premium path should not require the operator to manually stitch together Cloudflare Tunnel, subdomain claim, local ingress target, AgentRegistry endpoint registration, and OpenShell policy thinking across five surfaces.
 
 ### Tasks
-- [ ] Install Docker on current PC
-- [ ] Install OpenShell on current PC
-- [ ] Run `arc402 openshell init`
-- [ ] Verify the local ARC-402 runtime bundle is packaged and copied into the sandbox automatically
-- [ ] Run `arc402 openshell status`
-- [ ] Inspect generated policy, provider, and runtime-bundle setup
-- [ ] Run `arc402 daemon start` through OpenShell-owned path
-- [ ] Record exact behavior, logs, errors, and friction points
-- [ ] Test policy add/list/remove flows
+- [x] Install Docker on current PC
+- [x] Install OpenShell on current PC
+- [x] Run `arc402 openshell init`
+- [x] Verify the local ARC-402 runtime bundle is packaged and copied into the sandbox automatically
+- [x] Run `arc402 openshell status`
+- [x] Inspect generated policy, provider, and runtime-bundle setup
+- [x] Run `arc402 daemon start` through OpenShell-owned path
+- [ ] Record exact behavior, logs, errors, and friction points in a clean-room validation format
+- [x] Test policy add/list/remove flows
 - [ ] Document which outbound policies are needed for:
   - Base RPC
   - relay
@@ -297,12 +311,12 @@ The operator should think in one product surface: ARC-402.
 **Goal:** make sure the user-facing runtime story matches the actual command behavior.
 
 ### Tasks
-- [ ] Verify daemon help text and errors consistently point to OpenShell-first flow
-- [ ] Verify direct daemon fallback is documented as dev/recovery only
+- [x] Verify daemon help text and errors consistently point to OpenShell-first flow
+- [x] Verify direct daemon fallback is documented as dev/recovery only
 - [ ] Verify passkey-sign links and governance approval copy are accurate
-- [ ] Verify agent registration guidance is aligned with real endpoint metadata needs
+- [x] Verify agent registration guidance is aligned with real endpoint metadata needs
 - [ ] Verify notifier/alert language does not imply remote approval UX that does not exist
-- [ ] Specify the premium command sequence for endpoint bootstrap:
+- [x] Specify the premium command sequence for endpoint bootstrap:
   - `openclaw install arc402-agent`
   - `arc402 wallet deploy`
   - `arc402 endpoint init`
@@ -396,11 +410,12 @@ Host-side scaffold for:
 ## 7. Immediate next actions
 
 ### Today
-- [ ] Update README with onboarding choice section
-- [ ] Update getting-started with onboarding choice section
-- [ ] Mark device E2E as completed-once, with MacBook rerun still pending
-- [ ] Test local OpenShell prerequisites on current PC
-- [ ] Document current PC blockers: Docker + OpenShell absent
+- [x] Update README with onboarding choice section
+- [x] Update getting-started with onboarding choice section
+- [x] Mark device E2E as completed-once, with MacBook rerun still pending
+- [x] Test local OpenShell prerequisites on current PC
+- [x] Replace outdated PC-blocker language with roadmap-driven next steps
+- [x] Add linked implementation roadmap for remaining launch execution
 
 ### Next validation pass
 - [ ] install Docker on PC
@@ -416,11 +431,11 @@ Host-side scaffold for:
 
 | Workstream | Status | Owner | Next action |
 |---|---|---|---|
-| WS1 Documentation truth | In progress | Forge | Add onboarding choice sections |
-| WS2 OpenShell runtime validation | Blocked on local prerequisites | Forge | Install Docker on PC |
-| WS3 Runtime / CLI truth | In progress | Forge | Verify OpenShell-first wording everywhere |
-| WS4 Protocol / SDK / docs alignment | In progress | Forge | Build explicit coverage matrix |
-| WS5 GitHub polish prep | Pending | Forge | Isolate intentional launch diff |
+| WS1 Documentation truth | In progress | Forge | Merge roadmap-driven launch wording updates |
+| WS2 OpenShell runtime validation | In progress | Forge | Re-run the validated path on a clean MacBook |
+| WS3 Runtime / CLI truth | In progress | Forge | Build endpoint/tunnel CLI scaffold and keep OpenShell-first wording consistent |
+| WS4 Protocol / SDK / docs alignment | In progress | Forge | Encode public endpoint vs outbound policy semantics everywhere |
+| WS5 GitHub polish prep | Pending | Forge | Separate intentional launch work from generated/runtime churn |
 
 ---
 
