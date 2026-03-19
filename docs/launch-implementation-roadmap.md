@@ -51,8 +51,8 @@ These are locked truths for launch implementation. Every doc, CLI surface, and v
 
 ### Remaining build items
 1. **Doctor / proof UX**
-   - Add `arc402 openshell doctor` if MacBook validation shows remaining ambiguity.
-   - Report Docker, OpenShell, sandbox, provider, runtime bundle, and daemon readiness in one pass.
+   - [x] `arc402 openshell doctor` now reports Docker, OpenShell, sandbox, provider, runtime bundle, secret launch seam, and daemon readiness in one pass.
+   - Use it as the first diagnostic entrypoint during the MacBook clean-room pass.
 2. **Provider/secret hardening**
    - Validate update/recovery paths when machine key or Telegram credentials change.
    - Verify behavior when only partial credentials exist.

@@ -15,6 +15,7 @@ import {
   runCmd,
   writeOpenShellConfig,
 } from "../openshell-runtime";
+import { DAEMON_PID, DAEMON_LOG, DAEMON_TOML } from "../daemon/config";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -123,6 +124,209 @@ function ensureDockerAccessOrExit(prefix = "Docker", docker = detectDockerAccess
     console.error("Install Docker first, then retry.");
   }
   process.exit(1);
+}
+
+interface OpenShellDoctorCheck {
+  label: string;
+  ok: boolean;
+  detail: string;
+  fix?: string;
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildOpenShellDoctorChecks(): OpenShellDoctorCheck[] {
+  const checks: OpenShellDoctorCheck[] = [];
+  const shellPath = checkOpenShellInstalled();
+  if (!shellPath) {
+    checks.push({
+      label: "OpenShell CLI",
+      ok: false,
+      detail: "not installed",
+      fix: "Run `arc402 openshell install`.",
+    });
+    return checks;
+  }
+
+  const version = runCmd("openshell", ["--version"]);
+  checks.push({
+    label: "OpenShell CLI",
+    ok: version.ok,
+    detail: version.ok ? `installed (${version.stdout || shellPath})` : (version.stderr || version.stdout || `installed at ${shellPath}`),
+    fix: version.ok ? undefined : "Reinstall OpenShell and verify `openshell --version` works.",
+  });
+
+  const docker = detectDockerAccess();
+  checks.push({
+    label: "Docker",
+    ok: docker.ok,
+    detail: docker.detail,
+    fix: docker.ok ? undefined : "Start/install Docker or grant this shell Docker access, then retry.",
+  });
+
+  const gatewayStatus = runCmd("openshell", ["status"], { timeout: 30000 });
+  checks.push({
+    label: "OpenShell gateway",
+    ok: gatewayStatus.ok,
+    detail: gatewayStatus.ok ? (gatewayStatus.stdout || "reachable") : (gatewayStatus.stderr || gatewayStatus.stdout || "status unavailable"),
+    fix: gatewayStatus.ok ? undefined : "Run `openshell gateway start` (or `openshell doctor`) and retry.",
+  });
+
+  const config = readOpenShellConfig();
+  if (!config) {
+    checks.push({
+      label: "ARC-402 OpenShell config",
+      ok: false,
+      detail: `missing (${OPENSHELL_TOML})`,
+      fix: "Run `arc402 openshell init`.",
+    });
+    return checks;
+  }
+
+  checks.push({
+    label: "ARC-402 OpenShell config",
+    ok: true,
+    detail: `${config.sandbox.name} / remote root ${config.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT}`,
+  });
+
+  const sandboxLookup = runCmd("openshell", ["sandbox", "get", config.sandbox.name], { timeout: 120000 });
+  checks.push({
+    label: "Sandbox",
+    ok: sandboxLookup.ok,
+    detail: sandboxLookup.ok ? `${config.sandbox.name} exists` : (sandboxLookup.stderr || sandboxLookup.stdout || `${config.sandbox.name} not found`),
+    fix: sandboxLookup.ok ? undefined : "Re-run `arc402 openshell init` to create/update the sandbox.",
+  });
+
+  const providers = runCmd("openshell", ["provider", "list"]);
+  const hasMachine = providers.ok && providers.stdout.includes("arc402-machine-key");
+  const hasNotif = providers.ok && providers.stdout.includes("arc402-notifications");
+  checks.push({
+    label: "Credential providers",
+    ok: providers.ok && hasMachine && hasNotif,
+    detail: !providers.ok
+      ? (providers.stderr || providers.stdout || "provider list unavailable")
+      : `machine=${hasMachine ? "yes" : "no"}, notifications=${hasNotif ? "yes" : "no"}` ,
+    fix: providers.ok && hasMachine && hasNotif ? undefined : "Run `arc402 openshell init` again after verifying ARC-402 machine-key / Telegram config.",
+  });
+
+  const secrets = resolveOpenShellSecrets();
+  checks.push({
+    label: "Local secret material",
+    ok: Boolean(secrets.machineKey),
+    detail: secrets.machineKey
+      ? `machine key present${secrets.telegramBotToken && secrets.telegramChatId ? "; Telegram notifications configured" : "; Telegram notifications optional/incomplete"}`
+      : "machine key missing from env + ARC-402 config",
+    fix: secrets.machineKey ? undefined : "Set ARC402_MACHINE_KEY or run `arc402 config init` so daemon launch can materialize sandbox secrets.",
+  });
+
+  if (fs.existsSync(POLICY_FILE)) {
+    const policy = loadPolicyFile();
+    checks.push({
+      label: "Policy file",
+      ok: Boolean(policy),
+      detail: policy ? `${POLICY_FILE} loaded (${Object.keys(policy.network_policies ?? {}).length} outbound entries)` : `${POLICY_FILE} is unreadable`,
+      fix: policy ? undefined : "Re-run `arc402 openshell init` to regenerate the policy file.",
+    });
+  } else {
+    checks.push({
+      label: "Policy file",
+      ok: false,
+      detail: `missing (${POLICY_FILE})`,
+      fix: "Run `arc402 openshell init`.",
+    });
+  }
+
+  if (fs.existsSync(DAEMON_TOML)) {
+    checks.push({ label: "Daemon config", ok: true, detail: `${DAEMON_TOML} present` });
+  } else {
+    checks.push({
+      label: "Daemon config",
+      ok: false,
+      detail: `missing (${DAEMON_TOML})`,
+      fix: "Run `arc402 daemon init` before starting the runtime.",
+    });
+  }
+
+  try {
+    const { configPath, host } = buildOpenShellSshConfig(config.sandbox.name);
+    const remoteDaemonEntry = path.posix.join(
+      config.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT,
+      "dist/daemon/index.js",
+    );
+    const runtimeProbe = runCmd("ssh", ["-F", configPath, host, `test -f ${JSON.stringify(remoteDaemonEntry)} && echo present || echo missing`], { timeout: 60000 });
+    checks.push({
+      label: "Remote runtime bundle",
+      ok: runtimeProbe.ok && runtimeProbe.stdout.includes("present"),
+      detail: runtimeProbe.ok ? (runtimeProbe.stdout || remoteDaemonEntry) : (runtimeProbe.stderr || runtimeProbe.stdout || "probe failed"),
+      fix: runtimeProbe.ok && runtimeProbe.stdout.includes("present") ? undefined : "Run `arc402 openshell sync-runtime` (or `arc402 openshell init`) to upload the ARC-402 runtime bundle.",
+    });
+
+    const secretProbe = runCmd("ssh", ["-F", configPath, host, "printf '%s' \"${ARC402_MACHINE_KEY:-missing}\""], { timeout: 60000 });
+    const secretDetail = !secretProbe.ok
+      ? (secretProbe.stderr || secretProbe.stdout || "probe failed")
+      : secretProbe.stdout.startsWith("openshell:resolve:env:")
+        ? "raw SSH shows OpenShell env placeholders; ARC-402 launch overlay path is expected"
+        : secretProbe.stdout && secretProbe.stdout !== "missing"
+          ? "sandbox env already materialized"
+          : "sandbox secret not visible via raw SSH";
+    checks.push({
+      label: "Secret launch seam",
+      ok: secretProbe.ok && secretDetail !== "sandbox secret not visible via raw SSH",
+      detail: secretDetail,
+      fix: secretProbe.ok && secretDetail !== "sandbox secret not visible via raw SSH" ? undefined : "Ensure ARC402_MACHINE_KEY resolves locally, then restart with `arc402 daemon start`.",
+    });
+  } catch {
+    checks.push({
+      label: "Remote runtime bundle",
+      ok: false,
+      detail: "could not build OpenShell SSH proof for the sandbox",
+      fix: "Check `openshell sandbox ssh-config` and re-run `arc402 openshell init`."
+    });
+    checks.push({
+      label: "Secret launch seam",
+      ok: false,
+      detail: "could not verify sandbox secret/materialization behavior",
+      fix: "Confirm OpenShell sandbox access and ARC-402 machine-key config, then retry."
+    });
+  }
+
+  if (fs.existsSync(DAEMON_PID)) {
+    const rawPid = fs.readFileSync(DAEMON_PID, "utf-8").trim();
+    const pid = Number(rawPid);
+    if (Number.isFinite(pid) && pid > 0 && isProcessAlive(pid)) {
+      checks.push({ label: "Daemon process", ok: true, detail: `running (PID ${pid})` });
+    } else {
+      checks.push({
+        label: "Daemon process",
+        ok: false,
+        detail: `stale or invalid PID file (${JSON.stringify(rawPid)})`,
+        fix: "Remove the stale PID file or restart with `arc402 daemon start`.",
+      });
+    }
+  } else {
+    checks.push({
+      label: "Daemon process",
+      ok: false,
+      detail: "not running yet (no PID file)",
+      fix: "Run `arc402 daemon start` after init completes.",
+    });
+  }
+
+  checks.push({
+    label: "Daemon log",
+    ok: fs.existsSync(DAEMON_LOG),
+    detail: fs.existsSync(DAEMON_LOG) ? `${DAEMON_LOG} present` : `${DAEMON_LOG} not created yet`,
+    fix: fs.existsSync(DAEMON_LOG) ? undefined : "Start the runtime once to generate daemon logs.",
+  });
+
+  return checks;
 }
 
 // ─── Policy file helpers ──────────────────────────────────────────────────────
@@ -554,6 +758,41 @@ If you update the local CLI build and want the sandbox to pick it up immediately
         console.error(`Runtime sync failed: ${err instanceof Error ? err.message : String(err)}`);
         process.exit(1);
       }
+    });
+
+  // ── openshell doctor ───────────────────────────────────────────────────────
+  openshell
+    .command("doctor")
+    .description("Prove where MacBook/clean-room setup is blocked: Docker, OpenShell, sandbox, providers, runtime sync, or daemon boot.")
+    .action(() => {
+      console.log("ARC-402 OpenShell Doctor");
+      console.log("─────────────────────");
+
+      const checks = buildOpenShellDoctorChecks();
+      let failures = 0;
+      for (const check of checks) {
+        if (check.ok) {
+          console.log(`✓ ${check.label.padEnd(22)} ${check.detail}`);
+        } else {
+          failures += 1;
+          console.log(`✗ ${check.label.padEnd(22)} ${check.detail}`);
+          if (check.fix) console.log(`    Fix: ${check.fix}`);
+        }
+      }
+
+      if (failures === 0) {
+        console.log("\nOpenShell launch path looks ready for current launch scope.");
+      } else {
+        console.log(`\n${failures} readiness gap(s) found.`);
+      }
+
+      console.log("\nLayer order:");
+      console.log("  1. Docker / OpenShell substrate");
+      console.log("  2. ARC-402 OpenShell config + providers");
+      console.log("  3. sandbox existence + policy file");
+      console.log("  4. remote runtime bundle sync");
+      console.log("  5. daemon config + launch seam");
+      console.log("  6. daemon process/log proof");
     });
 
   // ── openshell status ───────────────────────────────────────────────────────

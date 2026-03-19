@@ -1,5 +1,5 @@
 # ARC-402 Engineering State
-*Last updated: 2026-03-19 18:33 SAST (ARC-402 OpenShell policy UX presets/toggles shipped)*
+*Last updated: 2026-03-19 23:58 SAST (OpenShell doctor + MacBook validation runbook shipped)*
 
 ---
 
@@ -24,7 +24,10 @@
 - Endpoint status/doctor hardening shipped: `arc402 endpoint status|doctor` now prove as much parity as currently feasible across local endpoint config, wallet binding, claim state, hostname DNS resolution, local ingress target reachability, daemon/OpenShell runtime health, and AgentRegistry endpoint parity; when proof is partial they now say exactly which layer is missing or mismatched instead of implying the whole stack is broken.
 - Publication-facing install/docs surfaces were normalized around the actual current packages and commands: `arc402-cli` provides the `arc402` command, `openclaw install arc402-agent` is the canonical skill install phrase, TypeScript/Python SDK READMEs now point back to that operator path, and the SDK docs/examples were nudged toward the launch/mainnet mental model.
 - First usable OpenShell-facing policy UX layer is now implemented in the CLI: `arc402 openshell policy concepts`, launch-safe presets (`core-launch`, `harness`, `search`, `all`), explicit peer-agent HTTPS allowlist helpers (`peer add|remove|list`), category-aware `policy list`, and clearer status wording that separates public ingress from sandbox outbound policy.
+- OpenShell proof UX was hardened for the coming clean MacBook validation pass: `arc402 openshell doctor` now checks Docker access, OpenShell gateway, ARC-402 OpenShell config, sandbox existence, credential providers, local secret material, policy file, daemon config, remote runtime bundle presence, secret launch seam behavior, daemon PID, and daemon log presence in one command.
+- Added `docs/macbook-validation-runbook.md` as the exact clean-room validation script so the MacBook pass records commands, outputs, and the specific broken layer instead of collapsing everything into vague setup friction.
 - Publish-surface sweep tightened GitHub-facing docs/readmes around the current launch truth: root README now links the launch checklist and uses the canonical endpoint flow in quick-start copy, CLI/skill docs now sequence endpoint scaffolding before agent registration, the reference README now points readers back to the operator-facing launch docs instead of stale pre-mainnet framing, and the old post-audit checklist was replaced with a publish-order checklist that preserves "public surfaces first → MacBook clean-room proof → publish".
+- Repo-hygiene cleanup separated obvious generated churn from launch work: `web/.next/`, Python `__pycache__/`, and `web/tsconfig.tsbuildinfo` are now ignored and removed from version control so launch diffs stay reviewable.
 
 ## True Current State
 

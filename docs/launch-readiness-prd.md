@@ -111,8 +111,8 @@ ARC-402 is launch-ready when all of the following are true:
 - [ ] launch-safe examples exist for one-time, recurring, multi-step, escrow, and API/session patterns
 
 ### GitHub truth
-- [ ] repo diff is cleaned and intentional
-- [ ] generated artifacts are separated from meaningful changes
+- [x] repo diff is cleaned and intentional
+- [x] generated artifacts are separated from meaningful changes
 - [ ] GitHub-facing docs are coherent enough for first public readers
 - [ ] launch checklist exists and is current
 
@@ -239,7 +239,8 @@ This PRD remains the tracker; the roadmap is the sharper implementation artifact
 - [x] Make `arc402 openshell status` verify the provisioned remote daemon bundle
 - [x] Tighten daemon/setup copy so the operator hears "OpenShell-owned runtime" rather than "manual daemon plumbing"
 - [ ] Validate the same path from a clean MacBook install
-- [ ] Add a single `arc402 openshell doctor` command if additional launch polish is needed after the MacBook pass
+- [x] Add a single `arc402 openshell doctor` command so clean-machine failures collapse to one broken layer instead of SSH guesswork
+- [x] Add a dedicated `docs/macbook-validation-runbook.md` so the MacBook pass records exact commands, outputs, and broken layers
 - [x] Make daemon launch materialize real machine-key / notification envs even when raw OpenShell SSH exposes `openshell:resolve:env:*` placeholders
 - [ ] Add `arc402 endpoint init` to scaffold canonical endpoint naming, local ingress target, and tunnel config for `agentname.arc402.xyz`
 - [ ] Add `arc402 endpoint status` to prove: DNS target, tunnel health, local target, daemon health, and registered AgentRegistry endpoint all match

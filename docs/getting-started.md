@@ -106,6 +106,7 @@ ARC-402's launch-default runtime path is a dedicated sandboxed workroom backed b
 arc402 openshell install
 arc402 openshell init
 arc402 openshell status
+arc402 openshell doctor
 ```
 
 The premium path here is deliberate:
@@ -113,6 +114,7 @@ The premium path here is deliberate:
 - it creates or updates the OpenShell credential providers for you
 - it syncs the current ARC-402 CLI runtime into the sandbox automatically
 - `arc402 openshell status` verifies both the policy wiring and that the remote daemon bundle is actually present
+- `arc402 openshell doctor` isolates the broken layer when a clean-machine install fails: Docker, OpenShell gateway, providers, sandbox, runtime sync, or daemon boot
 
 OpenShell contains the ARC-402 runtime path and sandboxes the worker behavior plus inherited subprocesses. In practice, ARC-402 gives the operator a dedicated commerce sandbox on the machine. Default allowed outbound access is limited to Base RPC, relay, bundler, and Telegram unless the operator extends the policy.
 
