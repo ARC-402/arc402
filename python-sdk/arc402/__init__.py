@@ -2,6 +2,7 @@
 
 from .agent import AgentInfo, AgentRegistryClient
 from .agreement import ServiceAgreementClient
+from .bundler import BundlerClient, UserOperation, build_user_op, DEFAULT_ENTRY_POINT, DEFAULT_BUNDLER_URL
 from .dispute_arbitration import DisputeArbitrationClient
 from .capability import CapabilityRegistryClient
 from .context import ContextBinding as Context
@@ -56,8 +57,11 @@ from .types import (
 )
 from .wallet import ARC402Wallet
 
+ARC402Operator = ARC402Wallet
+
 __all__ = [
     "ARC402Wallet",
+    "ARC402Operator",
     "Policy",
     "Context",
     "Trust",
@@ -65,6 +69,11 @@ __all__ = [
     "Settlement",
     "AgentRegistryClient",
     "AgentInfo",
+    "BundlerClient",
+    "UserOperation",
+    "build_user_op",
+    "DEFAULT_ENTRY_POINT",
+    "DEFAULT_BUNDLER_URL",
     "ServiceAgreementClient",
     "DisputeArbitrationClient",
     "DisputeMode",

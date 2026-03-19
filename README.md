@@ -23,6 +23,8 @@
 
 ARC-402 is the protocol that makes agent-to-agent hiring safe — economically and at runtime.
 
+For launch, the clearest deployment path is **OpenClaw inside OpenShell**: ARC-402 governs the wallet and agreement layer on Base, while OpenShell is the runtime home for daemon-style execution behaviour. Treat daemon startup as OpenShell-owned runtime behaviour, not as a standalone launch step.
+
 Two policy layers govern every agreement:
 
 | Layer | System | What It Governs |
@@ -30,26 +32,26 @@ Two policy layers govern every agreement:
 | **Economic immune system** | ARC-402 contracts (Base mainnet) | Who can hire, at what price, under what trust, with what settlement guarantees |
 | **Runtime immune system** | OpenShell sandbox | What the agent can touch while working — which endpoints it can call, what files it can write |
 
-The daemon connects them. One name covers the full stack.
+The daemon connects them. At launch, OpenShell owns how that runtime is started and contained.
 
 ---
 
 ## Install
 
-Three commands. Full stack.
+Three steps. Full stack.
 
 ```bash
-# 1. Install CLI + OpenShell wiring automatically
+# 1. Install ARC-402 for OpenClaw/OpenShell
 opclaw install arc402-agent
 
 # 2. Deploy your wallet (MetaMask tap → wallet on Base mainnet)
 arc402 wallet deploy
 
-# 3. Start the daemon (runs inside OpenShell sandbox automatically)
-arc402 daemon start
+# 3. Start your OpenClaw/OpenShell-managed ARC-402 operator flow
+#    (OpenShell owns daemon startup in the launch architecture)
 ```
 
-OpenShell is detected and wired at install time. If present, `arc402 daemon start` runs the entire daemon — and every worker process it spawns — inside the sandbox. No separate configuration needed.
+OpenShell is the default runtime home for launch deployments. The daemon still exists as implementation surface in the CLI, but docs should treat it as part of the OpenShell-contained operating path, with startup owned by OpenShell rather than by a standalone daemon deployment model. OpenShell CLI/version quirks should be absorbed by ARC-402 tooling, not pushed onto the operator.
 
 ---
 
@@ -67,7 +69,11 @@ This works until it doesn't. And at scale, it doesn't.
 
 ## What ARC-402 Is
 
-ARC-402 is an open standard that defines five primitives missing from every current wallet architecture:
+ARC-402 is an open standard for governed agent commerce. It defines the primitives missing from plain "agents with wallets" architectures and combines them with an escrow-backed agreement lifecycle on Base.
+
+For a launch-accurate explanation of what ARC-402 is, what it is not, who it is for, which payment patterns are supported now, and what is explicitly post-launch, read **[docs/launch-scope.md](./docs/launch-scope.md)**.
+
+ARC-402 defines five primitives missing from every current wallet architecture:
 
 | Primitive | What It Solves |
 |-----------|----------------|
@@ -145,11 +151,45 @@ Discover  →  Negotiate  →  Hire  →  Deliver  →  Verify  →  Settle
 
 ## Getting Started
 
-New to ARC-402? Follow the step-by-step guide:
+New to ARC-402? Start with these three docs in order:
 
-**[→ Getting Started: Install, deploy your wallet, set up your node](./docs/getting-started.md)**
+- **[→ Launch Scope](./docs/launch-scope.md)** — what exists now, what does not, and how to explain ARC-402 accurately
+- **[→ Getting Started](./docs/getting-started.md)** — install, wallet deployment, OpenClaw/OpenShell operator setup, endpoint registration, and live verification
+- **[→ Launch Readiness PRD](./docs/launch-readiness-prd.md)** — tracked execution plan for launch readiness, runtime validation, docs truth, and GitHub polish
 
-Covers CLI install → wallet deployment → endpoint setup (subdomain / own domain / ngrok) → tunnel → on-chain registration → live verification.
+### Choose your onboarding path
+
+The key launch decision: **wallet/passkey setup happens on mobile, runtime setup happens on your operator machine.** ARC-402 should feel like one product across both surfaces, not two separate systems you have to mentally stitch together.
+
+ARC-402 has two launch-safe entry paths.
+
+#### Option A — Mobile-first onboarding
+Choose this if you want the fastest wallet + passkey setup.
+
+1. Open `https://app.arc402.xyz/onboard` on your phone
+2. Deploy or detect your ARC-402 wallet
+3. Register Face ID / passkey
+4. Optionally apply policy defaults
+5. Optionally register your agent
+6. Continue into the OpenClaw/OpenShell runtime path
+
+#### Option B — CLI-first operator setup
+Choose this if you want to start from the local runtime and config.
+
+1. Install the CLI and OpenClaw tooling
+2. Configure ARC-402 locally
+3. Deploy or connect your wallet
+4. Use the mobile pages for passkey setup / signing when needed
+5. Initialize OpenShell
+6. Start the ARC-402 runtime through the OpenShell-owned path
+
+Both paths meet at the same launch architecture:
+**ARC-402 on Base + OpenClaw runtime + OpenShell containment.**
+
+| Surface | What happens there |
+|---|---|
+| **Phone / approval device** | wallet deployment confirmation, passkey registration, governance approvals |
+| **Operator machine** | CLI config, OpenClaw skill/runtime setup, OpenShell-contained daemon/runtime, endpoint exposure |
 
 ---
 
@@ -279,8 +319,7 @@ ARC-402 is the SMTP of the agent economy. `lego@gigabrain.arc402.xyz` and `resea
 | TrustRegistryV2 | [`0xdA1D377991B2E580991B0DD381CdD635dd71aC39`](https://basescan.org/address/0xdA1D377991B2E580991B0DD381CdD635dd71aC39) |
 | TrustRegistryV3 ← active | [`0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1`](https://basescan.org/address/0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1) |
 | IntentAttestation | [`0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460`](https://basescan.org/address/0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460) |
-| SettlementCoordinator v1 (frozen) | [`0x6653F385F98752575db3180b9306e2d9644f9Eb1`](https://basescan.org/address/0x6653F385F98752575db3180b9306e2d9644f9Eb1) |
-| SettlementCoordinator v2 ← active | [`0xd52d8Be9728976E0D70C89db9F8ACeb5B5e97cA2`](https://basescan.org/address/0xd52d8Be9728976E0D70C89db9F8ACeb5B5e97cA2) |
+| SettlementCoordinator ← active | [`0x6653F385F98752575db3180b9306e2d9644f9Eb1`](https://basescan.org/address/0x6653F385F98752575db3180b9306e2d9644f9Eb1) |
 | ARC402RegistryV2 ← active | [`0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622`](https://basescan.org/address/0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622) |
 | AgentRegistry | [`0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865`](https://basescan.org/address/0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865) |
 | WalletFactory v1 (frozen) | [`0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2`](https://basescan.org/address/0x0092E5bC265103070FDB19a8bf3Fa03A46c65ED2) |

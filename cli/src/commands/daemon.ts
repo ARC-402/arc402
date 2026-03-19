@@ -200,7 +200,7 @@ type IpcResponse = { ok: boolean; data?: unknown; error?: string };
 
 function sendIpcCommand(cmd: Record<string, unknown>): Promise<IpcResponse> {
   if (!fs.existsSync(DAEMON_SOCK)) {
-    console.error("Daemon is not running. Start with: arc402 daemon start");
+    console.error("Daemon is not running. Launch path: run `arc402 openshell init` first, then `arc402 daemon start`.");
     process.exit(1);
   }
 
@@ -231,7 +231,7 @@ function sendIpcCommand(cmd: Record<string, unknown>): Promise<IpcResponse> {
     socket.on("error", (err) => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT" ||
           (err as NodeJS.ErrnoException).code === "ECONNREFUSED") {
-        console.error("Daemon is not running. Start with: arc402 daemon start");
+        console.error("Daemon is not running. Launch path: run `arc402 openshell init` first, then `arc402 daemon start`.");
         process.exit(1);
       }
       reject(err);
@@ -447,7 +447,7 @@ export function registerDaemonCommands(program: Command): void {
   // ── daemon start ────────────────────────────────────────────────────────────
   daemon
     .command("start")
-    .description("Start the ARC-402 daemon in the background. Use --foreground for systemd/launchd.")
+    .description("Start the ARC-402 runtime. If OpenShell is configured, this automatically runs inside the configured sandbox.")
     .option("--foreground", "Run in foreground (blocking). Used by systemd/launchd service managers.")
     .action(async (opts) => {
       const foreground = opts.foreground as boolean | undefined;
@@ -462,10 +462,14 @@ export function registerDaemonCommands(program: Command): void {
           const daemonEntry = path.join(__dirname, "..", "daemon", "index.js");
           const result = spawnSync("openshell", [
             "sandbox", "exec", sandboxName, "--",
-            process.execPath, daemonEntry,
+            process.execPath, daemonEntry, "--foreground",
           ], {
             stdio: "inherit",
-            env: { ...process.env, ARC402_DAEMON_PROCESS: "1" },
+            env: {
+              ...process.env,
+              ARC402_DAEMON_PROCESS: "1",
+              ARC402_DAEMON_FOREGROUND: "1",
+            },
           });
           process.exit(result.status ?? 0);
         } else {
@@ -533,7 +537,8 @@ export function registerDaemonCommands(program: Command): void {
         if (fs.existsSync(DAEMON_PID)) fs.unlinkSync(DAEMON_PID);
       }
 
-      await startDaemonBackground();
+      const openShellCfg = readOpenShellConfig();
+      await startDaemonBackground(openShellCfg?.sandbox.name);
     });
 
   // ── daemon status ───────────────────────────────────────────────────────────
@@ -545,7 +550,7 @@ export function registerDaemonCommands(program: Command): void {
       const pid = readPid();
       if (!pid || !isProcessAlive(pid)) {
         console.log("Daemon is not running.");
-        console.log("Start with: arc402 daemon start");
+        console.log("Launch path: arc402 openshell init, then arc402 daemon start");
         process.exit(1);
       }
 
@@ -569,7 +574,7 @@ export function registerDaemonCommands(program: Command): void {
 
       if (!fs.existsSync(DAEMON_LOG)) {
         console.log(`Log file not found: ${DAEMON_LOG}`);
-        console.log("Has the daemon been started? Run: arc402 daemon start");
+        console.log("Has the OpenShell-owned runtime been started? Run `arc402 openshell init` first if needed, then `arc402 daemon start`.");
         process.exit(0);
       }
 
@@ -680,6 +685,19 @@ export function registerDaemonCommands(program: Command): void {
       formatHireTable(rows);
     });
 
+  daemon
+    .command("agreement <id>")
+    .description("Show full detail on a specific agreement.")
+    .action(async (id) => {
+      const res = await sendIpcCommand({ command: "agreement", id: String(id) });
+      if (!res.ok) {
+        console.error(`Error: ${res.error}`);
+        process.exit(1);
+      }
+      const data = res.data as { agreement: HireRow };
+      console.log(JSON.stringify(data.agreement, null, 2));
+    });
+
   // ── daemon init ──────────────────────────────────────────────────────────────
   daemon
     .command("init")
@@ -781,7 +799,8 @@ export function registerDaemonCommands(program: Command): void {
       console.log("Next steps:");
       console.log("  1. Edit daemon.toml — fill in wallet.contract_address and network.rpc_url");
       console.log("  2. Set your machine key: export ARC402_MACHINE_KEY=0x<private-key>");
-      console.log("  3. Start the daemon: arc402 daemon start");
+      console.log("  3. Hand runtime startup to OpenShell: arc402 openshell init");
+      console.log("  4. Start the OpenShell-owned ARC-402 runtime: arc402 daemon start");
     });
 
   // ── daemon channel-watch ─────────────────────────────────────────────────────
@@ -814,6 +833,10 @@ export function registerDaemonCommands(program: Command): void {
         wallet: address,
         contract,
         json: opts.json || program.opts().json,
+      });
+    });
+}
+ json: opts.json || program.opts().json,
       });
     });
 }

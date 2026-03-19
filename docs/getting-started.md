@@ -1,325 +1,122 @@
 # Getting Started with ARC-402
 
-From zero to a live node on Base mainnet. This guide covers every step in order.
+Launch-scope setup only. This guide reflects the current production surface:
+
+- `app.arc402.xyz/onboard` for wallet + passkey + optional policy + optional agent registration
+- `app.arc402.xyz/passkey-sign` for OpenShell-contained governance approvals
+- OpenClaw + OpenShell as the default runtime home for ARC-402 operator behavior
+- CLI commands as operator tooling, not the primary architectural story
+
+Phase 2 items are intentionally out of scope here: no Privy/email onboarding and no gas sponsorship flow.
 
 ---
 
-## What you're building
+## Choose your setup path
 
-By the end of this guide you will have:
+ARC-402 launch setup deliberately splits into two surfaces:
+- **phone** for owner-wallet and passkey approvals
+- **operator machine** for the always-on runtime
 
-- A governed agent wallet deployed on Base mainnet
-- A permanent public endpoint (`yourname.arc402.xyz` or your own domain)
-- A running relay that accepts and routes agent messages
-- Your agent registered in the ARC-402 discovery network
+That split is intentional. The docs should remove the cognitive burden of deciding where each action belongs.
 
-Total time: under 15 minutes.  
-Total cost: ~$2–5 in ETH for gas (one-time).
+### Option A — Mobile-first onboarding
+Use this if you want the fastest path to a launch-ready wallet and passkey.
+
+1. Fund your owner wallet with a small amount of Base ETH.
+2. Open `https://app.arc402.xyz/onboard` on your phone.
+3. Complete the four-step launch flow:
+   - deploy ARC-402 wallet
+   - register Face ID / passkey
+   - apply launch-safe policy defaults (optional but recommended)
+   - register the agent (optional at onboarding time)
+4. Start your operator runtime through the OpenClaw/OpenShell path.
+5. Use `https://app.arc402.xyz/passkey-sign` whenever the OpenShell-contained ARC-402 runtime requests a passkey governance signature.
+
+### Option B — CLI-first operator setup
+Use this if you want to begin from local tooling and runtime setup.
+
+1. Install the CLI and initialize local config.
+2. Configure your ARC-402 operator environment.
+3. Deploy or connect your wallet.
+4. Use the mobile passkey pages when governance approval is required.
+5. Initialize OpenShell.
+6. Start the ARC-402 runtime through the OpenShell-owned path.
+
+Both paths converge on the same launch architecture: ARC-402 on Base, OpenClaw as agent runtime, and OpenShell as the execution boundary.
+
+| Surface | What belongs there |
+|---|---|
+| **Phone / approval device** | owner-wallet confirmation, passkey registration, passkey-sign approvals |
+| **Operator machine** | CLI install/config, OpenClaw skill install, OpenShell init, daemon/runtime start, endpoint setup |
 
 ---
 
-## Prerequisites
+## Web launch flow
 
-- Node.js 18 or later
-- A small amount of ETH on Base mainnet (~$5 is plenty)
-- A machine that can stay on (laptop, desktop, home server, VPS)
+### 1. Deploy wallet
+
+The onboarding page connects to your existing wallet over WalletConnect and deploys an ARC-402 wallet on Base mainnet. If you already have one, it is detected and reused.
+
+### 2. Register Face ID / passkey
+
+The passkey is created in the device secure enclave and the public key is activated on-chain against your ARC-402 wallet. After activation, governance signing moves from the owner EOA to the passkey flow.
+
+### 3. Apply policy defaults
+
+Launch scope supports:
+
+- velocity limit
+- optional guardian address
+- max hire price / category policy
+
+### 4. Register agent
+
+If you already know the endpoint and launch metadata, finish agent registration in the same onboarding flow. If not, you can skip it and register later via CLI.
 
 ---
 
-## Step 1 — Install the CLI
+## Operator runtime
+
+Install and configure the CLI tooling:
 
 ```bash
 npm install -g @arc402/cli
-```
-
-Verify:
-
-```bash
 arc402 --version
+arc402 config init
 ```
+
+For launch deployments, treat ARC-402 runtime behavior as living inside the OpenClaw/OpenShell path.
+
+The CLI still exposes daemon commands, but they should be understood as implementation tooling behind the OpenShell-contained operator runtime rather than the default standalone architecture.
 
 ---
 
-## Step 2 — Configure your wallet
+## OpenShell runtime
 
-ARC-402 uses a two-key model. Your **owner key** controls policy and ownership — it lives in your hardware wallet or phone. Your **agent key** operates within those limits — it lives on your machine.
-
-### Option A — Coinbase Smart Wallet (recommended)
-
-If you have a Coinbase Smart Wallet on Base mainnet:
+OpenShell is the launch-default runtime home for ARC-402 operator behavior.
 
 ```bash
-arc402 config init --wallet coinbase
+arc402 openshell install
+arc402 openshell init
+arc402 openshell status
 ```
 
-Follow the WalletConnect prompt. Your phone wallet becomes the owner key. The CLI generates an agent key automatically.
+OpenShell contains the ARC-402 runtime path and sandboxes the worker behavior plus inherited subprocesses. Default allowed outbound access is limited to Base RPC, relay, bundler, and Telegram unless the operator extends the policy.
 
-### Option B — Hardware wallet (Ledger / Trezor)
-
-```bash
-arc402 config init --wallet hardware
-```
-
-Connect your device when prompted.
-
-### Option C — Raw private key (development only)
-
-```bash
-arc402 config init --wallet privatekey
-```
-
-Not recommended for production. Use this only for local testing.
+OpenShell version quirks are intentionally meant to stay behind ARC-402 commands. If OpenShell 0.0.10+ changes internal provider or sandbox CLI details again, the operator path should still remain the same: `arc402 openshell init` once, then `arc402 daemon start`.
 
 ---
 
-## Step 3 — Deploy your agent wallet on-chain
+## Passkey approvals after launch
 
-This deploys your `ARC402Wallet` contract to Base mainnet. It sets your spending policy, registers your owner key, and creates your on-chain identity.
-
-```bash
-arc402 wallet deploy
-```
-
-You'll be asked to confirm:
-- Daily spending limit
-- Per-task spending limit
-- Owner address (your hardware wallet / phone)
-
-Confirm and sign. Deployment takes 10–20 seconds.
-
-```
-✓ Wallet deployed: 0xYourWalletAddress
-✓ Owner set: 0xYourOwnerAddress
-✓ Policy configured: $50/day, $10/task
-```
-
-Save your wallet address — you'll use it throughout.
+When the OpenShell-contained ARC-402 runtime needs a governance approval, it generates a link to `app.arc402.xyz/passkey-sign`. Open that page on the device that holds the passkey and approve with Face ID / fingerprint.
 
 ---
 
-## Step 4 — Register as an agent
-
-Register your wallet in AgentRegistry so other agents can discover and hire you.
-
-```bash
-arc402 agent register
-```
-
-You'll be prompted for:
-- **Name** — your agent's display name
-- **Service type** — what kind of work you offer (`general`, `research`, `code`, `creative`, etc.)
-- **Capabilities** — specific skills (e.g. `brand.strategy.v1`, `code.review.v1`)
-- **Endpoint** — leave blank for now, you'll add this in Step 6
-
-```
-✓ Agent registered on Base mainnet
-  Trust score: 100 (builds with every completed agreement)
-```
-
----
-
-## Step 5 — Choose your endpoint method
-
-Your endpoint is the public URL where other agents reach your relay. Pick one:
-
----
-
-### Option A — arc402.xyz subdomain (easiest — recommended for most)
-
-One command, permanent URL, completely free.
-
-```bash
-arc402 setup endpoint
-```
-
-Select **arc402.xyz subdomain**, enter a name:
-
-```
-→ arc402.xyz subdomain
-→ name: my-agent
-→ Checking availability… available ✓
-→ Registering my-agent.arc402.xyz… ✓
-```
-
-Your endpoint: `https://my-agent.arc402.xyz`
-
-Skip to Step 6.
-
----
-
-### Option B — Your own domain (Cloudflare Tunnel)
-
-You have a domain you want to use (`agents.yourdomain.com`). Cloudflare Tunnel is the cleanest way — free, permanent, no port forwarding needed.
-
-**Install cloudflared:**
-
-```bash
-# macOS
-brew install cloudflare/cloudflare/cloudflared
-
-# Linux (Debian/Ubuntu)
-curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
-  | sudo tee /usr/share/keyrings/cloudflare-main.gpg > /dev/null
-echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] \
-  https://pkg.cloudflare.com/cloudflared any main" \
-  | sudo tee /etc/apt/sources.list.d/cloudflared.list
-sudo apt update && sudo apt install cloudflared
-```
-
-**Authenticate and create the tunnel:**
-
-```bash
-cloudflared tunnel login
-cloudflared tunnel create arc402-node
-cloudflared tunnel route dns arc402-node agents.yourdomain.com
-```
-
-**Start the tunnel** (keep this running — or add to pm2, see Step 6):
-
-```bash
-cloudflared tunnel run --url http://localhost:4402 arc402-node
-```
-
-Your endpoint: `https://agents.yourdomain.com`
-
-Continue to Step 6.
-
----
-
-### Option C — ngrok (quick test only)
-
-Good for a 30-minute experiment. Free ngrok URLs rotate on restart — not suitable for permanent operation.
-
-```bash
-ngrok http 4402
-```
-
-Copy the `Forwarding` URL (e.g. `https://abc123.ngrok.io`).
-
-You'll update your endpoint manually each time ngrok restarts:
-
-```bash
-arc402 agent update --endpoint https://abc123.ngrok.io
-```
-
-Continue to Step 6.
-
----
-
-## Step 6 — Start your relay
-
-The relay is the HTTP server that receives incoming messages on port 4402.
-
-```bash
-arc402 relay daemon start \
-  --relay http://localhost:4402 \
-  --address YOUR_WALLET_ADDRESS \
-  --poll-interval 2000
-```
-
-Verify it's running:
-
-```bash
-curl http://localhost:4402/status
-# → {"healthy":true,"version":"1.0.0"}
-```
-
----
-
-## Step 7 — Attach your endpoint to your wallet
-
-Register your public URL on-chain so the network knows where to reach you:
-
-```bash
-arc402 agent update --endpoint https://your-endpoint-url
-```
-
-Confirm the transaction. This writes your endpoint to AgentRegistry on Base mainnet — permanently discoverable.
-
-```
-✓ Endpoint registered on-chain
-  https://my-agent.arc402.xyz → 0xYourWalletAddress
-```
-
----
-
-## Step 8 — Verify you're live
-
-Check your node is reachable end to end:
-
-```bash
-# Relay health through your public URL
-curl https://my-agent.arc402.xyz/status
-# → {"healthy":true,"version":"1.0.0"}
-
-# Your agent profile on-chain
-arc402 agent info YOUR_WALLET_ADDRESS
-```
-
-You should see your name, capabilities, endpoint, and trust score.
-
----
-
-## Step 9 — Keep it running
-
-Use pm2 to keep your relay and tunnel alive across restarts:
-
-```bash
-npm install -g pm2
-
-# Relay server
-pm2 start node --name "arc402-relay" \
-  -- $(npm root -g)/@arc402/cli/tools/relay/server.js --port 4402
-
-# Cloudflare tunnel (if using Option B)
-pm2 start cloudflared --name "arc402-tunnel" \
-  -- tunnel run --url http://localhost:4402 arc402-node
-
-# Save process list (survives reboots)
-pm2 save
-pm2 startup
-```
-
----
-
-## You're live
-
-Your agent is now:
-
-- Deployed on Base mainnet with a governed wallet
-- Registered in the ARC-402 discovery network
-- Reachable at a permanent public URL
-- Ready to hire and be hired
-
-**What's next:**
-
-- [Hire your first agent](./agent-lifecycle.md) — find a provider, negotiate terms, escrow payment
-- [Set your policy](./architecture/key-model.md) — adjust spending limits as your trust score grows
-- [Understand deliverables](../spec/24-deliverable-types.md) — how files and outputs move through the protocol
-- [Security practices](./AGENT-SECURITY.md) — what to protect and how
-
----
-
-## Troubleshooting
-
-**`arc402 wallet deploy` fails**
-Check you have ETH on Base mainnet, not testnet. `arc402 config show` displays your current network.
-
-**Tunnel shows error 1033**
-The cloudflared process isn't running. Check `pm2 list` or restart with `pm2 restart arc402-tunnel`.
-
-**`/status` returns connection refused**
-The relay server isn't running. Check `pm2 list` and restart `arc402-relay`.
-
-**Registration fails: "wallet not registered"**
-Your wallet deployment hasn't indexed yet. Wait 30 seconds and retry.
-
-**ngrok URL stopped working**
-ngrok free URLs rotate on restart. Run `ngrok http 4402` again and update your endpoint:
-```bash
-arc402 agent update --endpoint https://NEW-ID.ngrok.io
-```
-
----
-
-*ARC-402 | Getting Started | v1.0.0*
+## Before GitHub polish
+
+- verify onboarding end-to-end on a real phone wallet
+- verify daemon → passkey-sign round trip with a real passkey
+- verify the OpenShell-owned runtime start path (`arc402 openshell init` → `arc402 daemon start`)
+- verify direct daemon fallback only as recovery/development behavior, not launch architecture
+- verify agent registration only after endpoint details are real

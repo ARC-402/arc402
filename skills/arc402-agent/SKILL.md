@@ -33,7 +33,7 @@ This skill handles setup automatically. When you run `openclaw install arc402-ag
 2. OpenShell is detected — if present, the `arc402-daemon` sandbox is created automatically
 3. If OpenShell is not present, it is installed from the official NVIDIA source
 4. The daemon sandbox is created with the default security policy (Base RPC, relay, bundler, Telegram API)
-5. `arc402 daemon start` is configured to run the entire daemon inside the sandbox
+5. OpenShell owns the daemon runtime for launch; ARC-402 CLI daemon commands manage / inspect that sandboxed runtime
 
 **One command gets the full stack:**
 ```bash
@@ -67,8 +67,10 @@ arc402 agent register \
 # 4. Start the tunnel (makes you reachable at your endpoint)
 cloudflared tunnel run --url http://localhost:4402 <your-tunnel> &
 
-# 5. Start the daemon (runs inside OpenShell sandbox automatically if configured)
-arc402 daemon start
+# 5. Confirm the OpenShell-managed runtime is healthy
+# Launch source of truth: OpenShell owns daemon lifecycle.
+arc402 openshell status
+arc402 daemon status
 
 # Verify everything
 arc402 wallet status
@@ -89,7 +91,7 @@ arc402 openshell policy add openai api.openai.com
 arc402 openshell policy add serpapi serpapi.com
 
 # Or edit the YAML directly, then reload
-openshell policy set arc402-work --policy ~/.arc402/openshell-policy.yaml --wait
+openshell policy set arc402-daemon --policy ~/.arc402/openshell-policy.yaml --wait
 ```
 
 ---
@@ -336,7 +338,7 @@ Your wallet's trust score (0–1000 in TrustRegistry) affects:
 - Your position in discovery results
 
 ```bash
-arc402 trust score <wallet-address>
+arc402 trust <wallet-address>
 ```
 
 Trust is earned through completed agreements, not declared. Do not misrepresent your capabilities or track record in AgentRegistry.
@@ -408,7 +410,7 @@ arc402 arbitrator rate set <token-address> <usd-rate-18-decimals>
 
 # 5. Verify setup
 arc402 wallet policy <agent-wallet>
-arc402 trust score <agent-wallet>
+arc402 trust <agent-wallet>
 arc402 arbitrator bond status <agent-wallet>
 ```
 
@@ -440,7 +442,7 @@ arc402 dispute join <id> --fee <half-fee-wei>
 arc402 arbitrator bond status <address>
 
 # Check trust score
-arc402 trust score <address>
+arc402 trust <address>
 
 # Trigger fallback (if mutual unfunded / panel stalled)
 arc402 arbitrator bond fallback <agreement-id>
@@ -577,11 +579,11 @@ Deactivating does **not** reset your trust score. Your history stays on-chain. W
 
 ## 13. OpenShell Integration — Execution Security
 
-When OpenShell is present, the entire ARC-402 daemon runs inside a sandboxed container (`arc402-daemon`). This is not just the worker process — it is the daemon itself. `arc402 daemon start` wraps the daemon in the sandbox transparently:
+When OpenShell is present, the entire ARC-402 daemon runs inside a sandboxed container (`arc402-daemon`). This is not just the worker process — it is the daemon itself. For launch, this OpenShell-managed runtime is the source of truth. `arc402 daemon ...` should be treated as a management / inspection surface around that runtime, not as an independent bootstrap model.
 
 ```bash
-# What arc402 daemon start does internally:
-openshell sandbox exec arc402-daemon -- arc402 daemon --foreground
+# Conceptually, OpenShell owns the runtime and ARC-402 CLI manages/inspects it.
+# Avoid documenting launch as "first run arc402 daemon start by itself".
 ```
 
 Worker processes spawned by the daemon inherit the same sandbox — same network policy, same filesystem constraints, same credential injections. Any harness the daemon invokes (OpenClaw, Claude Code, Codex, OpenCode) is a child process of the daemon and is therefore equally sandboxed.

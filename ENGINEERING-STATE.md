@@ -3,6 +3,20 @@
 
 ---
 
+## 2026-03-19 Launch-scope web/runtime sweep
+
+- Launch hub now links the real launch pages (`/onboard`, `/passkey-setup`, `/passkey-sign`, `/sign`) instead of a dead coming-soon placeholder.
+- Onboarding web flow is aligned to launch scope only: normal owner-wallet gas, no paymaster/gas sponsorship path, no Privy/email assumptions.
+- Launch docs were rewritten to match the current production surface: onboarding web flow, passkey signing flow, and OpenClaw/OpenShell as the default runtime home.
+- Documentation sweep added a dedicated `docs/launch-scope.md` covering what ARC-402 is / is not, supported payment patterns, user stories, and explicit post-launch boundaries.
+- Documentation now treats daemon behavior as absorbed into OpenShell for launch architecture; standalone daemon commands remain tooling/fallback, not the default story.
+- User-facing launch wiring was tightened again after founder decision: startup language now consistently frames `arc402 daemon start` as the OpenShell-owned runtime start path, never the primary standalone architecture.
+- Spec 35 was corrected to the active WalletFactory v5 / AgentRegistry addresses and explicitly marked as launch-scope only.
+- Device E2E for onboarding/passkey flow has been completed once already; planned rerun is from a clean MacBook OpenClaw/OpenShell setup.
+- Added `docs/launch-readiness-prd.md` as the tracked execution plan for remaining launch work.
+- Local runtime validation on PC progressed: Docker installed and running; OpenShell installed (`openshell 0.0.10`); gateway bootstrapped; ARC-402 OpenShell policy/providers/sandbox configured and `arc402 openshell status` now reports OpenShell-owned daemon mode.
+- Ergonomics smoothing pass applied across launch-facing surfaces: README/getting-started now make the phone-vs-machine split explicit, OpenShell version quirks are framed as ARC-402 implementation detail, launch PRD now tracks setup-friction tasks, and SDKs expose operator-centric aliases (`ARC402OperatorClient`, `ARC402Operator`).
+
 ## True Current State
 
 ### v1 — LIVE ON BASE MAINNET ✅
@@ -218,7 +232,7 @@ Active v2 contracts (use these):
 18. ✅ WalletFactory v4 deployed to mainnet — passkey P256 support live — 2026-03-17 (now frozen)
 18b. ✅ WalletFactory v5 deployed to mainnet (unoptimized, now frozen) — `0x3f4d4b19a69344B04fd9653E1bB12883e97300fE` — 2026-03-18
 18c. ✅ WalletFactory v5 redeployed with optimized bytecode (FOUNDRY_PROFILE=deploy) — `0xcB52B5d746eEc05e141039E92e3dBefeAe496051` — 2026-03-19
-19. → Start daemon (`arc402 daemon start`)
+19. → Start daemon via OpenShell-wrapped path (`arc402 openshell init` once, then `arc402 daemon start`)
 20. ~~Lego: `proposeRegistryUpdate(ARC402RegistryV2)` on `0xB7840152`~~ — OBSOLETE (personal wallet deprecated)
 21. → Passkey governance test (`/passkey-setup` + `/passkey-sign`)
 22. → ERC-4337 full mega audit (before tagging v1.0)
@@ -245,6 +259,8 @@ Active v2 contracts (use these):
 - **`via_ir = false`.** Causes 40+ min compile hangs. Keep OFF.
 - **`FOUNDRY_PROFILE=deploy` is MANDATORY for all deployments.** The default profile produces unoptimized bytecode that exceeds EIP-170 (24KB). The `deploy` profile enables the optimizer (runs=200). Lesson from 2026-03-19: v5 factory `0x3f4d…` was deployed without optimizer — bytecode was valid but unoptimized, now frozen.
 - **Repo private** until 5 days before article.
+- **Launch daemon path:** OpenShell owns daemon startup for launch (`arc402 openshell init` → `arc402 daemon start`). Do not frame standalone daemon startup as a launch step.
+- **Launch onboarding scope excludes phase 2:** no Privy/email/social auth and no gas sponsorship in the launch web flow.
 
 ---
 

@@ -36,6 +36,15 @@ python -m pytest -q
 python -m build
 ```
 
+## Operator model
+
+The launch mental model is **operator-first**:
+- the owner wallet / passkey flow lives on the phone or approval device
+- the runtime lives on the operator machine
+- this SDK should read like the surface area for operating an ARC-402 agent, not a loose pile of contract wrappers
+
+For that reason the package now exports `ARC402Operator` as an alias of `ARC402Wallet`.
+
 ## Quick start: governed wallet
 
 ```python

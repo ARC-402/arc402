@@ -241,7 +241,7 @@ export function registerOpenShellCommands(program: Command): void {
   // ── openshell init ─────────────────────────────────────────────────────────
   openshell
     .command("init")
-    .description("Create the arc402-daemon sandbox, generate policy, configure credential providers.")
+    .description("Initialize the launch runtime once: create the arc402-daemon sandbox, write the default policy, and hide OpenShell wiring behind ARC-402 commands.")
     .action(() => {
       console.log("OpenShell Init");
       console.log("──────────────");
@@ -280,8 +280,10 @@ export function registerOpenShellCommands(program: Command): void {
       const telegramChatId = process.env["TELEGRAM_CHAT_ID"] ?? "";
 
       const providerMachineKey = runCmd("openshell", [
-        "provider", "create", "arc402-machine-key",
-        `--env`, `ARC402_MACHINE_KEY=${machineKey}`,
+        "provider", "create",
+        "--name", "arc402-machine-key",
+        "--type", "generic",
+        "--credential", `ARC402_MACHINE_KEY=${machineKey}`,
       ]);
       if (!providerMachineKey.ok) {
         console.warn(`  Warning: arc402-machine-key provider: ${providerMachineKey.stderr}`);
@@ -290,9 +292,11 @@ export function registerOpenShellCommands(program: Command): void {
       }
 
       const providerNotifications = runCmd("openshell", [
-        "provider", "create", "arc402-notifications",
-        `--env`, `TELEGRAM_BOT_TOKEN=${telegramBotToken}`,
-        `--env`, `TELEGRAM_CHAT_ID=${telegramChatId}`,
+        "provider", "create",
+        "--name", "arc402-notifications",
+        "--type", "generic",
+        "--credential", `TELEGRAM_BOT_TOKEN=${telegramBotToken}`,
+        "--credential", `TELEGRAM_CHAT_ID=${telegramChatId}`,
       ]);
       if (!providerNotifications.ok) {
         console.warn(`  Warning: arc402-notifications provider: ${providerNotifications.stderr}`);
@@ -303,11 +307,15 @@ export function registerOpenShellCommands(program: Command): void {
       // Step 5: Create sandbox
       console.log("\nCreating sandbox...");
       const createSandbox = runCmd("openshell", [
-        "sandbox", "create", SANDBOX_NAME,
+        "sandbox", "create",
+        "--name", SANDBOX_NAME,
+        "--from", "openclaw",
         "--policy", POLICY_FILE,
         "--provider", "arc402-machine-key",
         "--provider", "arc402-notifications",
-      ]);
+        "--",
+        "true",
+      ], { timeout: 180000 });
       if (!createSandbox.ok) {
         console.error(`Failed to create sandbox: ${createSandbox.stderr}`);
         process.exit(1);
@@ -320,15 +328,15 @@ export function registerOpenShellCommands(program: Command): void {
       fs.writeFileSync(OPENSHELL_TOML, tomlContent, { mode: 0o600 });
       console.log(`  Config:  ${OPENSHELL_TOML}`);
 
-      // Step 7: Verify — test echo inside sandbox
+      // Step 7: Verify sandbox exists
       console.log("\nVerifying sandbox...");
       const testRun = runCmd("openshell", [
-        "sandbox", "exec", SANDBOX_NAME, "--", "echo", "arc402-sandbox-ok"
+        "sandbox", "get", SANDBOX_NAME,
       ]);
-      if (!testRun.ok || !testRun.stdout.includes("arc402-sandbox-ok")) {
+      if (!testRun.ok) {
         console.warn(`  Warning: sandbox verification failed: ${testRun.stderr}`);
       } else {
-        console.log("  Sandbox echo test: ok");
+        console.log("  Sandbox lookup: ok");
       }
 
       // Step 8: Print confirmation
@@ -394,9 +402,9 @@ To allow additional endpoints for your harness or worker tools:
 
       // Daemon mode
       if (fs.existsSync(OPENSHELL_TOML)) {
-        line("Daemon mode:", `sandboxed (arc402 daemon start → openshell sandbox exec)`);
+        line("Daemon mode:", `OpenShell-owned (arc402 daemon start via configured sandbox)`);
       } else {
-        line("Daemon mode:", "unsandboxed (arc402 openshell init not run)");
+        line("Daemon mode:", "not configured for launch (run: arc402 openshell init)");
       }
 
       // Network policies
