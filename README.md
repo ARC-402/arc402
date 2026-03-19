@@ -183,6 +183,8 @@ Choose this if you want to start from the local runtime and config.
 5. Initialize OpenShell
 6. Start the ARC-402 runtime through the OpenShell-owned path
 
+`arc402 openshell init` is intended to feel install-grade: it reuses your existing ARC-402 CLI config for machine key / Telegram credentials when env vars are absent, creates or updates the OpenShell providers, syncs the runtime bundle into the sandbox, and leaves `arc402 daemon start` as the only startup command you need to remember.
+
 Both paths meet at the same launch architecture:
 **ARC-402 on Base + OpenClaw runtime + OpenShell containment.**
 

@@ -16,6 +16,8 @@
 - Added `docs/launch-readiness-prd.md` as the tracked execution plan for remaining launch work.
 - Local runtime validation on PC progressed: Docker installed and running; OpenShell installed (`openshell 0.0.10`); gateway bootstrapped; ARC-402 OpenShell policy/providers/sandbox configured and `arc402 openshell status` now reports OpenShell-owned daemon mode.
 - Ergonomics smoothing pass applied across launch-facing surfaces: README/getting-started now make the phone-vs-machine split explicit, OpenShell version quirks are framed as ARC-402 implementation detail, launch PRD now tracks setup-friction tasks, and SDKs expose operator-centric aliases (`ARC402OperatorClient`, `ARC402Operator`).
+- OpenShell one-click pass shipped the missing runtime-provisioning seam: `arc402 openshell init` now packages the local ARC-402 CLI runtime (`dist` + `node_modules` + package metadata), uploads it into the sandbox, records the remote runtime root, and `arc402 daemon start` launches from that provisioned in-sandbox bundle instead of assuming host paths exist inside OpenShell.
+- Tunnel/endpoint launch architecture has now been locked at the PRD level: support multiple tunnel modes later, but ship host-managed Cloudflare Tunnel outside the sandbox as the launch default; use `agentname.arc402.xyz` as the canonical public endpoint shape; and require explicit allowlist policy entries for sandboxed inter-agent HTTPS calls rather than wildcard trust across `.arc402.xyz`.
 
 ## True Current State
 
@@ -232,7 +234,7 @@ Active v2 contracts (use these):
 18. ✅ WalletFactory v4 deployed to mainnet — passkey P256 support live — 2026-03-17 (now frozen)
 18b. ✅ WalletFactory v5 deployed to mainnet (unoptimized, now frozen) — `0x3f4d4b19a69344B04fd9653E1bB12883e97300fE` — 2026-03-18
 18c. ✅ WalletFactory v5 redeployed with optimized bytecode (FOUNDRY_PROFILE=deploy) — `0xcB52B5d746eEc05e141039E92e3dBefeAe496051` — 2026-03-19
-19. → Start daemon via OpenShell-wrapped path (`arc402 openshell init` once, then `arc402 daemon start`)
+19. → Re-validate one-click OpenShell runtime path end to end (`arc402 openshell init` provisions runtime bundle, then `arc402 daemon start` launches that in-sandbox bundle)
 20. ~~Lego: `proposeRegistryUpdate(ARC402RegistryV2)` on `0xB7840152`~~ — OBSOLETE (personal wallet deprecated)
 21. → Passkey governance test (`/passkey-setup` + `/passkey-sign`)
 22. → ERC-4337 full mega audit (before tagging v1.0)
@@ -313,7 +315,7 @@ Active v2 contracts (use these):
 | 31 | Bundler network | ✅ 2026-03-16 |
 | 32 | Daemon | ✅ 2026-03-16 |
 | 33 | Passkey authentication | ✅ 2026-03-16 |
-| 34 | OpenShell integration | ✅ 2026-03-17 — blocked on OpenShell public docs |
+| 34 | OpenShell integration | ✅ 2026-03-19 — premium one-click pass landed; remaining blocker is real secret injection / remote state bridge validation inside sandbox |
 | 35 | Website (arc402.xyz) | ✅ 2026-03-17 — ready to build |
 | 12 | Privacy model | 🔲 Post-launch |
 | 13 | ZK extensions | 🔲 Post-launch (ceremony) |

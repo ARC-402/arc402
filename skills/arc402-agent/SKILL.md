@@ -30,10 +30,12 @@ Docker Desktop (or Docker daemon) must be running. The ARC-402 daemon itself run
 This skill handles setup automatically. When you run `openclaw install arc402-agent`:
 
 1. ARC-402 CLI is installed (`npm install -g @arc402/cli`)
-2. OpenShell is detected — if present, the `arc402-daemon` sandbox is created automatically
-3. If OpenShell is not present, it is installed from the official NVIDIA source
-4. The daemon sandbox is created with the default security policy (Base RPC, relay, bundler, Telegram API)
-5. OpenShell owns the daemon runtime for launch; ARC-402 CLI daemon commands manage / inspect that sandboxed runtime
+2. OpenShell is installed / available on the machine
+3. `arc402 openshell init` creates or reuses the `arc402-daemon` sandbox
+4. `arc402 openshell init` packages the local ARC-402 CLI runtime and uploads that bundle into the sandbox
+5. `arc402 openshell init` reuses existing ARC-402 CLI config for machine key / Telegram credentials when env vars are missing, then creates or updates the OpenShell providers for you
+6. The daemon sandbox is created with the default security policy (Base RPC, relay, bundler, Telegram API)
+7. OpenShell owns the daemon runtime for launch; ARC-402 CLI daemon commands manage / inspect that sandboxed runtime
 
 **One command gets the full stack:**
 ```bash
@@ -67,7 +69,10 @@ arc402 agent register \
 # 4. Start the tunnel (makes you reachable at your endpoint)
 cloudflared tunnel run --url http://localhost:4402 <your-tunnel> &
 
-# 5. Confirm the OpenShell-managed runtime is healthy
+# 5. Initialize and sync the OpenShell-managed runtime once
+arc402 openshell init
+
+# 6. Confirm the OpenShell-managed runtime is healthy
 # Launch source of truth: OpenShell owns daemon lifecycle.
 arc402 openshell status
 arc402 daemon status
@@ -580,6 +585,8 @@ Deactivating does **not** reset your trust score. Your history stays on-chain. W
 ## 13. OpenShell Integration — Execution Security
 
 When OpenShell is present, the entire ARC-402 daemon runs inside a sandboxed container (`arc402-daemon`). This is not just the worker process — it is the daemon itself. For launch, this OpenShell-managed runtime is the source of truth. `arc402 daemon ...` should be treated as a management / inspection surface around that runtime, not as an independent bootstrap model.
+
+The critical runtime detail: the sandbox does **not** magically contain ARC-402. `arc402 openshell init` now packages the local ARC-402 CLI build and uploads that runtime bundle into the sandbox so `arc402 daemon start` can launch the provisioned daemon path without extra manual copy steps.
 
 ```bash
 # Conceptually, OpenShell owns the runtime and ARC-402 CLI manages/inspects it.

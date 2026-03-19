@@ -31,6 +31,8 @@ This is not a vision doc. It is an execution tracker.
 - OpenShell is not installed on the current PC yet.
 - Docker is not installed on the current PC yet.
 - We still need a from-scratch OpenClaw/OpenShell setup validation path, especially for the MacBook install.
+- Tunnel / endpoint architecture is not yet specified tightly enough for a premium install story.
+- Inter-agent endpoint reachability and sandbox-to-sandbox communication policy are still underdefined in launch docs.
 
 ---
 
@@ -90,8 +92,9 @@ ARC-402 is launch-ready when all of the following are true:
 ### Runtime truth
 - [ ] OpenShell install/init/status flow is tested locally on PC
 - [ ] OpenShell install/init/status flow is tested from scratch on MacBook
-- [ ] daemon startup works through the OpenShell-owned path
-- [ ] daemon restart behavior preserves OpenShell wrapping
+- [ ] `arc402 openshell init` provisions the ARC-402 runtime bundle into the sandbox without manual copy steps
+- [ ] daemon startup works through the OpenShell-owned path using the provisioned in-sandbox bundle
+- [ ] daemon restart behavior preserves OpenShell wrapping and runtime provisioning
 - [ ] policy extension flow is documented and tested
 
 ### Operator truth
@@ -114,6 +117,78 @@ ARC-402 is launch-ready when all of the following are true:
 
 ---
 
+## 5A. Locked launch architecture decisions
+
+### D1 — Tunnel placement
+**Recommendation:** support both host-mode and sandbox-mode in the long run, but ship **host-managed tunnel as the launch default**.
+
+Why host default:
+- Cloudflare Tunnel is infrastructure, not agent work. It should survive daemon restarts, harness crashes, and sandbox reprovisioning.
+- Host-managed tunnel cleanly decouples public ingress from the OpenShell runtime. OpenShell remains the execution boundary; Cloudflare remains the ingress boundary.
+- Operators already think of domain/TLS/tunnel state as machine-level plumbing. Keeping it outside the sandbox avoids coupling certificate/auth/account state to the ephemeral runtime bundle.
+- A host tunnel can point at a stable local ingress target while the sandboxed daemon is upgraded, restarted, or replaced.
+
+Supported modes to design for:
+- **Launch default:** host-managed `cloudflared` on the operator machine
+- **Advanced / later:** in-sandbox tunnel for tightly self-contained deployments
+- **Not recommended for launch:** undocumented tunnel placement ambiguity
+
+### D2 — Public endpoint model
+**Recommendation:** every publicly reachable agent gets one canonical HTTPS endpoint of the form:
+
+`https://<agentname>.arc402.xyz`
+
+That endpoint is a stable routing identity, not a promise that the agent process itself is directly internet-exposed.
+
+Launch model:
+- `agentname.arc402.xyz` terminates at Cloudflare
+- Cloudflare Tunnel forwards to a local host ingress target on the operator machine
+- that host ingress target forwards only to the ARC-402/OpenClaw surface that should be reachable
+- the sandboxed daemon remains behind OpenShell; it is not itself the public boundary
+
+### D3 — Inter-agent communication model
+**Recommendation:** split traffic into two classes.
+
+1. **Public discovery / negotiation reachability**
+   - via the canonical public HTTPS endpoint (`agentname.arc402.xyz`)
+   - used when another agent needs to initiate contact from outside the local machine or network
+
+2. **Runtime outbound execution traffic**
+   - from the sandboxed daemon / harness to approved endpoints only
+   - governed by OpenShell network policy
+
+This means an agent may be publicly reachable through Cloudflare while still being unable to call arbitrary outbound hosts from inside the sandbox.
+
+### D4 — Sandbox-to-sandbox policy boundary
+**Recommendation:** treat other agents exactly like external services from the perspective of a sandbox.
+
+Rules:
+- no implicit trust because both agents are “ARC-402” agents
+- no wildcard `*.arc402.xyz` allow rule by default
+- allow only:
+  - protocol-critical hosts by default (Base RPC, relay, bundler, Telegram)
+  - explicitly added agent endpoints for counterparties the operator intends this node to talk to
+- if one agent needs to call another over HTTPS, that destination host must be added to OpenShell policy explicitly
+- inter-agent policy entries should be narrow, named, and removable
+
+This keeps policy legible and prevents the launch product from quietly becoming “any ARC-402 agent can talk to any other ARC-402 agent from inside the sandbox.”
+
+### D5 — Premium install principle
+**Recommendation:** the premium story is not “install three systems manually.” The premium story is:
+
+`openclaw install arc402-agent`
+
+…then ARC-402 owns the orchestration of:
+- OpenClaw runtime setup
+- OpenShell install / verification / init
+- ARC-402 CLI config reuse
+- provider creation
+- runtime bundle sync
+- endpoint policy scaffolding
+- tunnel scaffold / doctor / verification
+
+The operator should think in one product surface: ARC-402.
+
 ## 6. Ergonomics smoothing findings
 
 ### Friction patterns found in the current launch path
@@ -126,9 +201,35 @@ ARC-402 is launch-ready when all of the following are true:
 ### Smoothing tasks added for launch
 - [ ] Make all operator-facing docs describe OpenShell as an implementation detail absorbed behind ARC-402 commands wherever possible
 - [ ] Add one canonical install phrase for the OpenClaw skill path and use it consistently across README, getting-started, CLI docs, and skill docs
-- [ ] Add a simple "phone vs machine" table to README/getting-started
+- [x] Add a simple "phone vs machine" table to README/getting-started
 - [ ] Keep SDK operator aliases (`ARC402OperatorClient`, `ARC402Operator`) documented and stable through launch
-- [ ] Add a short troubleshooting note for OpenShell 0.0.10+ compatibility so users never need to care which provider/sandbox flags changed
+- [x] Add a short troubleshooting note for OpenShell 0.0.10+ compatibility so users never need to care which provider/sandbox flags changed
+- [x] Reuse existing ARC-402 CLI config during `arc402 openshell init` so operators do not have to manually export machine-key / Telegram env vars for the common path
+- [x] Make `arc402 openshell status` verify the remote runtime bundle presence, not just local config files
+
+## 6B. Premium one-click OpenShell
+
+### What still felt unpremium
+- Runtime provisioning existed, but credential provisioning still leaned on ambient env vars instead of the operator's already-configured ARC-402 setup.
+- OpenShell CLI 0.0.10 changed gateway/status expectations, and our install guidance still exposed those implementation details.
+- Status reporting could say "configured" even if the remote runtime bundle was missing.
+- Startup still risked feeling like "trust me, it synced" instead of giving the operator a proof-oriented readiness readout.
+- Docker failures surfaced as generic setup friction instead of actionable operator feedback.
+
+### Premium one-click tasks
+- [x] Teach `arc402 openshell init` to reuse CLI config secrets when env vars are absent
+- [x] Create-or-update OpenShell providers instead of only attempting first-time create
+- [x] Update install verification to the real OpenShell 0.0.10 command surface (`openshell status`)
+- [x] Improve Docker preflight messaging for "not installed" vs "not running" vs "permission denied"
+- [x] Make `arc402 openshell status` verify the provisioned remote daemon bundle
+- [x] Tighten daemon/setup copy so the operator hears "OpenShell-owned runtime" rather than "manual daemon plumbing"
+- [ ] Validate the same path from a clean MacBook install
+- [ ] Add a single `arc402 openshell doctor` command if additional launch polish is needed after the MacBook pass
+- [ ] Add `arc402 endpoint init` to scaffold canonical endpoint naming, local ingress target, and tunnel config for `agentname.arc402.xyz`
+- [ ] Add `arc402 endpoint status` to prove: DNS target, tunnel health, local target, daemon health, and registered AgentRegistry endpoint all match
+- [ ] Add `arc402 endpoint claim <agentname>` to combine subdomain claim + endpoint metadata wiring + local config lock
+- [ ] Add `arc402 endpoint allow <host>` / `revoke <host>` helpers for explicit inter-agent reachability policy entries
+- [ ] Add `arc402 endpoint doctor` to diagnose the exact broken layer: DNS, Cloudflare tunnel, local host ingress, sandboxed daemon, or AgentRegistry metadata mismatch
 
 ## 6A. Workstreams
 
@@ -153,12 +254,17 @@ ARC-402 is launch-ready when all of the following are true:
 ## WS2 — OpenShell runtime validation
 **Goal:** prove the actual runtime path on real machines.
 
+**Launch packaging decision:** ARC-402 owns runtime provisioning at init-time by packaging the local CLI/daemon bundle and syncing it into the OpenShell sandbox. Operators should never have to manually copy the ARC-402 runtime into the sandbox before `arc402 daemon start`.
+
+**Launch endpoint decision:** ARC-402 should also own endpoint scaffolding. The premium path should not require the operator to manually stitch together Cloudflare Tunnel, subdomain claim, local ingress target, AgentRegistry endpoint registration, and OpenShell policy thinking across five surfaces.
+
 ### Tasks
 - [ ] Install Docker on current PC
 - [ ] Install OpenShell on current PC
 - [ ] Run `arc402 openshell init`
+- [ ] Verify the local ARC-402 runtime bundle is packaged and copied into the sandbox automatically
 - [ ] Run `arc402 openshell status`
-- [ ] Inspect generated policy and provider setup
+- [ ] Inspect generated policy, provider, and runtime-bundle setup
 - [ ] Run `arc402 daemon start` through OpenShell-owned path
 - [ ] Record exact behavior, logs, errors, and friction points
 - [ ] Test policy add/list/remove flows
@@ -168,6 +274,9 @@ ARC-402 is launch-ready when all of the following are true:
   - bundler
   - Telegram
   - OpenAI / Anthropic / other harness APIs where relevant
+- [ ] Validate host-managed Cloudflare Tunnel as the launch default against the sandboxed daemon
+- [ ] Define the stable local ingress target the tunnel should point at (host reverse proxy vs direct local daemon port) and lock one default
+- [ ] Verify endpoint continuity across daemon restart / OpenShell re-init / runtime resync
 - [ ] Repeat from scratch on MacBook
 
 ### Questions this workstream must answer
@@ -193,6 +302,15 @@ ARC-402 is launch-ready when all of the following are true:
 - [ ] Verify passkey-sign links and governance approval copy are accurate
 - [ ] Verify agent registration guidance is aligned with real endpoint metadata needs
 - [ ] Verify notifier/alert language does not imply remote approval UX that does not exist
+- [ ] Specify the premium command sequence for endpoint bootstrap:
+  - `openclaw install arc402-agent`
+  - `arc402 wallet deploy`
+  - `arc402 endpoint init`
+  - `arc402 agent register` or integrated register flow
+  - `arc402 daemon start`
+- [ ] Decide whether `arc402 agent register` should accept a raw `--endpoint` at launch or prefer an `--endpoint-name` / `--claim-subdomain` premium path
+- [ ] Ensure CLI copy distinguishes public ingress policy from sandbox outbound policy
+- [ ] Ensure CLI copy never implies that registering an endpoint automatically grants outbound permission to arbitrary peer agents
 
 ### Deliverables
 - CLI copy cleanup
@@ -211,6 +329,12 @@ ARC-402 is launch-ready when all of the following are true:
 - [ ] Verify Python SDK types match active contract behavior
 - [ ] Verify OpenClaw skill docs reflect launch truth
 - [ ] Verify payment pattern documentation never invents unsupported primitives
+- [ ] Add launch docs for endpoint communication semantics:
+  - public endpoint = discovery / negotiation entrypoint
+  - relay / protocol endpoints = core protocol transport
+  - OpenShell policy = outbound execution allowlist
+- [ ] Document that `agentname.arc402.xyz` is canonical public identity, but not equivalent to sandbox trust
+- [ ] Add one explicit policy template for peer-agent HTTPS calls and one for model/API tool calls
 
 ### Deliverables
 - coverage matrix
@@ -234,6 +358,40 @@ ARC-402 is launch-ready when all of the following are true:
 - GitHub polish checklist
 
 ---
+
+## 6C. Policy templates required before premium launch
+
+These templates should ship as first-class generated artifacts, not buried examples.
+
+### Template 1 — Core launch policy
+Default OpenShell outbound policy for every ARC-402 node:
+- Base RPC
+- ARC-402 relay
+- bundler
+- Telegram
+- zero peer-agent wildcard access
+
+### Template 2 — Peer agent HTTPS allowlist
+For operators who want one agent to call another agent's HTTPS endpoint:
+- one named host per peer (`gigabrain.arc402.xyz`, `researcher.arc402.xyz`)
+- no `*.arc402.xyz`
+- hot-reloadable add/remove via CLI
+- docs must state that public discoverability does not imply outbound trust
+
+### Template 3 — Harness/API expansion pack
+Optional policy additions for harness/tooling usage:
+- OpenAI
+- Anthropic
+- web search / search APIs
+- custom business APIs
+
+### Template 4 — Endpoint ingress template
+Host-side scaffold for:
+- Cloudflare Tunnel config
+- local ingress target
+- health probe target
+- canonical hostname lock
+- AgentRegistry endpoint sync target
 
 ## 7. Immediate next actions
 
@@ -270,6 +428,10 @@ ARC-402 is launch-ready when all of the following are true:
 
 - OpenShell owns runtime startup for launch.
 - `arc402 daemon start` remains the command surface, but not the standalone architecture story.
+- Cloudflare Tunnel should be **supported in multiple modes**, but the **launch default is host-managed tunnel outside the sandbox**.
+- `agentname.arc402.xyz` is the canonical public endpoint shape for launch.
+- Public ingress and sandbox outbound policy are separate controls and must be documented as such.
+- Inter-agent HTTPS reachability must be explicit allowlist policy, never wildcard trust by default.
 - Device E2E has been completed once already and should be rerun from a clean MacBook setup.
 - Phase 2 stays out of launch messaging:
   - Privy / email onboarding

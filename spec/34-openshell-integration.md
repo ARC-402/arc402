@@ -17,6 +17,8 @@ These are peer systems. They solve adjacent problems at different layers. When O
 
 Neither can answer the other's question. Both are required.
 
+> **Launch decision (2026-03-19):** OpenShell owns daemon startup for launch. The daemon is not documented as a standalone launch-step process. The operator flow is: configure OpenShell with `arc402 openshell init`, then start the ARC-402 runtime through that OpenShell-owned path via `arc402 daemon start`.
+
 ---
 
 ## Prerequisites
@@ -38,18 +40,25 @@ Host OS
               └── worker process (inherits sandbox)
 ```
 
-The entire ARC-402 daemon runs inside OpenShell. When `arc402 daemon start` is called, the CLI internally wraps the daemon in the sandbox:
+The entire ARC-402 daemon runs inside OpenShell. The missing launch seam was runtime provisioning: the sandbox does not automatically contain the ARC-402 CLI/daemon bundle.
+
+**Chosen launch model:** `arc402 openshell init` packages the local ARC-402 CLI runtime (`dist` + `node_modules` + package metadata), uploads that bundle into the `arc402-daemon` sandbox, records the remote runtime root in `~/.arc402/openshell.toml`, and `arc402 daemon start` launches the daemon from that provisioned in-sandbox path.
 
 ```bash
-# What arc402 daemon start does internally (with OpenShell configured):
-openshell sandbox exec arc402-daemon -- arc402 daemon --foreground
+# What arc402 openshell init now does conceptually:
+# 1. build local runtime tarball
+# 2. upload tarball into the sandbox
+# 3. extract to the recorded remote runtime root
+
+# What arc402 daemon start now does internally (with OpenShell configured):
+ssh <openshell-proxy-host> 'node /home/sandbox/.arc402/runtime/arc402-cli/dist/daemon/index.js'
 ```
 
 The daemon is the sandboxed process. The worker process it spawns inherits the same sandbox — same network policy, same filesystem constraints, same credential injections. There is no separate sandbox for the worker.
 
 ### What This Changes
 
-The seam is no longer `exec_command` in `daemon.toml` — it is `arc402 daemon start`. The daemon has no OpenShell awareness. The CLI wraps it transparently. If OpenShell is not configured, the CLI runs the daemon directly. Same call from the operator's perspective either way.
+The seam is no longer `exec_command` in `daemon.toml` — it is `arc402 daemon start`. The daemon has no OpenShell awareness. The CLI wraps it transparently. For launch, this seam is treated as OpenShell-owned runtime startup, not as a standalone daemon bootstrap path.
 
 ### What the Sandbox Needs
 
@@ -300,7 +309,7 @@ http_auth_token = "env:WORKER_AUTH_TOKEN"
 
 The `harness` field tells the daemon which agent runtime to invoke for work. See §5 (Harness Registry) for all supported values. The operator never writes `exec_command` manually.
 
-### Without OpenShell (fallback)
+### Without OpenShell (non-launch / development only)
 
 ```toml
 [work]
@@ -390,13 +399,17 @@ Steps:
 1. Check OpenShell is installed — if not, suggest `arc402 openshell install`
 2. Check Docker is running
 3. Generate `~/.arc402/openshell-policy.yaml` with ARC-402 default policy (Base RPC, relay, bundler, Telegram API, `~/.arc402` filesystem access)
-4. Create credential providers from CLI config:
+4. Create or update credential providers from ARC-402 operator state:
+   - prefer env vars when explicitly set
+   - otherwise reuse existing ARC-402 CLI config values
    - `arc402-machine-key` → `ARC402_MACHINE_KEY`
    - `arc402-notifications` → `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-5. Create sandbox: `openshell sandbox create arc402-daemon --policy ~/.arc402/openshell-policy.yaml --provider arc402-machine-key --provider arc402-notifications`
-6. Record sandbox config in `~/.arc402/openshell.toml` (read by `arc402 daemon start` to decide whether to wrap)
-7. Verify wiring: run a test echo inside the sandbox
-8. Print confirmation:
+5. Create or reuse sandbox: `openshell sandbox create arc402-daemon --policy ~/.arc402/openshell-policy.yaml --provider arc402-machine-key --provider arc402-notifications`
+6. Build a local ARC-402 runtime tarball (`package.json`, `package-lock.json`, `dist/`, `node_modules/`)
+7. Upload and extract that runtime bundle into `/sandbox/.arc402/runtime/arc402-cli`
+8. Record sandbox + runtime config in `~/.arc402/openshell.toml` (read by `arc402 daemon start` to decide which in-sandbox daemon path to launch)
+9. Verify wiring: confirm `/sandbox/.arc402/runtime/arc402-cli/dist/daemon/index.js` exists inside the sandbox
+10. Print confirmation:
 
 ```
 OpenShell integration configured.
@@ -423,7 +436,7 @@ When `~/.arc402/openshell.toml` exists and `sandbox = "arc402-daemon"`:
 openshell sandbox exec arc402-daemon -- arc402 daemon --foreground
 ```
 
-When OpenShell is not configured: runs `arc402 daemon --foreground` directly.
+When OpenShell is not configured: runs `arc402 daemon --foreground` directly. This direct path is retained for development and recovery, but it is not the launch architecture.
 
 The operator always runs the same command. The CLI handles the wrapping transparently.
 
@@ -491,14 +504,14 @@ Step 2: Check NemoClaw
              print: "NemoClaw detected. Using bundled OpenShell."
   → NOT FOUND → Step 3
 
-Step 3: Unsandboxed fallback
-  → skip sandbox creation
-  → print: "OpenShell not found. Daemon will run unsandboxed."
-  → print: "For sandboxed execution: arc402 openshell install && arc402 openshell init"
-  → continue — ARC-402 works without OpenShell
+Step 3: OpenShell missing
+  → skip launch runtime setup
+  → print: "OpenShell not found. Launch runtime is not configured."
+  → print: "Install/configure it first: arc402 openshell install && arc402 openshell init"
+  → do not present unsandboxed daemon startup as the launch path
 ```
 
-**Priority:** Standalone OpenShell first. NemoClaw second. Unsandboxed third. NemoClaw is never installed automatically — operators choose it separately if they want the full NVIDIA stack.
+**Priority:** Standalone OpenShell first. NemoClaw second. NemoClaw is never installed automatically — operators choose it separately if they want the full NVIDIA stack.
 
 ---
 
@@ -636,7 +649,7 @@ Same principle. Same security property. The two systems share a philosophy — c
 
 The ARC-402 contracts, SDK, and protocol are unchanged by this integration. The CLI's `arc402 daemon start` gains transparent sandbox wrapping, but the operator interface is identical. `daemon.toml` gains the `harness` field; `exec_command` becomes managed (auto-generated, not hand-written).
 
-The integration is additive. ARC-402 works without OpenShell. OpenShell makes execution safer at the daemon level. The skill handles detection and wiring. The daemon calls whatever command the harness generates — and neither the daemon nor the harness knows it is inside a sandbox.
+The integration is launch-critical. For launch, ARC-402 runtime startup is owned by OpenShell. The skill handles detection and wiring. The daemon calls whatever command the harness generates — and neither the daemon nor the harness knows it is inside a sandbox.
 
 ---
 
@@ -645,3 +658,4 @@ The integration is additive. ARC-402 works without OpenShell. OpenShell makes ex
 *Schema confirmed from: github.com/NVIDIA/OpenShell*
 *Docs: docs.nvidia.com/openshell/latest*
 *Status: Ready to build — no open blockers*
+ers*

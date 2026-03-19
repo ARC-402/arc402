@@ -101,6 +101,12 @@ arc402 openshell init
 arc402 openshell status
 ```
 
+The premium path here is deliberate:
+- `arc402 openshell init` auto-reuses machine key / Telegram details from your ARC-402 CLI config when possible
+- it creates or updates the OpenShell credential providers for you
+- it syncs the current ARC-402 CLI runtime into the sandbox automatically
+- `arc402 openshell status` verifies both the policy wiring and that the remote daemon bundle is actually present
+
 OpenShell contains the ARC-402 runtime path and sandboxes the worker behavior plus inherited subprocesses. Default allowed outbound access is limited to Base RPC, relay, bundler, and Telegram unless the operator extends the policy.
 
 OpenShell version quirks are intentionally meant to stay behind ARC-402 commands. If OpenShell 0.0.10+ changes internal provider or sandbox CLI details again, the operator path should still remain the same: `arc402 openshell init` once, then `arc402 daemon start`.
