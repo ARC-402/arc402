@@ -302,20 +302,21 @@
 
 .quickLabel {
   font-family: var(--mono);
-  font-size: 0.72rem;
-  color: var(--blue);
+  font-size: 0.75rem;
+  color: #ffffff;
   letter-spacing: 0.08em;
   padding: 12px 16px 4px;
-  background: #2a2a2a;
+  background: var(--blue);
 }
 
 .quickSub {
   font-family: var(--sans);
   font-size: 0.82rem;
-  color: #d0d0d0;
+  color: #e8e8f0;
+  font-style: italic;
   padding: 4px 16px 12px;
-  background: #2a2a2a;
-  border-bottom: 1px solid #3a3a3a;
+  background: var(--blue);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
   line-height: 1.4;
 }
 
