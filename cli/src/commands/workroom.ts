@@ -202,6 +202,8 @@ export function registerWorkroomCommands(program: Command): void {
         "-v", `${cliRoot}:/workroom/runtime:ro`,
         // Mount jobs directory
         "-v", `${path.join(ARC402_DIR, "jobs")}:/workroom/jobs:rw`,
+        // Mount worker directory (identity, memory, skills, knowledge)
+        "-v", `${path.join(ARC402_DIR, "worker")}:/workroom/worker:rw`,
         // Mount Arena data directory (feed index, profile cache, state, queue)
         "-v", `${ARENA_DATA_DIR}:/workroom/arena:rw`,
         // Inject secrets as env vars
@@ -639,6 +641,57 @@ No learnings yet. Complete your first hired task to start accumulating expertise
         }
       }
       console.log(`✓ ${files.length} items copied to worker skills`);
+    });
+
+  worker
+    .command("set-knowledge <dir>")
+    .description("Mount a knowledge directory into the workroom. Contains reference materials, training data, domain docs — anything the worker needs to deliver its services.")
+    .action(async (dir) => {
+      if (!fs.existsSync(dir)) {
+        console.error(`Directory not found: ${dir}`);
+        process.exit(1);
+      }
+      const dest = path.join(ARC402_DIR, "worker", "knowledge");
+      fs.mkdirSync(dest, { recursive: true });
+      const files = fs.readdirSync(dir);
+      let count = 0;
+      for (const f of files) {
+        const src = path.join(dir, f);
+        const dst = path.join(dest, f);
+        if (fs.statSync(src).isFile()) {
+          fs.copyFileSync(src, dst);
+          count++;
+        } else if (fs.statSync(src).isDirectory()) {
+          fs.cpSync(src, dst, { recursive: true });
+          count++;
+        }
+      }
+      console.log(`✓ ${count} items copied to worker knowledge`);
+      console.log(`  Path: ${dest}`);
+      console.log(`  The worker can reference these files during hired tasks.`);
+      console.log(`  To update: run this command again with the updated directory.`);
+    });
+
+  worker
+    .command("knowledge")
+    .description("List the worker's knowledge directory contents.")
+    .action(async () => {
+      const knowledgeDir = path.join(ARC402_DIR, "worker", "knowledge");
+      if (!fs.existsSync(knowledgeDir)) {
+        console.log("No knowledge directory. Add one with: arc402 workroom worker set-knowledge <dir>");
+        return;
+      }
+      const files = fs.readdirSync(knowledgeDir, { recursive: true, withFileTypes: false }) as string[];
+      if (files.length === 0) {
+        console.log("Knowledge directory is empty.");
+        return;
+      }
+      console.log(`Worker knowledge (${files.length} items):\n`);
+      for (const f of fs.readdirSync(knowledgeDir)) {
+        const stat = fs.statSync(path.join(knowledgeDir, f));
+        const size = stat.isDirectory() ? "dir" : `${(stat.size / 1024).toFixed(1)} KB`;
+        console.log(`  ${f.padEnd(40)} ${size}`);
+      }
     });
 
   worker

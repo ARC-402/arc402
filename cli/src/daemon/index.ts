@@ -27,6 +27,7 @@ import { verifyWallet, getWalletBalance } from "./wallet-monitor";
 import { Notifier } from "./notify";
 import { HireListener } from "./hire-listener";
 import { UserOpsManager, buildAcceptCalldata } from "./userops";
+import { generateReceipt, extractLearnings, createJobDirectory, cleanJobDirectory } from "./job-lifecycle";
 
 // ─── State DB ─────────────────────────────────────────────────────────────────
 
@@ -301,6 +302,54 @@ function handleIpcCommand(
       ctx.db.updateHireRequestStatus(cmd.id, "rejected", reason);
       log({ event: "hire_rejected", id: cmd.id, reason });
       return { ok: true, data: { rejected: true, id: cmd.id, reason } };
+    }
+
+    case "complete": {
+      // Called after a job is delivered and accepted. Triggers post-job lifecycle:
+      // receipt generation, learning extraction, worker memory update.
+      if (!cmd.id) return { ok: false, error: "id required" };
+      const hire = ctx.db.getHireRequest(cmd.id);
+      if (!hire) return { ok: false, error: "hire request not found" };
+
+      const now = new Date().toISOString();
+      const startedAt = new Date(hire.created_at).toISOString();
+
+      // Generate execution receipt
+      const receipt = generateReceipt({
+        agreementId: hire.agreement_id ?? cmd.id,
+        deliverableHash: hire.spec_hash ?? "0x0",
+        walletAddress: ctx.walletAddress,
+        startedAt,
+        completedAt: now,
+      });
+      log({ event: "receipt_generated", id: cmd.id, receipt_hash: receipt.receipt_hash });
+
+      // Extract learnings
+      extractLearnings({
+        agreementId: hire.agreement_id ?? cmd.id,
+        taskDescription: hire.capability ?? "unknown",
+        deliverableHash: hire.spec_hash ?? "0x0",
+        priceEth: hire.price_eth ?? "0",
+        capability: hire.capability ?? "general",
+        wallClockSeconds: receipt.metrics.wall_clock_seconds,
+        success: true,
+      });
+      log({ event: "learnings_extracted", id: cmd.id });
+
+      // Update status to complete
+      ctx.db.updateHireRequestStatus(cmd.id, "complete");
+
+      // Clean job directory (keep receipt + memory)
+      cleanJobDirectory(hire.agreement_id ?? cmd.id);
+
+      return {
+        ok: true,
+        data: {
+          completed: true,
+          id: cmd.id,
+          receipt_hash: receipt.receipt_hash,
+        },
+      };
     }
 
     default:
