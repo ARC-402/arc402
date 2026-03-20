@@ -91,43 +91,33 @@ arc402 workroom stop    → stops cleanly
 
 The default workroom handles all agreements unless overridden.
 
-### 4.2 Per-agreement workroom (on-demand)
+### 4.2 Per-agreement workspaces (within the persistent workroom)
 
-For agreements that require isolation:
+The workroom is a single persistent container. Each agreement gets its own **workspace directory** inside it — not a separate container.
 
 ```
-Agreement arrives → daemon evaluates scope → spins up job-specific workroom
-  → policy = base policy ∩ agreement requirements
-  → filesystem = fresh /workroom/job/<id>/
-  → metering starts
-  → work executes
-  → deliverable hash produced
-  → receipt signed
-  → workroom destroyed after settlement
+/workroom/jobs/agreement-001/    ← Job A's working files
+/workroom/jobs/agreement-002/    ← Job B's working files (can run in parallel)
 ```
 
-Each agreement gets a clean environment. No state leaks between jobs.
+The daemon manages concurrency internally via `max_concurrent_agreements`. The worker has access to all its knowledge, skills, and accumulated learnings across every job — the environment is persistent, only the workspace is scoped.
 
-### 4.3 Hirer-specified workroom (advanced)
+After settlement, the job workspace is cleaned. The worker's memory, receipts, and learnings persist.
 
-The hirer includes a workroom spec in the agreement:
+Why not separate containers per job:
+- Zero cold start latency (workroom is always on)
+- Worker retains accumulated expertise across jobs
+- Knowledge directory, skills, and learnings are always available
+- No Docker image duplication or orchestration complexity
+- Parallel jobs share the same governed network policy
 
-```json
-{
-  "workroom_spec": {
-    "network_allow": ["api.westlaw.com", "api.lexisnexis.com"],
-    "network_deny_all_else": true,
-    "max_cpu_seconds": 3600,
-    "max_memory_mb": 2048,
-    "max_network_bytes": 104857600
-  }
-}
-```
+### 4.3 Hirer-specified constraints (future)
 
-The daemon validates this against its own policy bounds:
-- If the hirer's spec is stricter than the agent's base → accept (tighter is always safe)
-- If the hirer's spec is looser → reject or negotiate
-- If incompatible → reject with reason
+In future protocol versions, a hirer may include policy constraints in the agreement. These narrow the workroom's existing policy for that specific job — they cannot widen it.
+
+For example: a hirer could specify that their job should only allow outbound access to `api.westlaw.com`. If the workroom's policy already includes that host, the constraint is applied. If the hirer requests a host the workroom doesn't allow, the job is rejected.
+
+This is a per-job policy overlay on the persistent workroom, not a separate container.
 
 ---
 
@@ -159,7 +149,7 @@ Background loop resolves all policy hostnames and atomically updates iptables.
 
 ### Agreement-scoped additions
 
-When a per-agreement workroom is created, the agreement's network requirements are merged with the base policy:
+When a job has hirer-specified constraints, the constraints narrow the base policy:
 ```bash
 # Base policy allows: mainnet.base.org, relay.arc402.xyz, public.pimlico.io
 # Agreement adds: api.westlaw.com (for legal research job)
@@ -456,7 +446,7 @@ Target image size: < 250MB. No GPU dependencies. No NVIDIA stack.
 | **Week 1** | Build workroom container + iptables enforcement |
 | **Week 2** | `arc402 workroom init/start` replaces `arc402 openshell init` |
 | **Week 3** | Execution receipts + policy hash in AgentRegistry |
-| **Week 4** | Per-agreement workrooms + metering |
+| **Week 4** | Per-agreement workspaces + metering |
 | **Month 2** | Templates + federation + compliance proofs |
 
 The `openshell-policy.yaml` schema remains compatible — operators don't rewrite their config.
