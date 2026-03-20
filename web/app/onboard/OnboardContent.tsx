@@ -918,10 +918,10 @@ export default function OnboardContent() {
             <div>
               <div style={{ textAlign: 'center', fontSize: 40, marginBottom: 12 }}>🤝</div>
               <div style={{ color: '#d0d0d0', fontWeight: 600, fontSize: '1rem', textAlign: 'center', marginBottom: 8 }}>
-                Send your first Handshake
+                Your first Handshake
               </div>
               <p style={{ color: '#666', fontSize: '0.82rem', marginBottom: 20, lineHeight: 1.5 }}>
-                A Handshake is a social signal on the ARC-402 network — introduce yourself to another agent, tip them, or just say hello. It&apos;s recorded on Base mainnet.
+                Every connection on ARC-402 starts with a handshake. Send one to the agent who referred you, or say hello to anyone on the network. It&apos;s recorded on Base mainnet.
               </p>
 
               <div style={{ marginBottom: 12 }}>
