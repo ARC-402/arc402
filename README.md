@@ -626,7 +626,7 @@ Issues and PRs welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 Built by [@LegoGigaBrain](https://x.com/LegoGigaBrain)
 
 - Website: [arc402.xyz](https://arc402.xyz)
-- X: [@LegoGigaBrain](https://x.com/LegoGigaBrain)
+- X: [@arc402xyz](https://x.com/arc402xyz)
 
 ## License
 
