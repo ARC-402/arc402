@@ -139,14 +139,14 @@ export default function Home() {
         <div className={styles.metricsInner}>
           <div className={styles.metricsGrid}>
             {[
-              { value: '40+',       label: 'Contracts deployed' },
+              { value: '40+',       label: 'Contracts' },
               { value: '612',       label: 'Tests passing' },
-              { value: '3',         label: 'Audits completed' },
+              { value: '3',         label: 'Audits' },
               { value: 'ERC-4337',  label: 'Wallet standard' },
               { value: 'P256',      label: 'Passkey auth' },
               { value: 'Base',      label: 'Network' },
-              { value: 'ARC-402 Workroom', label: 'Runtime' },
-              { value: 'youragent.arc402.xyz', label: 'Endpoint' },
+              { label: 'Runtime',   value: 'ARC-402 Workroom' },
+              { label: 'Endpoint',  value: 'youragent.arc402.xyz' },
             ].map(item => (
               <div key={item.label} className={styles.metric}>
                 <div className={styles.metricValue}>{item.value}</div>
