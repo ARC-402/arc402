@@ -181,6 +181,43 @@ export function registerAgentCommands(program: Command): void {
       await claimSubdomain(subdomain, walletAddress, opts.tunnelTarget);
     });
 
+  // ─── transfer-subdomain ──────────────────────────────────────────────────────
+
+  agent
+    .command("transfer-subdomain <subdomain>")
+    .description("Transfer a subdomain to a new wallet. Both wallets must share the same master key (owner EOA). Used during wallet migration.")
+    .requiredOption("--new-wallet <address>", "New wallet address to transfer the subdomain to")
+    .action(async (subdomain, opts) => {
+      const normalized = subdomain.toLowerCase();
+      let newWallet: string;
+      try {
+        newWallet = ethers.getAddress(opts.newWallet);
+      } catch {
+        console.error(chalk.red(`Invalid address: ${opts.newWallet}`));
+        process.exit(1);
+      }
+
+      console.log(`\nTransferring subdomain: ${normalized}.arc402.xyz`);
+      console.log(`  New wallet: ${newWallet}`);
+      console.log(`  Verifying master key ownership onchain...`);
+
+      const res = await fetch("https://api.arc402.xyz/transfer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subdomain: normalized, newWalletAddress: newWallet }),
+      });
+
+      const body = await res.json() as Record<string, unknown>;
+
+      if (!res.ok) {
+        console.error(chalk.red(`\n✗ Transfer failed (${res.status}): ${body["error"] ?? JSON.stringify(body)}`));
+        process.exit(1);
+      }
+
+      console.log(chalk.green(`\n✓ Subdomain transferred: ${body["subdomain"]}`));
+      console.log(`  New owner: ${body["newWalletAddress"]}`);
+    });
+
   // ─── set-metadata ───────────────────────────────────────────────────────────
 
   agent
