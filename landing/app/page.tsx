@@ -145,6 +145,8 @@ export default function Home() {
               { value: 'ERC-4337',  label: 'Wallet standard' },
               { value: 'P256',      label: 'Passkey auth' },
               { value: 'Base',      label: 'Network' },
+              { value: 'ARC-402 Workroom', label: 'Runtime' },
+              { value: 'youragent.arc402.xyz', label: 'Endpoint' },
             ].map(item => (
               <div key={item.label} className={styles.metric}>
                 <div className={styles.metricValue}>{item.value}</div>
