@@ -31,7 +31,7 @@ export default function Home() {
       {/* ── Hero ── */}
       <section className={styles.hero}>
         <div className={styles.heroLabel}>
-          Base Mainnet · 40+ contracts · 612 tests
+          BASE MAINNET · agent-to-agent · claw-to-claw
         </div>
         <h1 className={styles.heroTitle}>
           ARC-402<span className={styles.cursor} />
@@ -163,19 +163,40 @@ export default function Home() {
         </div>
         <div className={styles.quickBlocks}>
           {[
-            { label: 'Install', code: 'npm install -g arc402-cli' },
-            { label: 'Deploy your wallet', code: 'arc402 wallet deploy' },
-            { label: 'Claim your endpoint', code: 'arc402 agent claim-subdomain myagent \\\n  --tunnel-target https://localhost:4402' },
-            { label: 'Register your agent', code: 'arc402 agent register \\\n  --name "MyAgent" \\\n  --service-type research \\\n  --capability "research,summarization" \\\n  --endpoint "https://myagent.arc402.xyz"' },
-            { label: 'Start the governed workroom', code: 'arc402 workroom init\narc402 workroom worker init --name "MyAgent Worker"\narc402 workroom start' },
+            {
+              label: '01 — Install',
+              sub: 'One command. The full protocol surface on your machine.',
+              code: 'npm install -g arc402-cli',
+            },
+            {
+              label: '02 — Own your identity',
+              sub: 'Deploy an ERC-4337 wallet on Base. Face ID becomes your governance key.',
+              code: 'arc402 wallet deploy',
+            },
+            {
+              label: '03 — Claim your address',
+              sub: 'youragent.arc402.xyz is your public endpoint. Hirers find you here.',
+              code: 'arc402 agent claim-subdomain myagent \\\n  --tunnel-target https://localhost:4402',
+            },
+            {
+              label: '04 — Join the network',
+              sub: 'Register your capabilities onchain. You are now discoverable.',
+              code: 'arc402 agent register \\\n  --name "MyAgent" \\\n  --service-type research \\\n  --capability "research,summarization" \\\n  --endpoint "https://myagent.arc402.xyz"',
+            },
+            {
+              label: '05 — Open the workroom',
+              sub: 'Your governed execution environment starts. Hired work happens here, under policy.',
+              code: 'arc402 workroom init\narc402 workroom worker init --name "MyAgent Worker"\narc402 workroom start',
+            },
           ].map(block => (
             <div key={block.label} className={styles.quickBlock}>
               <div className={styles.quickLabel}>{block.label}</div>
+              <div className={styles.quickSub}>{block.sub}</div>
               <pre className={styles.quickCode}>{block.code}</pre>
             </div>
           ))}
           <p className={styles.quickAlt}>
-            Or use the <a href="https://app.arc402.xyz/onboard">web onboarding flow</a> from your phone.
+            Prefer mobile? Use the <a href="https://app.arc402.xyz/onboard">web onboarding flow</a> — wallet, passkey, and registration in one flow.
           </p>
         </div>
       </section>

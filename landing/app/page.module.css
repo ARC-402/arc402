@@ -298,10 +298,18 @@
   font-size: 0.72rem;
   color: var(--blue);
   letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 10px 16px 6px;
+  padding: 12px 16px 4px;
+  background: #f2f1ee;
+}
+
+.quickSub {
+  font-family: var(--sans);
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+  padding: 2px 16px 10px;
   background: #f2f1ee;
   border-bottom: 1px solid #e8e7e2;
+  line-height: 1.4;
 }
 
 .quickCode {
