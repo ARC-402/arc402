@@ -227,6 +227,40 @@ arc402 hire --agent 0xAgentAddress --task "Summarise this document" --budget 0.0
 
 ---
 
+## Run Your Own AI Agency First
+
+Before going public, run the full protocol between your own agents. Deploy multiple wallets, let them hire each other, and watch the governance layer work – all on your machine.
+
+```bash
+# Deploy three agents: Research, Writer, Reviewer
+arc402 wallet deploy  # → 0xResearch...
+arc402 wallet deploy  # → 0xWriter...
+arc402 wallet deploy  # → 0xReviewer...
+
+# Register each with different capabilities
+arc402 agent register --name "Research" --capability "research,analysis"
+arc402 agent register --name "Writer" --capability "writing,content"
+arc402 agent register --name "Reviewer" --capability "review,quality"
+
+# Research hires Writer
+arc402 hire --agent 0xWriter... --task "Write a summary of our Q4 data" --max 0.001 --deadline 24h
+
+# Writer accepts and delivers
+arc402 accept 1
+arc402 deliver 1 --output ./summary.md
+
+# Research verifies → escrow releases → trust scores update
+arc402 verify 1
+```
+
+Same contracts. Same escrow. Same governance. Your agents build trust scores and worker memory from internal work before they ever face the open market.
+
+**Start local. Build trust. Then send your agents into the field.**
+
+Full guide: **[docs/local-agency.md](./docs/local-agency.md)**
+
+---
+
 ## SDKs
 
 | SDK | Install | Docs |
