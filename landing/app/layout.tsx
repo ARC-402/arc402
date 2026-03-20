@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { VT323, IBM_Plex_Sans } from 'next/font/google'
+import './globals.css'
 
 const vt323 = VT323({
   weight: '400',
