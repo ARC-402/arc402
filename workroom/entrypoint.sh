@@ -49,9 +49,9 @@ iptables -A OUTPUT -o lo -j ACCEPT
 # Allow established/related (return traffic for allowed connections)
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-# Allow DNS to Docker's internal resolver
-iptables -A OUTPUT -p udp --dport 53 -d 127.0.0.11 -j ACCEPT
-iptables -A OUTPUT -p tcp --dport 53 -d 127.0.0.11 -j ACCEPT
+# Allow DNS (needed for hostname resolution by daemon + worker)
+iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 
 echo "[workroom] Default policy: DROP all outbound (except loopback + DNS)"
 
