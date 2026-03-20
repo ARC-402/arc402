@@ -81,7 +81,7 @@ const WALLETS = [
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Step = 'deploy' | 'passkey' | 'policy' | 'agent' | 'done'
+type Step = 'deploy' | 'passkey' | 'policy' | 'agent' | 'handshake' | 'done'
 
 interface PasskeyResult { credId: string; x: string; y: string }
 
@@ -507,7 +507,7 @@ export default function OnboardContent() {
       await sendWCTx(wc, arc402Wallet, execData)
       setAgentDone(true)
       await disconnectWC(wc)
-      setStep('done')
+      setStep('handshake')
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg.includes('rejected') || msg.includes('cancel') ? 'Cancelled. Tap to try again.' : msg)
@@ -518,13 +518,14 @@ export default function OnboardContent() {
   // ── Render helpers ─────────────────────────────────────────────────────────
 
   const STEP_DEFS = [
-    { id: 'deploy',  label: 'Deploy',  icon: '🏗️' },
-    { id: 'passkey', label: 'Face ID', icon: '🔑' },
-    { id: 'policy',  label: 'Policy',  icon: '📋' },
-    { id: 'agent',   label: 'Agent',   icon: '🤖' },
+    { id: 'deploy',    label: 'Deploy',    icon: '🏗️' },
+    { id: 'passkey',   label: 'Face ID',   icon: '🔑' },
+    { id: 'policy',    label: 'Policy',    icon: '📋' },
+    { id: 'agent',     label: 'Agent',     icon: '🤖' },
+    { id: 'handshake', label: 'Shake',     icon: '🤝' },
   ] as const
 
-  const stepOrder: Step[] = ['deploy', 'passkey', 'policy', 'agent', 'done']
+  const stepOrder: Step[] = ['deploy', 'passkey', 'policy', 'agent', 'handshake', 'done']
   const currentIdx = stepOrder.indexOf(step)
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -902,6 +903,109 @@ export default function OnboardContent() {
                 style={{ width: '100%', padding: '13px', background: (loading || !agentName || !agentEndpoint) ? '#1a1a1a' : '#1a1a2e', border: `1px solid ${(loading || !agentName || !agentEndpoint) ? '#1a1a1a' : '#2a2a4a'}`, borderRadius: 12, color: (loading || !agentName || !agentEndpoint) ? '#333' : '#818cf8', fontSize: '0.9rem', fontWeight: 500, cursor: (loading || !agentName || !agentEndpoint) ? 'not-allowed' : 'pointer', marginBottom: 10 }}
               >
                 {loading ? '⏳ ' + (statusMsg || 'Working...') : '🤖 Register Agent →'}
+              </button>
+              <button
+                onClick={() => setStep('done')}
+                style={{ width: '100%', padding: '10px', background: 'transparent', border: '1px solid #1e1e1e', borderRadius: 10, color: '#444', fontSize: '0.8rem', cursor: 'pointer' }}
+              >
+                Skip →
+              </button>
+            </div>
+          )}
+
+          {/* ── STEP 5: HANDSHAKE ── */}
+          {step === 'handshake' && !wcUri && !waiting && (
+            <div>
+              <div style={{ textAlign: 'center', fontSize: 40, marginBottom: 12 }}>🤝</div>
+              <div style={{ color: '#d0d0d0', fontWeight: 600, fontSize: '1rem', textAlign: 'center', marginBottom: 8 }}>
+                Send your first Handshake
+              </div>
+              <p style={{ color: '#666', fontSize: '0.82rem', marginBottom: 20, lineHeight: 1.5 }}>
+                A Handshake is a social signal on the ARC-402 network — introduce yourself to another agent, tip them, or just say hello. It&apos;s recorded on Base mainnet.
+              </p>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: '0.72rem', color: '#555', display: 'block', marginBottom: 5 }}>Recipient address</label>
+                <input
+                  type="text"
+                  id="hs-recipient"
+                  placeholder="0x... (any ARC-402 agent wallet)"
+                  style={{ width: '100%', padding: '10px 12px', background: '#0d0d0d', border: '1px solid #1e1e1e', borderRadius: 10, color: '#d0d0d0', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: '0.72rem', color: '#555', display: 'block', marginBottom: 5 }}>Type</label>
+                <select
+                  id="hs-type"
+                  defaultValue="7"
+                  style={{ width: '100%', padding: '10px 12px', background: '#0d0d0d', border: '1px solid #1e1e1e', borderRadius: 10, color: '#d0d0d0', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                >
+                  <option value="7">👋 Hello</option>
+                  <option value="0">🤝 Respect</option>
+                  <option value="1">🔍 Curiosity</option>
+                  <option value="2">⭐ Endorsement</option>
+                  <option value="3">🙏 Thanks</option>
+                  <option value="4">🤝 Collaboration</option>
+                  <option value="5">⚡ Challenge</option>
+                  <option value="6">📣 Referral</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: '0.72rem', color: '#555', display: 'block', marginBottom: 5 }}>Note (optional)</label>
+                <input
+                  type="text"
+                  id="hs-note"
+                  placeholder="First handshake on ARC-402!"
+                  maxLength={140}
+                  style={{ width: '100%', padding: '10px 12px', background: '#0d0d0d', border: '1px solid #1e1e1e', borderRadius: 10, color: '#d0d0d0', fontSize: '0.82rem', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              <button
+                onClick={async () => {
+                  const recipient = (document.getElementById('hs-recipient') as HTMLInputElement)?.value?.trim()
+                  const hsType = parseInt((document.getElementById('hs-type') as HTMLSelectElement)?.value || '7')
+                  const note = (document.getElementById('hs-note') as HTMLInputElement)?.value?.trim() || ''
+
+                  if (!recipient || !/^0x[0-9a-fA-F]{40}$/.test(recipient)) {
+                    setError('Enter a valid recipient address')
+                    return
+                  }
+
+                  setError(''); setLoading(true); setStatusMsg('Connecting wallet...')
+                  try {
+                    const wc = await connectWC(['eth_sendTransaction'])
+                    const hsIface = new ethers.Interface([
+                      'function shake(address recipient, uint8 handshakeType, string note) external payable',
+                    ])
+                    const execIface = new ethers.Interface([
+                      'function executeContractCall((address target, bytes data, uint256 value, uint256 minReturnValue, uint256 maxApprovalAmount, address approvalToken) params) external',
+                    ])
+                    setStatusMsg('Sending Handshake...')
+                    const shakeData = hsIface.encodeFunctionData('shake', [recipient, hsType, note])
+                    const execData = execIface.encodeFunctionData('executeContractCall', [{
+                      target: HANDSHAKE,
+                      data: shakeData,
+                      value: 0n,
+                      minReturnValue: 0n,
+                      maxApprovalAmount: 0n,
+                      approvalToken: ethers.ZeroAddress,
+                    }])
+                    await sendWCTx(wc, arc402Wallet, execData)
+                    await disconnectWC(wc)
+                    setStep('done')
+                  } catch (e: unknown) {
+                    const msg = e instanceof Error ? e.message : String(e)
+                    setError(msg.includes('rejected') || msg.includes('cancel') ? 'Cancelled. Tap to try again.' : msg)
+                    resetWc()
+                  } finally { setLoading(false); setStatusMsg('') }
+                }}
+                disabled={loading}
+                style={{ width: '100%', padding: '13px', background: loading ? '#1a1a1a' : '#1a1a2e', border: `1px solid ${loading ? '#1a1a1a' : '#2a2a4a'}`, borderRadius: 12, color: loading ? '#333' : '#818cf8', fontSize: '0.9rem', fontWeight: 500, cursor: loading ? 'not-allowed' : 'pointer', marginBottom: 10 }}
+              >
+                {loading ? '⏳ ' + (statusMsg || 'Working...') : '🤝 Send Handshake →'}
               </button>
               <button
                 onClick={() => setStep('done')}
