@@ -17,6 +17,8 @@ const ENTRY_POINT     = '0x0000000071727De22E5E9d8BAf0edAc6f37da032'
 const ARC402_REGISTRY = '0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622' // Protocol registry (v2)
 const AGENT_REGISTRY  = '0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865' // AgentRegistry — where agents register
 const POLICY_ENGINE   = '0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847'
+const HANDSHAKE       = '0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3' // Handshake contract (Arena v1)
+const GIGABRAIN_WALLET = '0xa9e0612a6f82bf4056D7e48A406E36C990aB83bE' // GigaBrain agent wallet
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,7 +81,7 @@ const WALLETS = [
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Step = 'deploy' | 'passkey' | 'policy' | 'agent' | 'done'
+type Step = 'deploy' | 'passkey' | 'policy' | 'agent' | 'handshake' | 'done'
 
 interface PasskeyResult { credId: string; x: string; y: string }
 
@@ -432,6 +434,13 @@ export default function OnboardContent() {
         await sendWCTx(wc, POLICY_ENGINE, policyIface.encodeFunctionData('setCategoryLimitFor', [arc402Wallet, 'hire', hirePriceWei]))
       }
 
+      // Whitelist Handshake contract on PolicyEngine (so wallet can send handshakes)
+      setStatusMsg('Whitelisting Handshake contract...')
+      const peIface = new ethers.Interface([
+        'function enableContractInteraction(address wallet, address target) external',
+      ])
+      await sendWCTx(wc, POLICY_ENGINE, peIface.encodeFunctionData('enableContractInteraction', [arc402Wallet, HANDSHAKE]))
+
       setPolicyDone(true)
       await disconnectWC(wc)
       setStep('agent')
@@ -498,7 +507,7 @@ export default function OnboardContent() {
       await sendWCTx(wc, arc402Wallet, execData)
       setAgentDone(true)
       await disconnectWC(wc)
-      setStep('done')
+      setStep('handshake')
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       setError(msg.includes('rejected') || msg.includes('cancel') ? 'Cancelled. Tap to try again.' : msg)
@@ -509,13 +518,14 @@ export default function OnboardContent() {
   // ── Render helpers ─────────────────────────────────────────────────────────
 
   const STEP_DEFS = [
-    { id: 'deploy',  label: 'Deploy',  icon: '🏗️' },
-    { id: 'passkey', label: 'Face ID', icon: '🔑' },
-    { id: 'policy',  label: 'Policy',  icon: '📋' },
-    { id: 'agent',   label: 'Agent',   icon: '🤖' },
+    { id: 'deploy',    label: 'Deploy',    icon: '🏗️' },
+    { id: 'passkey',   label: 'Face ID',   icon: '🔑' },
+    { id: 'policy',    label: 'Policy',    icon: '📋' },
+    { id: 'agent',     label: 'Agent',     icon: '🤖' },
+    { id: 'handshake', label: 'Hello',     icon: '🤝' },
   ] as const
 
-  const stepOrder: Step[] = ['deploy', 'passkey', 'policy', 'agent', 'done']
+  const stepOrder: Step[] = ['deploy', 'passkey', 'policy', 'agent', 'handshake', 'done']
   const currentIdx = stepOrder.indexOf(step)
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -893,6 +903,75 @@ export default function OnboardContent() {
                 style={{ width: '100%', padding: '13px', background: (loading || !agentName || !agentEndpoint) ? '#1a1a1a' : '#1a1a2e', border: `1px solid ${(loading || !agentName || !agentEndpoint) ? '#1a1a1a' : '#2a2a4a'}`, borderRadius: 12, color: (loading || !agentName || !agentEndpoint) ? '#333' : '#818cf8', fontSize: '0.9rem', fontWeight: 500, cursor: (loading || !agentName || !agentEndpoint) ? 'not-allowed' : 'pointer', marginBottom: 10 }}
               >
                 {loading ? '⏳ ' + (statusMsg || 'Working...') : '🤖 Register Agent →'}
+              </button>
+              <button
+                onClick={() => setStep('done')}
+                style={{ width: '100%', padding: '10px', background: 'transparent', border: '1px solid #1e1e1e', borderRadius: 10, color: '#444', fontSize: '0.8rem', cursor: 'pointer' }}
+              >
+                Skip →
+              </button>
+            </div>
+          )}
+
+          {/* ── STEP 5: HANDSHAKE ── */}
+          {step === 'handshake' && !wcUri && !waiting && (
+            <div>
+              <div style={{ textAlign: 'center', fontSize: 48, marginBottom: 16 }}>🤝</div>
+              <div style={{ color: '#d0d0d0', fontWeight: 600, fontSize: '1.1rem', textAlign: 'center', marginBottom: 8 }}>
+                Say Hello to the Network
+              </div>
+              <p style={{ color: '#666', fontSize: '0.82rem', marginBottom: 20, lineHeight: 1.5, textAlign: 'center' }}>
+                Send your first Handshake — a typed social signal on the ARC-402 network.
+                Say hello to GigaBrain, the first agent on the protocol.
+              </p>
+
+              <div style={{ background: '#0d0d12', border: '1px solid #1e1e2a', borderRadius: 10, padding: '14px 16px', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <span style={{ fontSize: 20 }}>🧠</span>
+                  <div>
+                    <div style={{ fontSize: '0.9rem', color: '#d0d0d0', fontWeight: 500 }}>GigaBrain</div>
+                    <div style={{ fontSize: '0.72rem', color: '#555', fontFamily: 'monospace' }}>{short(GIGABRAIN_WALLET)}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#666' }}>
+                  The first autonomous agent on ARC-402. Say hello and your handshake will be recorded on Base mainnet.
+                </div>
+              </div>
+
+              <button
+                onClick={async () => {
+                  setError(''); setLoading(true); setStatusMsg('Connecting wallet...')
+                  try {
+                    const wc = await connectWC(['eth_sendTransaction'])
+                    const hsIface = new ethers.Interface([
+                      'function shake(address recipient, uint8 handshakeType, string note) external payable',
+                    ])
+                    const execIface = new ethers.Interface([
+                      'function executeContractCall((address target, bytes data, uint256 value, uint256 minReturnValue, uint256 maxApprovalAmount, address approvalToken) params) external',
+                    ])
+                    setStatusMsg('Sending Handshake...')
+                    const shakeData = hsIface.encodeFunctionData('shake', [GIGABRAIN_WALLET, 7, 'Hello from onboarding!']) // 7 = Hello
+                    const execData = execIface.encodeFunctionData('executeContractCall', [{
+                      target: HANDSHAKE,
+                      data: shakeData,
+                      value: 0n,
+                      minReturnValue: 0n,
+                      maxApprovalAmount: 0n,
+                      approvalToken: ethers.ZeroAddress,
+                    }])
+                    await sendWCTx(wc, arc402Wallet, execData)
+                    await disconnectWC(wc)
+                    setStep('done')
+                  } catch (e: unknown) {
+                    const msg = e instanceof Error ? e.message : String(e)
+                    setError(msg.includes('rejected') || msg.includes('cancel') ? 'Cancelled. Tap to try again.' : msg)
+                    resetWc()
+                  } finally { setLoading(false); setStatusMsg('') }
+                }}
+                disabled={loading}
+                style={{ width: '100%', padding: '14px', background: loading ? '#1a1a1a' : '#1a1a2e', border: `1px solid ${loading ? '#1a1a1a' : '#2a2a4a'}`, borderRadius: 12, color: loading ? '#333' : '#818cf8', fontSize: '0.95rem', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', marginBottom: 10 }}
+              >
+                {loading ? '⏳ ' + (statusMsg || 'Working...') : '🤝 Say Hello to GigaBrain →'}
               </button>
               <button
                 onClick={() => setStep('done')}
