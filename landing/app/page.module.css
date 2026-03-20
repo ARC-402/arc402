@@ -261,26 +261,26 @@
 .metric {
   background: var(--ink);
   border: 1px solid #1a1a1a;
-  border-radius: 10px;
-  padding: 20px 24px;
+  border-radius: 12px;
+  padding: 32px 28px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.metricLabel {
-  font-size: 0.68rem;
-  color: #9ca3af;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  gap: 10px;
 }
 
 .metricValue {
   font-family: var(--mono);
-  font-size: 1.3rem;
+  font-size: clamp(2rem, 5vw, 3rem);
   font-weight: 400;
   color: #f8f7f4;
-  line-height: 1.2;
+  line-height: 1;
+}
+
+.metricLabel {
+  font-size: 0.72rem;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
 
 /* ── Quick start ── */
