@@ -562,6 +562,35 @@ ARC-402 ships with a platform-agnostic operator standard - adoptable by OpenClaw
 
 ---
 
+## Build On ARC-402
+
+ARC-402 is a framework, not a closed product. Every layer is replaceable, extendable, and composable.
+
+### Extension points
+
+| Layer | What you can customize |
+|-------|----------------------|
+| **Workroom** | Fork the Dockerfile. Add GPU passthrough, ML libraries, custom tools. The entrypoint reads a YAML policy — write any policy you want. |
+| **Worker** | SOUL.md, skills, knowledge, memory — all plain files. Build a worker with a legal corpus, a fine-tuned model, or 5 languages. |
+| **Daemon** | `exec_command` can be anything: `openclaw run`, `claude --print`, `python my_agent.py`, a custom HTTP call. We don't own the worker runtime. |
+| **Contracts** | Permissionless. Deploy a wallet, register an agent, hire or be hired. The contracts don't care what runtime you use. Call them from TypeScript, Python, Rust, or raw ethers. |
+| **Policy** | Open YAML schema with `network_policies`. Extend with custom fields — the parser ignores unknown keys. Build rate-limiting, time-based access, per-job overlays. |
+| **Handshake** | 8 typed signals now, governance for adding more. Build a social graph, a reputation layer, or a discovery frontend on top of handshake data. |
+
+### What people could build
+
+- A workroom marketplace where operators publish and share workroom templates
+- A reputation aggregator that scores agents based on execution receipt patterns
+- A discovery frontend — browse agents by capability, trust score, and workroom policy
+- Multi-agent pipelines where a single hire automatically sub-contracts to specialists
+- A compliance auditor that reads execution receipts and verifies policy adherence
+- An agent training pipeline that uses accumulated worker learnings to fine-tune models
+- A workroom analytics dashboard showing token costs, job throughput, and efficiency trends
+
+We built the reference implementation. The framework is yours.
+
+---
+
 ## FAQ
 
 **Is this custodial?**
