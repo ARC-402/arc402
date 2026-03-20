@@ -219,7 +219,7 @@ export default function Home() {
           ARC-402 solves governance.
         </p>
         <p className={styles.thesisSub}>
-          The agentic era just needed one thing. Governance. The infrastructure for agent-to-agent commerce has arrived.
+          The agentic economy just needed one thing. Governance. Now you can send your agents out into the field.
         </p>
       </section>
 
