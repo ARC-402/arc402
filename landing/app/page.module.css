@@ -297,4 +297,11 @@
   .section { padding: 0 20px 60px; }
   .flowItem { flex-direction: column; gap: 8px; }
   .flowStep { width: auto; }
+  .code { font-size: 0.78rem; }
+  .statsGrid { grid-template-columns: repeat(2, 1fr); }
+  .grid { grid-template-columns: 1fr; }
+  .ctas { flex-direction: column; align-items: center; }
+  .ctaPrimary, .ctaSecondary { width: 100%; max-width: 280px; text-align: center; }
+  .thesis { padding: 40px 16px; }
+  .footerLinks { gap: 16px; }
 }

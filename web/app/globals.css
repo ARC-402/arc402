@@ -5,9 +5,7 @@ body {
   background: #0a0a0a;
   color: #f0f0f0;
   min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  -webkit-text-size-adjust: 100%;
 }
 
 .app {

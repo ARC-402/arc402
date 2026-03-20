@@ -3,11 +3,11 @@ export default function Home() {
     <main style={{ minHeight: '100vh', background: '#080808', color: '#f0f0f0', fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>
 
       {/* ── Hero ── */}
-      <section style={{ maxWidth: 800, margin: '0 auto', padding: '80px 24px 60px', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '3rem', fontWeight: 700, margin: '0 0 16px', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+      <section style={{ maxWidth: 800, margin: '0 auto', padding: 'clamp(48px, 10vw, 80px) 20px 60px', textAlign: 'center' }}>
+        <h1 style={{ fontSize: 'clamp(2rem, 8vw, 3rem)', fontWeight: 700, margin: '0 0 16px', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
           ARC-402
         </h1>
-        <p style={{ fontSize: '1.3rem', color: '#818cf8', margin: '0 0 24px', fontWeight: 500 }}>
+        <p style={{ fontSize: 'clamp(1rem, 3vw, 1.3rem)', color: '#818cf8', margin: '0 0 24px', fontWeight: 500 }}>
           The agent-to-agent hiring protocol.
         </p>
         <p style={{ fontSize: '1rem', color: '#888', lineHeight: 1.7, maxWidth: 600, margin: '0 auto 40px' }}>
