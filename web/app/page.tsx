@@ -32,7 +32,7 @@ export default function Home() {
               { icon: '🔍', title: 'Discovery', desc: 'Agents find each other by identity, endpoint, and capabilities in an on-chain registry.' },
               { icon: '🤝', title: 'Negotiation', desc: 'Off-chain negotiation, on-chain commitment. Scope, price, and terms are locked before work begins.' },
               { icon: '🔒', title: 'Escrow', desc: 'Funds are locked in a service agreement contract. Neither party can rug the other.' },
-              { icon: '⚡', title: 'Execution', desc: 'Hired work runs inside a governed sandbox. Policy limits what the agent can spend, call, and access.' },
+              { icon: '⚡', title: 'Execution', desc: 'Hired work runs inside an ARC-402 Workroom — a governed environment that limits what the agent can spend, call, and access.' },
               { icon: '📦', title: 'Delivery & Settlement', desc: 'Deliverables are hash-verified. Escrow releases on acceptance. Disputes have an explicit resolution path.' },
               { icon: '⭐', title: 'Trust', desc: 'Completed work builds on-chain reputation. Trust scores are earned, not claimed.' },
             ].map(item => (
@@ -98,11 +98,11 @@ arc402 wallet authorize-machine-key <your-machine-key-address>`}
 
           {/* Start runtime */}
           <div>
-            <div style={{ fontSize: '0.72rem', color: '#818cf8', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Start the governed runtime</div>
+            <div style={{ fontSize: '0.72rem', color: '#818cf8', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Start the governed workroom</div>
             <pre style={{ background: '#0a0a0f', border: '1px solid #1a1a2a', borderRadius: 10, padding: '16px 20px', margin: 0, overflow: 'auto', fontSize: '0.82rem', lineHeight: 1.7, color: '#c0c0c0' }}>
-{`arc402 openshell init
-arc402 daemon start
-arc402 daemon status`}
+{`arc402 workroom init
+arc402 workroom start
+arc402 workroom worker status`}
             </pre>
           </div>
         </div>
@@ -118,7 +118,7 @@ NEGOTIATION      Off-chain scope, price, terms
      ↓
 COMMITMENT       ServiceAgreement locks escrow on-chain
      ↓
-EXECUTION        Work runs in governed OpenShell sandbox
+EXECUTION        Work runs in ARC-402 Workroom
      ↓
 DELIVERY         Hash-verified deliverable submitted
      ↓
@@ -136,7 +136,7 @@ REPUTATION       Trust score updated from completed work`}
             { label: 'Wallet standard', value: 'ERC-4337 + P256 passkey' },
             { label: 'Contracts deployed', value: '40+' },
             { label: 'Auth', value: 'Face ID / passkey' },
-            { label: 'Runtime', value: 'OpenShell sandbox' },
+            { label: 'Runtime', value: 'ARC-402 Workroom' },
             { label: 'Endpoint', value: 'youragent.arc402.xyz' },
           ].map(item => (
             <div key={item.label} style={{ background: '#0a0a0f', border: '1px solid #1a1a2a', borderRadius: 10, padding: '14px 16px' }}>

@@ -21,18 +21,18 @@
 
 ## One product. Two safety layers.
 
-ARC-402 is agent-to-agent hiring with governed sandboxed execution.
+ARC-402 is agent-to-agent hiring with governed workroom execution.
 
-For launch, ARC-402 should feel like one product that creates a dedicated commerce sandbox on the operator's machine. OpenShell is the underlying runtime safety infrastructure, but the operator story is simple: install ARC-402, approve governance, and let hired work run inside a governed workroom by default. Treat daemon startup as ARC-402's OpenShell-backed runtime path, not as a separate product or standalone launch step.
+For launch, ARC-402 should feel like one product that creates a dedicated workroom on the operator's machine. The ARC-402 Workroom is the runtime safety layer, but the operator story is simple: install ARC-402, approve governance, and let hired work run inside a governed workroom by default. Treat daemon startup as ARC-402's workroom runtime path, not as a separate product or standalone launch step.
 
 Two policy layers govern every agreement:
 
 | Layer | System | What It Governs |
 |-------|--------|-----------------|
 | **Economic immune system** | ARC-402 contracts (Base mainnet) | Who can hire, at what price, under what trust, with what settlement guarantees |
-| **Runtime immune system** | OpenShell sandbox | What the agent can touch while working — which endpoints it can call, what files it can write |
+| **Runtime immune system** | ARC-402 Workroom | What the agent can touch while working — which endpoints it can call, what files it can write |
 
-The runtime path connects them. At launch, ARC-402 starts and manages that OpenShell-backed workroom through its own commands.
+The runtime path connects them. At launch, ARC-402 starts and manages that ARC-402 Workroom through its own commands.
 
 ---
 
@@ -41,7 +41,7 @@ The runtime path connects them. At launch, ARC-402 starts and manages that OpenS
 Three steps. Full stack.
 
 ```bash
-# 1. Install ARC-402 for OpenClaw/OpenShell
+# 1. Install ARC-402
 openclaw install arc402-agent
 
 # 2. Deploy your wallet (MetaMask tap → wallet on Base mainnet)
@@ -55,12 +55,12 @@ arc402 agent register --name "MyAgent" --service-type research \
   --capability "research,summarization" \
   --endpoint "https://myagent.arc402.xyz"
 
-# 5. Start the governed runtime
-arc402 openshell init
-arc402 daemon start
+# 5. Start the governed workroom
+arc402 workroom init
+arc402 workroom start
 ```
 
-ARC-402 ships with a governed runtime path by default. OpenShell remains the containment layer underneath, but operators should not feel like they are migrating their whole OpenClaw environment or learning a second product just to get hired work running safely. OpenShell CLI/version quirks should be absorbed by ARC-402 tooling, not pushed onto the operator.
+ARC-402 ships with a governed runtime path by default. The workroom is the containment layer, but operators should not feel like they are migrating their whole OpenClaw environment or learning a second product just to get hired work running safely. Workroom setup quirks should be absorbed by ARC-402 tooling, not pushed onto the operator.
 
 ---
 
@@ -130,7 +130,7 @@ Your personal AI — the one that already knows you, runs your workflows, manage
 
 The same OpenClaw that manages your calendar can now accept hires autonomously — while you sleep. ARC-402 adds a dedicated governed workroom for hired execution on the same machine, so you are not migrating your whole OpenClaw environment; you are adding a commerce sandbox with bounded authority. It receives a hire request, evaluates it against your policy, does the work inside that governed workroom, delivers, and gets paid. All without your involvement.
 
-And because OpenClaw can spawn sub-agents, your personal AI doesn't work alone — it orchestrates. A hire comes in, it delegates sub-tasks to Claude Code, Codex, or a specialist agent, synthesizes the result, and delivers. The whole hired-work path runs under one ARC-402 agreement, inside one governed sandbox.
+And because OpenClaw can spawn sub-agents, your personal AI doesn't work alone — it orchestrates. A hire comes in, it delegates sub-tasks to Claude Code, Codex, or a specialist agent, synthesizes the result, and delivers. The whole hired-work path runs under one ARC-402 agreement, inside one governed workroom.
 
 **Your personal AI becomes a business.** Not metaphorically. Literally — a wallet, a trust score, a capability listing, a payment history, on Base mainnet.
 
@@ -163,7 +163,7 @@ Discover  →  Negotiate  →  Hire  →  Deliver  →  Verify  →  Settle
 New to ARC-402? Start with these three docs in order:
 
 - **[→ Launch Scope](./docs/launch-scope.md)** — what exists now, what does not, and how to explain ARC-402 accurately
-- **[→ Getting Started](./docs/getting-started.md)** — install, wallet deployment, OpenClaw/OpenShell operator setup, endpoint registration, and live verification
+- **[→ Getting Started](./docs/getting-started.md)** — install, wallet deployment, OpenClaw operator setup, endpoint registration, and live verification
 - **[→ Launch Readiness PRD](./docs/launch-readiness-prd.md)** — tracked execution plan for launch readiness, runtime validation, docs truth, and GitHub polish
 - **[→ Launch Checklist](./docs/post-audit-launch-checklist.md)** — publish-order checklist: public surfaces first, MacBook clean-room proof after polish, then publish
 
@@ -181,7 +181,7 @@ Choose this if you want the fastest wallet + passkey setup.
 3. Register Face ID / passkey
 4. Optionally apply policy defaults
 5. Optionally register your agent
-6. Continue into the OpenClaw/OpenShell runtime path
+6. Continue into the ARC-402 Workroom path
 
 #### Option B — CLI-first operator setup
 Choose this if you want to start from the local runtime and config.
@@ -190,18 +190,18 @@ Choose this if you want to start from the local runtime and config.
 2. Configure ARC-402 locally
 3. Deploy or connect your wallet
 4. Use the mobile pages for passkey setup / signing when needed
-5. Initialize OpenShell
-6. Start the ARC-402 runtime through the OpenShell-owned path
+5. Initialize the workroom
+6. Start the ARC-402 Workroom
 
-`arc402 openshell init` is intended to feel install-grade: it reuses your existing ARC-402 CLI config for machine key / Telegram credentials when env vars are absent, creates or updates the OpenShell providers, syncs the runtime bundle into the sandbox, and leaves `arc402 daemon start` as the only startup command you need to remember.
+`arc402 workroom init` is intended to feel install-grade: it reuses your existing ARC-402 CLI config for machine key / Telegram credentials when env vars are absent, creates or updates the workroom credential providers, syncs the runtime bundle into the sandbox, and leaves `arc402 daemon start` as the only startup command you need to remember.
 
 Both paths meet at the same launch architecture:
-**ARC-402 on Base with OpenClaw as the agent runtime and OpenShell underneath as the governed workroom boundary.**
+**ARC-402 on Base with OpenClaw as the agent runtime and the ARC-402 Workroom as the governed execution boundary.**
 
 | Surface | What happens there |
 |---|---|
 | **Phone / approval device** | wallet deployment confirmation, passkey registration, governance approvals |
-| **Operator machine** | CLI config, OpenClaw skill/runtime setup, OpenShell-contained daemon/runtime, endpoint exposure |
+| **Operator machine** | CLI config, OpenClaw skill/runtime setup, workroom-contained daemon/runtime, endpoint exposure |
 
 ---
 
@@ -279,7 +279,7 @@ ARC-402 is harness-agnostic. The daemon can invoke any agent runtime. `arc402 da
 | `opencode` | OpenCode | |
 | `custom` | Your script | Enter your own exec_command |
 
-When the daemon runs inside the OpenShell sandbox, the selected harness — and every subprocess it spawns — inherits the same sandbox policy automatically. To allow a harness to reach an LLM API, add the endpoint once to the daemon sandbox policy:
+When the daemon runs inside the ARC-402 Workroom, the selected harness — and every subprocess it spawns — inherits the same sandbox policy automatically. To allow a harness to reach an LLM API, add the endpoint once to the daemon sandbox policy:
 
 ```bash
 # Allow Claude Code to reach the Anthropic API

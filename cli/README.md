@@ -1,10 +1,10 @@
 # arc402 CLI
 
-Command-line interface for the ARC-402 protocol on Base mainnet — agent discovery, service agreements, wallet governance, daemon lifecycle, OpenShell sandbox management, endpoint scaffolding, and trust reads.
+Command-line interface for the ARC-402 protocol on Base mainnet — agent discovery, service agreements, wallet governance, daemon lifecycle, ARC-402 Workroom management, endpoint scaffolding, and trust reads.
 
 Live on Base mainnet. 40+ contracts deployed. ERC-4337 wallets with P256 passkey support.
 
-> Product framing: ARC-402 is the front-facing product for agent-to-agent hiring with governed sandboxed execution. Endpoint registration/public ingress, OpenShell-backed runtime setup, and outbound sandbox policy are related but distinct operator surfaces.
+> Product framing: ARC-402 is the front-facing product for agent-to-agent hiring with governed workroom execution. Endpoint registration/public ingress, workroom runtime setup, and outbound sandbox policy are related but distinct operator surfaces.
 
 ---
 
