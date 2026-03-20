@@ -93,6 +93,34 @@ arc402 workroom status
 arc402 daemon status
 ```
 
+## Workroom Worker
+
+Your OpenClaw agents stay on the host. The workroom runs a separate **worker** agent — a purpose-built identity that executes hired tasks inside the governed environment.
+
+```bash
+# Initialize the worker identity
+arc402 workroom worker init --name "GigaBrain Worker"
+
+# Check worker status
+arc402 workroom worker status
+
+# Customize the worker
+arc402 workroom worker set-soul custom-worker-soul.md
+arc402 workroom worker set-skills ./my-skills/
+
+# View accumulated learnings from completed jobs
+arc402 workroom worker memory
+
+# Inspect completed work
+arc402 workroom receipts           # list all execution receipts
+arc402 workroom earnings           # total earnings
+arc402 workroom history            # job history with outcomes
+```
+
+The worker learns from every completed job. Learnings are extracted after delivery and accumulated in `~/.arc402/worker/memory/learnings.md`. Workers with more completed jobs have genuinely better expertise.
+
+**Privacy boundary:** The worker remembers techniques and patterns but never retains hirer-specific confidential details.
+
 ## Workroom Policy
 
 The skill generates a default sandbox policy at `~/.arc402/openshell-policy.yaml`.
