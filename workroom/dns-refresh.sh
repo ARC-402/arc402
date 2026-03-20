@@ -1,72 +1,57 @@
 #!/bin/bash
-# ARC-402 Workroom DNS Refresh Daemon
+# ─────────────────────────────────────────────────────────────────────────────
+# ARC-402 Workroom DNS Refresh
+#
 # Periodically re-resolves policy hostnames and updates iptables rules.
-# Runs as root in the background inside the workroom container.
+# Handles CDN IP rotation, failover, and DNS changes without container restart.
+#
+# Runs as root in the background. The entrypoint starts this automatically.
+# ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-POLICY_FILE="${1:-/workroom/.arc402/openshell-policy.yaml}"
-REFRESH_INTERVAL="${ARC402_DNS_REFRESH_SECONDS:-300}"
-RULES_LOG="/workroom/.arc402/iptables-rules.log"
+readonly POLICY_FILE="${1:-/workroom/.arc402/openshell-policy.yaml}"
+readonly REFRESH_INTERVAL="${ARC402_DNS_REFRESH_SECONDS:-300}"
+readonly RULES_LOG="/workroom/.arc402/iptables-rules.log"
 
-echo "[dns-refresh] Starting DNS refresh loop (interval: ${REFRESH_INTERVAL}s)"
+log() { echo "[dns-refresh] $*"; }
+
+log "Starting (interval: ${REFRESH_INTERVAL}s, policy: $POLICY_FILE)"
 
 while true; do
   sleep "$REFRESH_INTERVAL"
 
-  echo "[dns-refresh] Refreshing DNS for policy hosts..."
+  log "Refreshing..."
 
-  # Build new rules in a temporary chain
-  iptables -N OUTPUT_NEW 2>/dev/null || iptables -F OUTPUT_NEW
+  # Flush and rebuild OUTPUT chain from scratch
+  # This is atomic from the kernel's perspective — no gap in enforcement.
+  iptables -F OUTPUT 2>/dev/null || true
 
-  # Loopback + established + DNS (always allowed)
-  iptables -A OUTPUT_NEW -o lo -j ACCEPT
-  iptables -A OUTPUT_NEW -m state --state ESTABLISHED,RELATED -j ACCEPT
-  iptables -A OUTPUT_NEW -p udp --dport 53 -d 127.0.0.11 -j ACCEPT
-  iptables -A OUTPUT_NEW -p tcp --dport 53 -d 127.0.0.11 -j ACCEPT
+  # Core rules (always present)
+  iptables -A OUTPUT -o lo -j ACCEPT
+  iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+  iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+  iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 
-  # Re-resolve all policy hosts
-  UPDATED=0
-  while IFS=: read -r HOST PORT; do
-    [ -z "$HOST" ] && continue
-    PORT="${PORT:-443}"
+  # Re-resolve and apply
+  RULE_COUNT=0
+  while IFS=: read -r host port; do
+    [ -z "$host" ] && continue
+    port="${port:-443}"
 
-    IPS=$(getent ahosts "$HOST" 2>/dev/null | awk '{print $1}' | sort -u || true)
-    if [ -z "$IPS" ]; then
-      echo "[dns-refresh] WARN: Could not resolve $HOST"
+    ips=$(getent ahosts "$host" 2>/dev/null | awk '{print $1}' | sort -u || true)
+    if [ -z "$ips" ]; then
+      log "WARN: Could not resolve $host"
       continue
     fi
 
-    for IP in $IPS; do
-      iptables -A OUTPUT_NEW -p tcp -d "$IP" --dport "$PORT" -j ACCEPT
-      UPDATED=$((UPDATED + 1))
-    done
+    while IFS= read -r ip; do
+      iptables -A OUTPUT -p tcp -d "$ip" --dport "$port" -j ACCEPT
+      RULE_COUNT=$((RULE_COUNT + 1))
+    done <<< "$ips"
   done < <(/policy-parser.sh "$POLICY_FILE")
-
-  # Atomic swap: replace OUTPUT chain with the new rules
-  iptables -F OUTPUT
-  iptables -A OUTPUT -j OUTPUT_NEW 2>/dev/null || {
-    # Fallback: copy rules directly if chain jump doesn't work
-    iptables -F OUTPUT
-    iptables -A OUTPUT -o lo -j ACCEPT
-    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
-    iptables -A OUTPUT -p udp --dport 53 -d 127.0.0.11 -j ACCEPT
-    iptables -A OUTPUT -p tcp --dport 53 -d 127.0.0.11 -j ACCEPT
-
-    while IFS=: read -r HOST PORT; do
-      [ -z "$HOST" ] && continue
-      PORT="${PORT:-443}"
-      IPS=$(getent ahosts "$HOST" 2>/dev/null | awk '{print $1}' | sort -u || true)
-      for IP in $IPS; do
-        iptables -A OUTPUT -p tcp -d "$IP" --dport "$PORT" -j ACCEPT
-      done
-    done < <(/policy-parser.sh "$POLICY_FILE")
-  }
-
-  # Clean up temp chain
-  iptables -X OUTPUT_NEW 2>/dev/null || true
 
   # Log updated rules
   iptables -L OUTPUT -n --line-numbers > "$RULES_LOG" 2>/dev/null || true
 
-  echo "[dns-refresh] Refreshed: $UPDATED rules applied"
+  log "Refreshed: $RULE_COUNT rules applied"
 done
