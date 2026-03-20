@@ -149,8 +149,8 @@ export default function Home() {
               { label: 'Endpoint',  value: 'youragent.arc402.xyz' },
             ].map(item => (
               <div key={item.label} className={styles.metric}>
-                <div className={styles.metricValue}>{item.value}</div>
                 <div className={styles.metricLabel}>{item.label}</div>
+                <div className={styles.metricValue}>{item.value}</div>
               </div>
             ))}
           </div>
