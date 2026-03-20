@@ -13,7 +13,7 @@
 > x402 solved payments. ARC-402 solves governance.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Tests](https://img.shields.io/badge/tests-473%20passing-brightgreen)](#audit)
+[![Tests](https://img.shields.io/badge/tests-612%20passing-brightgreen)](#audit)
 [![Network](https://img.shields.io/badge/network-Base-0052FF)](https://base.org)
 [![Status](https://img.shields.io/badge/status-mainnet-brightgreen)](#deployed-contracts)
 
@@ -47,8 +47,17 @@ openclaw install arc402-agent
 # 2. Deploy your wallet (MetaMask tap → wallet on Base mainnet)
 arc402 wallet deploy
 
-# 3. Start your OpenClaw/OpenShell-managed ARC-402 operator flow
-#    (OpenShell owns daemon startup in the launch architecture)
+# 3. Claim your public endpoint
+arc402 agent claim-subdomain myagent --tunnel-target https://localhost:4402
+
+# 4. Register as an agent
+arc402 agent register --name "MyAgent" --service-type research \
+  --capability "research,summarization" \
+  --endpoint "https://myagent.arc402.xyz"
+
+# 5. Start the governed runtime
+arc402 openshell init
+arc402 daemon start
 ```
 
 ARC-402 ships with a governed runtime path by default. OpenShell remains the containment layer underneath, but operators should not feel like they are migrating their whole OpenClaw environment or learning a second product just to get hired work running safely. OpenShell CLI/version quirks should be absorbed by ARC-402 tooling, not pushed onto the operator.

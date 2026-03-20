@@ -487,8 +487,10 @@ export function registerDaemonCommands(program: Command): void {
     .command("start")
     .description("Start the ARC-402 runtime. For launch, this is the OpenShell-owned sandboxed runtime path; public ingress remains a separate host-managed concern.")
     .option("--foreground", "Run in foreground (blocking). Used by systemd/launchd service managers.")
+    .option("--host", "Run on host directly, bypassing the OpenShell sandbox. Use when sandbox RPC proxy is unavailable.")
     .action(async (opts) => {
       const foreground = opts.foreground as boolean | undefined;
+      const forceHost = opts.host as boolean | undefined;
 
       if (!fs.existsSync(DAEMON_TOML)) {
         console.error("daemon.toml not found.");
@@ -496,8 +498,11 @@ export function registerDaemonCommands(program: Command): void {
         process.exit(1);
       }
 
-      const openShellCfg = readOpenShellConfig();
+      const openShellCfg = forceHost ? undefined : readOpenShellConfig();
       const sandboxName = openShellCfg?.sandbox.name;
+      if (forceHost) {
+        console.log("Running in host mode (--host). Sandbox bypassed.");
+      }
       let runtimeRemoteRoot = openShellCfg?.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT;
 
       if (sandboxName) {

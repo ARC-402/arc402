@@ -40,3 +40,4 @@ docs/audit-briefs/
 docs/post-audit-launch-checklist.md
 web/.next/
 web/tsconfig.tsbuildinfo
+web/out/

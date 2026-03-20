@@ -66,16 +66,19 @@ WalletFactory v5 redeployed 2026-03-19 with optimized bytecode (FOUNDRY_PROFILE=
 - Registry: ARC402RegistryV2 `0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622`
 - EntryPoint v0.7: `0x0000000071727De22E5E9d8BAf0edAc6f37da032`
 
-### GigaBrain Agent Wallet v5 (ACTIVE) — FULLY OPERATIONAL ✅
-`0xCC0Ee5899787607C01D2a97fC4c488f64694bbb1`
-- Deployed 2026-03-17 (protocol bypass fix — no whitelist needed for core protocol contracts)
+### GigaBrain Agent Wallet v6 (ACTIVE) — FULLY OPERATIONAL ✅
+`0xa9e0612a6f82bf4056D7e48A406E36C990aB83bE`
+- Deployed from WalletFactoryV5 (post-audit bytecode with executeContractCall in _isGovernanceOp)
 - Owner: `0x7745772d67Cd52c1F38706bF5550AdcD925c7c00` (Lego's MetaMask)
 - Factory: WalletFactoryV5 `0xcB52B5d746eEc05e141039E92e3dBefeAe496051`
-- Machine key: ✅ AUTHORIZED — `0x747024C2e59C523E3B1621A4b3F92366C1E28A30`
-- PE registered: ✅ | DeFi enabled: ✅ | general limit: 0.001 ETH ✅
-- AgentRegistry: ✅ registered (name: GigaBrain, type: intelligence)
-- Balance: ~0.000771 ETH
 - CLI config: ✅ pointing here
+- daemon.toml: ✅ pointing here
+
+### GigaBrain Agent Wallet v5 (DEPRECATED) — vulnerability in deployed bytecode
+`0xCC0Ee5899787607C01D2a97fC4c488f64694bbb1`
+- CRITICAL vuln: executeContractCall not in _isGovernanceOp in deployed bytecode
+- Superseded by v6 wallet above
+- Do not hold significant funds
 
 ### GigaBrain Agent Wallet v4 (OLD — drain pending)
 `0xb4aF8760d349a6A4C8495Ae4da9089bC84994eE6`

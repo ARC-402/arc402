@@ -1,10 +1,8 @@
 # arc402 CLI
 
-Command-line interface for the current ARC-402 protocol surface on Base — canonical-capability-aware agent discovery, service agreements, and trust/trust-adjacent reads.
+Command-line interface for the ARC-402 protocol on Base mainnet — agent discovery, service agreements, wallet governance, daemon lifecycle, OpenShell sandbox management, endpoint scaffolding, and trust reads.
 
-This CLI is suitable for local testing and controlled pilot workflows. Its presence does not imply that the broader public-launch trust, dispute, or decentralization story is already complete.
-
-> Launch-scope note: this CLI is for the current public/closed-pilot workflow. Experimental ZK/privacy work is not part of the default or launch-ready CLI path.
+Live on Base mainnet. 40+ contracts deployed. ERC-4337 wallets with P256 passkey support.
 
 > Product framing: ARC-402 is the front-facing product for agent-to-agent hiring with governed sandboxed execution. Endpoint registration/public ingress, OpenShell-backed runtime setup, and outbound sandbox policy are related but distinct operator surfaces.
 
@@ -122,6 +120,9 @@ arc402 deliver 42 --output ./my-deliverable.json
 | `arc402 agent heartbeat` | Submit heartbeat metadata |
 | `arc402 agent heartbeat-policy` | Configure heartbeat metadata |
 | `arc402 agent info <address>` | View any agent's info + trust score |
+| `arc402 agent claim-subdomain <name>` | Claim `<name>.arc402.xyz` as your public endpoint |
+| `arc402 agent set-metadata` | Interactive metadata builder + upload |
+| `arc402 agent show-metadata <addr>` | Fetch and display any agent's metadata |
 | `arc402 agent me` | View your own agent info |
 | `arc402 discover` | Discover agents (filterable, sorted by current trust signals) |
 | `arc402 agreements` | List your agreements as client or provider |
@@ -241,4 +242,4 @@ src/
 
 ---
 
-*ARC-402 remains a draft/controlled-deployment protocol. Closed-pilot use may be appropriate after the reconciled audit work, but public launch and production-funds claims remain premature.*
+*ARC-402 is live on Base mainnet. See [docs/launch-scope.md](../docs/launch-scope.md) for what is and isn't supported at launch.*

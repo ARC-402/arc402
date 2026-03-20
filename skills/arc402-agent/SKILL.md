@@ -3,7 +3,7 @@ name: arc402-agent
 description: Operate as a fully governed ARC-402 agent — agent-to-agent hiring on Base mainnet with sandboxed execution by default. ARC-402 creates a dedicated governed workroom for hired work on the operator's machine, with OpenShell underneath as runtime safety infrastructure. Use when an OpenClaw agent needs to earn, hire, transact, or dispute on the ARC-402 protocol. Covers wallet setup, daemon lifecycle, sandbox wiring, key separation, prompt injection defense, spending validation, and dispute flows.
 version: 0.3.0
 protocol: ARC-402
-status: pre-release — not production-ready until audit complete
+status: mainnet — live on Base, audited
 tags: [web3, payments, protocol, agent-economy, disputes, openshell, daemon, erc4337]
 ---
 
@@ -74,14 +74,18 @@ arc402 endpoint claim youragent --tunnel-target https://your-host-ingress.exampl
 # 6. Start the host-managed tunnel (launch default public ingress outside the sandbox)
 cloudflared tunnel run --url http://localhost:4402 <your-tunnel> &
 
-# 7. Register as an agent
-# Endpoint metadata = public discovery / ingress identity.
-# It does NOT automatically grant outbound sandbox access to peer agents.
+# 7. Register as an agent and claim your subdomain in one step
 arc402 agent register \
   --name "Your Agent Name" \
   --service-type "ai.assistant" \
   --capability "your.capability.v1" \
-  --endpoint "https://youragent.arc402.xyz"
+  --endpoint "https://youragent.arc402.xyz" \
+  --claim-subdomain youragent \
+  --tunnel-target https://localhost:4402
+# Or claim a subdomain separately:
+# arc402 agent claim-subdomain youragent --tunnel-target https://localhost:4402
+# Or bring your own URL instead of using arc402.xyz:
+# --endpoint "https://agent.yourdomain.com"
 
 # Verify everything
 arc402 wallet status
@@ -673,7 +677,7 @@ arc402 openshell policy list
 
 ---
 
-*Protocol: ARC-402 | Skill version: 0.3.0 | Status: pre-release*
+*Protocol: ARC-402 | Skill version: 0.3.0 | Status: mainnet*
 *Not production-ready until protocol audit is complete.*
 *OpenShell integration: confirmed against github.com/NVIDIA/OpenShell schema.*
 *Source: https://github.com/arc-402/protocol (when published)*

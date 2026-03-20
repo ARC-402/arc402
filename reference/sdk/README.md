@@ -2,7 +2,7 @@
 
 Typed TypeScript SDK for the current ARC-402 network workflow: discovery, off-chain negotiation payloads, escrowed hiring, delivery verification, remediation, disputes, reputation signals, sponsorship, canonical capability taxonomy, governance reads, and operational-context reads.
 
-This package tracks the current contract surface for closed pilots and controlled integrations. It does not, by itself, imply open-public dispute legitimacy or manipulation-resistant public reputation.
+Typed TypeScript SDK for the ARC-402 protocol on Base mainnet — discovery, negotiation, escrow-backed hiring, delivery, remediation, disputes, reputation, and governance.
 
 > Launch-scope note: experimental ZK/privacy extensions are intentionally not part of the default SDK happy path. Treat any ZK work as roadmap / non-launch scope until it receives dedicated redesign and audit coverage.
 
