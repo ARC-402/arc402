@@ -5,8 +5,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables curl dnsutils iproute2 procps jq \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user for daemon execution
-RUN useradd -m -s /bin/bash -d /workroom workroom
+# Create workroom user with the same UID/GID as the host user (default: 1000).
+# This ensures bind-mounted volumes are readable/writable without permission fights.
+# Override at build time: docker build --build-arg HOST_UID=1001 --build-arg HOST_GID=1001
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+# node:22-slim already has a 'node' user at UID 1000. Rename it to 'workroom'
+# so the container user matches the host user (bind mount permissions).
+RUN usermod -l workroom -d /workroom -m node \
+    && groupmod -n workroom node \
+    && usermod -u ${HOST_UID} workroom 2>/dev/null || true \
+    && groupmod -g ${HOST_GID} workroom 2>/dev/null || true
 
 # Workroom scripts
 COPY entrypoint.sh /entrypoint.sh

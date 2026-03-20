@@ -128,12 +128,7 @@ if [ ! -f "$DAEMON_ENTRY" ]; then
   exit 1
 fi
 
-# ─── Phase 6: Ensure workroom user can write state files ───────────────────
-
-chown -R workroom:workroom /workroom/.arc402 2>/dev/null || true
-chown -R workroom:workroom /workroom/jobs 2>/dev/null || true
-
-# ─── Phase 7: Drop privileges and start daemon ────────────────────────────
+# ─── Phase 6: Drop privileges and start daemon ────────────────────────────
 
 log "Starting ARC-402 daemon as user 'workroom'..."
 exec su -s /bin/bash workroom -c "node $DAEMON_ENTRY --foreground"
