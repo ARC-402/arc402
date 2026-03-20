@@ -90,7 +90,6 @@ subgraph/
 memory/
 scripts/
 tools/
-ENGINEERING-STATE.md\nDEPLOY-HANDSHAKE.md\nTODO.md
 SECURITY-AUDIT.md
 docs/THREAT-MODEL.md
 docs/AGENT-SECURITY.md
@@ -104,3 +103,5 @@ docs/post-audit-launch-checklist.md
 cli/scripts/
 cli/src/drain-v4.ts
 cli/test/
+DEPLOY-HANDSHAKE.md
+TODO.md
