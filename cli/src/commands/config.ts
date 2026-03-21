@@ -49,4 +49,10 @@ export function registerConfigCommands(program: Command): void {
     const cfg = loadConfig();
     console.log(JSON.stringify({ ...cfg, privateKey: cfg.privateKey ? "***" : undefined, subdomainApi: getSubdomainApi(cfg) }, null, 2));
   });
+  config.command("set <key> <value>").description("Set a config value: arc402 config set <key> <value>").action((key: string, value: string) => {
+    const cfg = loadConfig();
+    (cfg as unknown as Record<string, unknown>)[key] = value;
+    saveConfig(cfg);
+    console.log(' ' + c.success + c.white(` ${key} = ${value}`));
+  });
 }

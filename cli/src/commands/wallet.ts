@@ -715,6 +715,7 @@ export function registerWalletCommands(program: Command): void {
         // Generate guardian key (separate from hot key) and call setGuardian
         const guardianWallet = ethers.Wallet.createRandom();
         config.walletContractAddress = walletAddress;
+        config.ownerAddress = address;
         config.guardianPrivateKey = guardianWallet.privateKey;
         config.guardianAddress = guardianWallet.address;
         saveConfig(config);
@@ -1572,15 +1573,32 @@ export function registerWalletCommands(program: Command): void {
         console.error("walletConnectProjectId not set in config. Run `arc402 config set walletConnectProjectId <id>`.");
         process.exit(1);
       }
-      const ownerAddress = config.ownerAddress;
-      if (!ownerAddress) {
-        console.error("ownerAddress not set in config. Run `arc402 wallet deploy` first.");
-        process.exit(1);
-      }
-
       const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
       const chainId = config.network === "base-mainnet" ? 8453 : 84532;
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+
+      let ownerAddress = config.ownerAddress;
+      if (!ownerAddress) {
+        // Fallback 1: WalletConnect session account
+        if (config.wcSession?.account) {
+          ownerAddress = config.wcSession.account;
+          console.log(c.dim(`Owner resolved from WalletConnect session: ${ownerAddress}`));
+        } else {
+          // Fallback 2: call owner() on the wallet contract
+          try {
+            const walletOwnerContract = new ethers.Contract(
+              config.walletContractAddress!,
+              ["function owner() external view returns (address)"],
+              provider,
+            );
+            ownerAddress = await walletOwnerContract.owner();
+            console.log(c.dim(`Owner resolved from contract: ${ownerAddress}`));
+          } catch {
+            console.error("ownerAddress not set in config and could not be resolved from contract or WalletConnect session.");
+            process.exit(1);
+          }
+        }
+      }
 
       // Encode registerWallet(wallet, owner) calldata — called on PolicyEngine
       const policyInterface = new ethers.Interface([
