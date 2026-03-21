@@ -17,6 +17,7 @@ export function registerConfigCommands(program: Command): void {
     const defaults = NETWORK_DEFAULTS[answers.network] ?? {};
     const cfg: Arc402Config = {
       network: answers.network,
+      walletConnectProjectId: "2bc39e3b38de7ef7deeed1e3dbbe6ad6",
       rpcUrl: defaults.rpcUrl ?? "https://mainnet.base.org",
       trustRegistryAddress: defaults.trustRegistryAddress ?? "",
       agentRegistryAddress: defaults.agentRegistryV2Address ?? defaults.agentRegistryAddress,
