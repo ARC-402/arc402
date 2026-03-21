@@ -16,7 +16,9 @@ export async function getClient(config: Arc402Config): Promise<Arc402Client> {
     return { provider, signer, address };
   }
 
-  return { provider, signer: null, address: null };
+  // No private key — use walletContractAddress for read-only operations
+  const address = config.walletContractAddress ?? null;
+  return { provider, signer: null, address };
 }
 
 export async function requireSigner(
