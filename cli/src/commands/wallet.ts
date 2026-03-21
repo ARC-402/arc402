@@ -9,7 +9,7 @@ import { spawnSync } from "child_process";
 import { Arc402Config, getConfigPath, getUsdcAddress, loadConfig, NETWORK_DEFAULTS, saveConfig } from "../config";
 import { getClient, requireSigner } from "../client";
 import { getTrustTier } from "../utils/format";
-import { ARC402_WALLET_EXECUTE_ABI, ARC402_WALLET_GUARDIAN_ABI, ARC402_WALLET_MACHINE_KEY_ABI, ARC402_WALLET_OWNER_ABI, ARC402_WALLET_PASSKEY_ABI, ARC402_WALLET_PROTOCOL_ABI, ARC402_WALLET_REGISTRY_ABI, POLICY_ENGINE_GOVERNANCE_ABI, POLICY_ENGINE_LIMITS_ABI, TRUST_REGISTRY_ABI, WALLET_FACTORY_ABI } from "../abis";
+import { AGENT_REGISTRY_ABI, ARC402_WALLET_EXECUTE_ABI, ARC402_WALLET_GUARDIAN_ABI, ARC402_WALLET_MACHINE_KEY_ABI, ARC402_WALLET_OWNER_ABI, ARC402_WALLET_PASSKEY_ABI, ARC402_WALLET_PROTOCOL_ABI, ARC402_WALLET_REGISTRY_ABI, POLICY_ENGINE_GOVERNANCE_ABI, POLICY_ENGINE_LIMITS_ABI, TRUST_REGISTRY_ABI, WALLET_FACTORY_ABI } from "../abis";
 import { warnIfPublicRpc } from "../config";
 import { connectPhoneWallet, sendTransactionWithSession, requestPhoneWalletSignature } from "../walletconnect";
 import { BundlerClient, buildSponsoredUserOp, PaymasterClient, DEFAULT_ENTRY_POINT } from "../bundler";
@@ -655,38 +655,113 @@ export function registerWalletCommands(program: Command): void {
           console.error("Could not find WalletCreated event in receipt. Check the transaction on-chain.");
           process.exit(1);
         }
+        // ── Step 1 complete: save wallet + owner ──────────────────────────────
         config.walletContractAddress = walletAddress;
         config.ownerAddress = account;
         saveConfig(config);
-        console.log("\n" + c.success + c.white(" ARC402Wallet deployed"));
+        try { fs.chmodSync(getConfigPath(), 0o600); } catch { /* best-effort */ }
+        console.log("\n " + c.success + c.white(" Step 1 — wallet deployed"));
         renderTree([
           { label: "Wallet", value: walletAddress },
-          { label: "Owner", value: account + c.dim(" (phone wallet)"), last: true },
+          { label: "Owner", value: account },
         ]);
 
-        // ── Mandatory onboarding ceremony (same WalletConnect session) ────────
-        console.log("\nStarting mandatory onboarding ceremony in this WalletConnect session...");
-        await runWalletOnboardingCeremony(
-          walletAddress,
-          account,
-          config,
-          provider,
-          async (call, description) => {
-            console.log(" " + c.dim(`Sending: ${description}`));
-            const hash = await sendTransactionWithSession(client, session, account, chainId, call);
-            await provider.waitForTransaction(hash, 1);
-            console.log(" " + c.success + " " + c.dim(description) + " " + c.dim(hash));
-            return hash;
-          },
-        );
+        // ── Step 2: Generate machine key ──────────────────────────────────────
+        console.log("\n" + c.dim("── Step 2: Machine key ─────────────────────────────────────────"));
+        const machineWallet = ethers.Wallet.createRandom();
+        config.privateKey = machineWallet.privateKey;
+        saveConfig(config);
+        console.log(" " + c.success + c.white(" Machine key generated"));
+        console.log("   " + c.dim("Address: ") + c.white(machineWallet.address));
 
-        console.log(c.dim("Your wallet contract is ready for policy enforcement"));
-        const paymasterUrl2 = config.paymasterUrl ?? NETWORK_DEFAULTS[config.network]?.paymasterUrl;
-        const deployedBalance = await provider.getBalance(walletAddress);
-        if (paymasterUrl2 && deployedBalance < BigInt(1_000_000_000_000_000)) {
-          console.log(c.dim("Gas sponsorship active — initial setup ops are free"));
+        // ── Step 3: Authorize machine key (one MetaMask tap) ──────────────────
+        console.log("\n" + c.dim("── Step 3: Authorize machine key ───────────────────────────────"));
+        const mkIface = new ethers.Interface(ARC402_WALLET_MACHINE_KEY_ABI);
+        let authHash: string | null = null;
+        try {
+          const authSpinner = startSpinner("Sending authorizeMachineKey — approve in MetaMask...");
+          authHash = await sendTransactionWithSession(client, session, account, chainId, {
+            to: walletAddress,
+            data: mkIface.encodeFunctionData("authorizeMachineKey", [machineWallet.address]),
+            value: "0x0",
+          });
+          await provider.waitForTransaction(authHash, 1);
+          authSpinner.succeed("Machine key authorized");
+        } catch {
+          console.error(" " + c.failure + c.red(" authorizeMachineKey failed — run manually:"));
+          console.error("   arc402 wallet authorize-machine-key " + machineWallet.address);
         }
-        console.log(c.dim("\nNext: run 'arc402 wallet set-guardian' to configure the emergency guardian key."));
+
+        // ── Step 4: Protocol bypass — no PolicyEngine registration needed ─────
+        console.log("\n " + c.success + c.dim(" Protocol bypass active — no PolicyEngine registration needed"));
+
+        // ── Step 5: Prompt for agent details ──────────────────────────────────
+        console.log("\n" + c.dim("── Step 5: Agent details ───────────────────────────────────────"));
+        const defaultAgentName = os.hostname() || "MyAgent";
+        const agentAnswers = await prompts([
+          { type: "text", name: "agentName", message: "Agent name?", initial: defaultAgentName },
+          { type: "text", name: "serviceType", message: "Service type?", initial: "intelligence" },
+          { type: "text", name: "caps", message: "Capabilities? (comma-separated)", initial: "research" },
+          { type: "text", name: "endpoint", message: "Endpoint?", initial: `https://${defaultAgentName.toLowerCase().replace(/[^a-z0-9-]/g, "-")}.arc402.xyz` },
+        ]);
+        const agentName = (agentAnswers.agentName as string | undefined) || defaultAgentName;
+        const serviceType = (agentAnswers.serviceType as string | undefined) || "intelligence";
+        const capabilities = ((agentAnswers.caps as string | undefined) || "research")
+          .split(",").map((s: string) => s.trim()).filter(Boolean);
+        const agentEndpoint = (agentAnswers.endpoint as string | undefined) || "";
+
+        // ── Step 6: Register agent (one MetaMask tap) ─────────────────────────
+        console.log("\n" + c.dim("── Step 6: Register agent ──────────────────────────────────────"));
+        const agentRegistryAddress2 =
+          config.agentRegistryV2Address ??
+          NETWORK_DEFAULTS[config.network]?.agentRegistryV2Address;
+        let agentRegistered = false;
+        if (agentRegistryAddress2) {
+          const registryIface = new ethers.Interface(AGENT_REGISTRY_ABI);
+          const execIface2 = new ethers.Interface(ARC402_WALLET_EXECUTE_ABI);
+          const regData = registryIface.encodeFunctionData("register", [agentName, capabilities, serviceType, agentEndpoint, ""]);
+          const execData = execIface2.encodeFunctionData("executeContractCall", [{
+            target: agentRegistryAddress2,
+            data: regData,
+            value: 0n,
+            minReturnValue: 0n,
+            maxApprovalAmount: 0n,
+            approvalToken: ethers.ZeroAddress,
+          }]);
+          try {
+            const regSpinner = startSpinner("Registering agent — approve in MetaMask...");
+            const regHash = await sendTransactionWithSession(client, session, account, chainId, {
+              to: walletAddress,
+              data: execData,
+              value: "0x0",
+            });
+            await provider.waitForTransaction(regHash, 1);
+            regSpinner.succeed("Agent registered in AgentRegistry");
+            agentRegistered = true;
+          } catch {
+            console.error(" " + c.failure + c.red(" Agent registration failed — run manually:"));
+            console.error(`   arc402 agent register --name "${agentName}" --service-type "${serviceType}" --capability "${capabilities.join(",")}" --endpoint "${agentEndpoint}"`);
+          }
+        } else {
+          console.warn(" " + c.warning + c.yellow(" agentRegistryV2Address not configured — skipping agent registration"));
+        }
+
+        // ── Step 7: Summary ───────────────────────────────────────────────────
+        console.log("\n" + c.dim("── Onboarding complete ─────────────────────────────────────────"));
+        const summaryItems: { label: string; value: string; last?: boolean }[] = [
+          { label: "Wallet", value: walletAddress },
+          { label: "Owner", value: account },
+          { label: "Machine", value: machineWallet.address + (authHash ? " (authorized)" : " (pending auth)") },
+        ];
+        if (agentRegistered) {
+          summaryItems.push({ label: "Agent", value: agentName });
+          summaryItems.push({ label: "Service", value: serviceType });
+          summaryItems.push({ label: "Endpoint", value: agentEndpoint || "(none)" });
+        }
+        summaryItems.push({ label: "Trust", value: "100 (Restricted)", last: true });
+        renderTree(summaryItems);
+        console.log("\n" + c.dim(" Next: fund your wallet with 0.002 ETH on Base"));
+        console.log("       " + c.dim("arc402 daemon start"));
         printOpenShellHint();
       } else {
         console.warn("⚠ WalletConnect not configured. Using stored private key (insecure).");

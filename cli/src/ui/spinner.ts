@@ -14,6 +14,16 @@ export interface ArcSpinner {
 }
 
 export function startSpinner(text: string): ArcSpinner {
+  if (process.env.ARC402_PRINT) {
+    process.stdout.write(text + "\n");
+    return {
+      succeed(msg?: string) { if (msg) process.stdout.write("✓ " + msg + "\n"); },
+      fail(msg?: string) { if (msg) process.stderr.write("✗ " + msg + "\n"); },
+      update(t: string) { process.stdout.write(t + "\n"); },
+      stop() {},
+    };
+  }
+
   const instance: Ora = ora({
     text,
     spinner: SPINNER_FRAMES,
