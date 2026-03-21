@@ -42,6 +42,7 @@ export function formatTimeAgo(timestampSeconds: number): string {
   const now = Math.floor(Date.now() / 1000);
   const delta = now - timestampSeconds;
 
+  if (delta < 0) return "in " + formatDuration(Math.abs(delta));
   if (delta < 60) return "just now";
   if (delta < 3600) {
     const m = Math.floor(delta / 60);

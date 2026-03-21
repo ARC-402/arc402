@@ -51,6 +51,10 @@ export interface Arc402Config {
 const CONFIG_DIR = path.join(os.homedir(), ".arc402");
 const CONFIG_PATH = process.env.ARC402_CONFIG || path.join(CONFIG_DIR, "config.json");
 
+// WalletConnect project ID — get your own at cloud.walletconnect.com
+const DEFAULT_WC_PROJECT_ID = "455e9425343b9156fce1428250c9a54a";
+export const getWcProjectId = () => process.env.WC_PROJECT_ID ?? DEFAULT_WC_PROJECT_ID;
+
 export const getConfigPath = () => CONFIG_PATH;
 
 export function loadConfig(): Arc402Config {
@@ -61,7 +65,7 @@ export function loadConfig(): Arc402Config {
     const autoConfig: Arc402Config = {
       network: "base-mainnet",
       rpcUrl: defaults.rpcUrl ?? "https://mainnet.base.org",
-      walletConnectProjectId: "455e9425343b9156fce1428250c9a54a",
+      walletConnectProjectId: getWcProjectId(),
       ownerAddress: undefined,
       policyEngineAddress: defaults.policyEngineAddress,
       trustRegistryAddress: defaults.trustRegistryAddress ?? "",
@@ -77,6 +81,7 @@ export function loadConfig(): Arc402Config {
     };
     saveConfig(autoConfig);
     console.log(`◈ Config auto-created at ${CONFIG_PATH} (Base Mainnet)`);
+    console.log("⚠ Base Mainnet — real funds at risk. Use arc402 config init for testnet.");
     return autoConfig;
   }
   return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Arc402Config;
@@ -86,6 +91,9 @@ export function saveConfig(config: Arc402Config): void {
   const configDir = path.dirname(CONFIG_PATH);
   fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
+  if (config.privateKey) {
+    console.warn("⚠ Private key stored in plaintext at ~/.arc402/config.json");
+  }
 }
 
 export const configExists = () => fs.existsSync(CONFIG_PATH);

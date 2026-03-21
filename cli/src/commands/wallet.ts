@@ -267,12 +267,15 @@ async function runCompleteOnboardingCeremony(
     const guardianInput = (guardianAns.guardian as string | undefined)?.trim() ?? "";
     if (guardianInput.toLowerCase() === "g") {
       const generatedGuardian = ethers.Wallet.createRandom();
-      config.guardianPrivateKey = generatedGuardian.privateKey;
+      // Save guardian private key to a separate restricted file, NOT config.json
+      const guardianKeyPath = path.join(os.homedir(), ".arc402", "guardian.key");
+      fs.mkdirSync(path.dirname(guardianKeyPath), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(guardianKeyPath, generatedGuardian.privateKey + "\n", { mode: 0o400 });
+      // Only save address (not private key) to config
       config.guardianAddress = generatedGuardian.address;
       saveConfig(config);
       guardianAddress = generatedGuardian.address;
-      console.log("\n " + c.warning + " IMPORTANT: Save this guardian private key (emergency freeze key):");
-      console.log("   " + c.dim(generatedGuardian.privateKey));
+      console.log("\n " + c.warning + " Guardian key saved to ~/.arc402/guardian.key — move offline for security");
       console.log("   " + c.dim("Address: ") + c.white(generatedGuardian.address) + "\n");
       const guardianIface = new ethers.Interface(["function setGuardian(address _guardian) external"]);
       await sendTx(
@@ -686,16 +689,40 @@ export function registerWalletCommands(program: Command): void {
 
   // ─── import ────────────────────────────────────────────────────────────────
 
-  wallet.command("import <privateKey>")
-    .description("Import an existing private key")
+  wallet.command("import")
+    .description("Import an existing private key (use --key-file or stdin prompt)")
     .option("--network <network>", "Network (base-mainnet or base-sepolia)", "base-sepolia")
-    .action(async (privateKey, opts) => {
+    .option("--key-file <path>", "Read private key from file instead of prompting")
+    .action(async (opts) => {
       const network = opts.network as "base-mainnet" | "base-sepolia";
       const defaults = NETWORK_DEFAULTS[network];
       if (!defaults) {
         console.error(`Unknown network: ${network}. Use base-mainnet or base-sepolia.`);
         process.exit(1);
       }
+
+      let privateKey: string;
+      if (opts.keyFile) {
+        try {
+          privateKey = fs.readFileSync(opts.keyFile, "utf-8").trim();
+        } catch (e) {
+          console.error(`Cannot read key file: ${e instanceof Error ? e.message : String(e)}`);
+          process.exit(1);
+        }
+      } else {
+        // Interactive prompt — hidden input avoids shell history
+        const answer = await prompts({
+          type: "password",
+          name: "key",
+          message: "Paste private key (hidden):",
+        });
+        privateKey = ((answer.key as string | undefined) ?? "").trim();
+        if (!privateKey) {
+          console.error("No private key entered.");
+          process.exit(1);
+        }
+      }
+
       let imported: ethers.Wallet;
       try {
         imported = new ethers.Wallet(privateKey);
@@ -850,8 +877,32 @@ export function registerWalletCommands(program: Command): void {
     .option("--smart-wallet", "Connect via Base Smart Wallet (Coinbase Wallet SDK) instead of WalletConnect")
     .option("--hardware", "Hardware wallet mode: show raw wc: URI only (for Ledger Live, Trezor Suite, etc.)")
     .option("--sponsored", "Use CDP paymaster for gas sponsorship (requires paymasterUrl + cdpKeyName + CDP_PRIVATE_KEY env)")
+    .option("--dry-run", "Simulate the deployment ceremony without sending transactions")
     .action(async (opts) => {
       const config = loadConfig();
+
+      if (opts.dryRun) {
+        const factoryAddr = config.walletFactoryAddress ?? NETWORK_DEFAULTS[config.network]?.walletFactoryAddress ?? "(not configured)";
+        const chainId = config.network === "base-mainnet" ? 8453 : 84532;
+        console.log();
+        console.log(" " + c.dim("── Dry run: wallet deploy ──────────────────────────────────────"));
+        console.log(" " + c.dim("Network:         ") + c.white(config.network));
+        console.log(" " + c.dim("Chain ID:        ") + c.white(String(chainId)));
+        console.log(" " + c.dim("RPC:             ") + c.white(config.rpcUrl));
+        console.log(" " + c.dim("WalletFactory:   ") + c.white(factoryAddr));
+        console.log(" " + c.dim("Signing method:  ") + c.white(opts.smartWallet ? "Base Smart Wallet" : opts.hardware ? "Hardware (WC URI)" : "WalletConnect"));
+        console.log(" " + c.dim("Sponsored:       ") + c.white(opts.sponsored ? "yes" : "no"));
+        console.log();
+        console.log(" " + c.dim("Steps that would run:"));
+        console.log("   1. Connect " + (opts.smartWallet ? "Coinbase Smart Wallet" : "WalletConnect") + " session");
+        console.log("   2. Call WalletFactory.createWallet() → deploy ARC402Wallet");
+        console.log("   3. Save walletContractAddress to config");
+        console.log("   4. Run onboarding ceremony (PolicyEngine, machine key, agent registration)");
+        console.log();
+        console.log(" " + c.dim("No transactions sent (--dry-run mode)."));
+        console.log();
+        return;
+      }
       const factoryAddress = config.walletFactoryAddress ?? NETWORK_DEFAULTS[config.network]?.walletFactoryAddress;
       if (!factoryAddress) {
         console.error("walletFactoryAddress not found in config or NETWORK_DEFAULTS. Add walletFactoryAddress to your config.");

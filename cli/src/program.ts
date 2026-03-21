@@ -27,6 +27,7 @@ import { registerVerifyCommand } from "./commands/verify";
 import { registerContractInteractionCommands } from "./commands/contract-interaction";
 import { registerWatchtowerCommands } from "./commands/watchtower";
 import { registerColdStartCommands } from "./commands/coldstart";
+import { registerDoctorCommand } from "./commands/doctor";
 import { registerMigrateCommands } from "./commands/migrate";
 import { registerFeedCommand } from "./commands/feed";
 import { registerArenaCommands } from "./commands/arena";
@@ -72,6 +73,7 @@ export function createProgram(): Command {
   registerContractInteractionCommands(program);
   registerWatchtowerCommands(program);
   registerColdStartCommands(program);
+  registerDoctorCommand(program);
   registerMigrateCommands(program);
   registerFeedCommand(program);
   registerArenaCommands(program);

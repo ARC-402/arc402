@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import prompts from "prompts";
 import chalk from "chalk";
-import { Arc402Config, NETWORK_DEFAULTS, configExists, loadConfig, saveConfig, getSubdomainApi } from "../config";
+import { Arc402Config, NETWORK_DEFAULTS, configExists, loadConfig, saveConfig, getSubdomainApi, getWcProjectId } from "../config";
 import { c } from '../ui/colors';
 
 export function registerConfigCommands(program: Command): void {
@@ -17,7 +17,7 @@ export function registerConfigCommands(program: Command): void {
     const defaults = NETWORK_DEFAULTS[answers.network] ?? {};
     const cfg: Arc402Config = {
       network: answers.network,
-      walletConnectProjectId: "455e9425343b9156fce1428250c9a54a",
+      walletConnectProjectId: getWcProjectId(),
       rpcUrl: defaults.rpcUrl ?? "https://mainnet.base.org",
       trustRegistryAddress: defaults.trustRegistryAddress ?? "",
       agentRegistryAddress: defaults.agentRegistryV2Address ?? defaults.agentRegistryAddress,
@@ -50,6 +50,16 @@ export function registerConfigCommands(program: Command): void {
     console.log(JSON.stringify({ ...cfg, privateKey: cfg.privateKey ? "***" : undefined, subdomainApi: getSubdomainApi(cfg) }, null, 2));
   });
   config.command("set <key> <value>").description("Set a config value: arc402 config set <key> <value>").action((key: string, value: string) => {
+    const BLOCKED_KEYS = ["privateKey", "guardianPrivateKey", "cdpPrivateKey", "machineKey"];
+    const ALLOWED_KEYS = ["network", "rpcUrl", "walletContractAddress", "ownerAddress", "walletConnectProjectId", "subdomainApi", "telegramBotToken", "telegramChatId", "telegramThreadId"];
+    if (BLOCKED_KEYS.includes(key)) {
+      console.error(chalk.red("Cannot set sensitive keys via config set. Edit ~/.arc402/config.json directly."));
+      process.exit(1);
+    }
+    if (!ALLOWED_KEYS.includes(key)) {
+      console.error(chalk.red(`Unknown config key: ${key}. Allowed keys: ${ALLOWED_KEYS.join(", ")}`));
+      process.exit(1);
+    }
     const cfg = loadConfig();
     (cfg as unknown as Record<string, unknown>)[key] = value;
     saveConfig(cfg);

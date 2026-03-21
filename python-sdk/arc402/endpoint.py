@@ -17,14 +17,20 @@ DEFAULT_REGISTRY_ADDRESS = "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865"
 
 def resolve_endpoint(
     agent_address: str,
-    rpc_url: str,
+    rpc_url: str = "",
     registry_address: str = DEFAULT_REGISTRY_ADDRESS,
+    *,
+    w3: "Web3 | None" = None,
 ) -> str:
     """Read an agent's public HTTP endpoint from AgentRegistry.
 
+    Either ``rpc_url`` or an existing ``w3`` Web3 instance must be provided.
     Returns an empty string if the agent is not registered or has no endpoint.
     """
-    w3 = Web3(Web3.HTTPProvider(rpc_url))
+    if w3 is None:
+        if not rpc_url:
+            raise ValueError("Either rpc_url or w3 must be provided")
+        w3 = Web3(Web3.HTTPProvider(rpc_url))
     registry = w3.eth.contract(
         address=Web3.to_checksum_address(registry_address),
         abi=AgentRegistry_ABI,

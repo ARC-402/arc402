@@ -6,17 +6,11 @@ import { createProgram } from "./program";
 import { getBannerLines, BannerConfig } from "./ui/banner";
 import { c } from "./ui/colors";
 
-// ─── Sentinel to intercept process.exit() from commands ──────────────────────
-
-class REPLExitSignal extends Error {
-  constructor(public readonly code: number = 0) {
-    super("repl-exit-signal");
-  }
-}
-
 // ─── Config / banner helpers ──────────────────────────────────────────────────
 
 const CONFIG_PATH = path.join(os.homedir(), ".arc402", "config.json");
+const HISTORY_PATH = path.join(os.homedir(), ".arc402", "repl_history");
+const MAX_HISTORY = 1000;
 
 async function loadBannerConfig(): Promise<BannerConfig | undefined> {
   if (!fs.existsSync(CONFIG_PATH)) return undefined;
@@ -99,10 +93,21 @@ function parseTokens(input: string): string[] {
   let current = "";
   let inQuote = false;
   let quoteChar = "";
+  let escape = false;
   for (const ch of input) {
+    if (escape) {
+      current += ch;
+      escape = false;
+      continue;
+    }
     if (inQuote) {
-      if (ch === quoteChar) inQuote = false;
-      else current += ch;
+      if (quoteChar === '"' && ch === "\\") {
+        escape = true;
+      } else if (ch === quoteChar) {
+        inQuote = false;
+      } else {
+        current += ch;
+      }
     } else if (ch === '"' || ch === "'") {
       inQuote = true;
       quoteChar = ch;
@@ -173,6 +178,14 @@ class TUI {
 
   async start(): Promise<void> {
     this.bannerCfg = await loadBannerConfig();
+
+    // Load persisted history
+    try {
+      if (fs.existsSync(HISTORY_PATH)) {
+        const lines = fs.readFileSync(HISTORY_PATH, "utf-8").split("\n").filter(Boolean);
+        this.history = lines.slice(-MAX_HISTORY);
+      }
+    } catch { /* non-fatal */ }
 
     // Build command metadata for completion
     const template = createProgram();
@@ -529,42 +542,32 @@ class TUI {
       writeErr: (str) => process.stderr.write(str),
     });
 
-    const origExit = process.exit;
-    (process as NodeJS.Process).exit = ((code?: number) => {
-      throw new REPLExitSignal(code ?? 0);
-    }) as typeof process.exit;
-
     try {
       await prog.parseAsync(["node", "arc402", ...tokens]);
     } catch (err) {
-      if (err instanceof REPLExitSignal) {
-        // Command called process.exit() — normal
+      const e = err as { code?: string; message?: string };
+      if (
+        e.code === "commander.helpDisplayed" ||
+        e.code === "commander.version" ||
+        e.code === "commander.executeSubCommandAsync"
+      ) {
+        // already written or normal exit
+      } else if (e.code === "commander.unknownCommand") {
+        process.stdout.write(
+          `\n ${c.failure} ${chalk.red(`Unknown command: ${chalk.white(tokens[0])}`)} \n`
+        );
+        process.stdout.write(
+          chalk.dim("  Type 'help' for available commands\n")
+        );
+      } else if (e.code?.startsWith("commander.")) {
+        process.stdout.write(
+          `\n ${c.failure} ${chalk.red(e.message ?? String(err))}\n`
+        );
       } else {
-        const e = err as { code?: string; message?: string };
-        if (
-          e.code === "commander.helpDisplayed" ||
-          e.code === "commander.version"
-        ) {
-          // already written
-        } else if (e.code === "commander.unknownCommand") {
-          process.stdout.write(
-            `\n ${c.failure} ${chalk.red(`Unknown command: ${chalk.white(tokens[0])}`)} \n`
-          );
-          process.stdout.write(
-            chalk.dim("  Type 'help' for available commands\n")
-          );
-        } else if (e.code?.startsWith("commander.")) {
-          process.stdout.write(
-            `\n ${c.failure} ${chalk.red(e.message ?? String(err))}\n`
-          );
-        } else {
-          process.stdout.write(
-            `\n ${c.failure} ${chalk.red(e.message ?? String(err))}\n`
-          );
-        }
+        process.stdout.write(
+          `\n ${c.failure} ${chalk.red(e.message ?? String(err))}\n`
+        );
       }
-    } finally {
-      (process as NodeJS.Process).exit = origExit;
     }
 
     // Restore raw mode + our listener (interactive commands may have toggled it)
@@ -579,7 +582,8 @@ class TUI {
 
   // ── OpenClaw chat ─────────────────────────────────────────────────────────────
 
-  private async sendChat(message: string): Promise<void> {
+  private async sendChat(rawMessage: string): Promise<void> {
+    const message = rawMessage.trim().slice(0, 10000);
     write(ansi.move(this.scrollBot, 1));
 
     let res: Response;
@@ -762,6 +766,13 @@ class TUI {
   // ── Exit ──────────────────────────────────────────────────────────────────────
 
   private exitGracefully(): void {
+    // Save history
+    try {
+      const toSave = this.history.slice(-MAX_HISTORY);
+      fs.mkdirSync(path.dirname(HISTORY_PATH), { recursive: true });
+      fs.writeFileSync(HISTORY_PATH, toSave.join("\n") + "\n", { mode: 0o600 });
+    } catch { /* non-fatal */ }
+
     write(ansi.move(this.inputRow, 1) + ansi.clearLine);
     write(" " + chalk.cyanBright("◈") + chalk.dim(" goodbye") + "\n");
     write(ansi.resetScroll);

@@ -443,6 +443,34 @@
   color: #4b5563;
 }
 
+/* ── Contracts section ── */
+.contractsTable {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 24px;
+}
+.contractRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+}
+.contractName {
+  color: #d1d5db;
+  min-width: 220px;
+}
+.contractAddr {
+  color: #6b7280;
+}
+.contractsVerified {
+  margin-top: 16px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: #4b5563;
+}
+
 /* ── Mobile ── */
 @media (max-width: 640px) {
   .hero { padding: 60px 20px 60px; }

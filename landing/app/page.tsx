@@ -328,6 +328,23 @@ export default function Home() {
         </p>
       </section>
 
+      {/* ── Contracts ── */}
+      <section className={styles.flowSection}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionNum}>03</span>
+          <h2 className={styles.sectionTitle}>Contracts</h2>
+        </div>
+        <div className={styles.contractsTable}>
+          {CONTRACTS.map(c => (
+            <div key={c.addr} className={styles.contractRow}>
+              <span className={styles.contractName}>{c.name}</span>
+              <span className={styles.contractAddr}>{short(c.addr)}</span>
+            </div>
+          ))}
+        </div>
+        <p className={styles.contractsVerified}>Addresses verified 2026-03-21</p>
+      </section>
+
       {/* ── Footer ── */}
       <footer className={styles.footer}>
         <div className={styles.footerInner}>

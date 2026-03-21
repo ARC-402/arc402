@@ -14,6 +14,8 @@ import * as http from "http";
 import { ethers } from "ethers";
 import Database from "better-sqlite3";
 
+import * as crypto from "crypto";
+
 import {
   loadDaemonConfig,
   loadMachineKey,
@@ -147,6 +149,49 @@ function openStateDB(dbPath: string): DaemonDB {
   };
 }
 
+// ─── Auth token ───────────────────────────────────────────────────────────────
+
+const DAEMON_TOKEN_FILE = path.join(path.dirname(DAEMON_SOCK), "daemon.token");
+
+function generateApiToken(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function saveApiToken(token: string): void {
+  fs.mkdirSync(path.dirname(DAEMON_TOKEN_FILE), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(DAEMON_TOKEN_FILE, token, { mode: 0o600 });
+}
+
+function loadApiToken(): string | null {
+  try {
+    return fs.readFileSync(DAEMON_TOKEN_FILE, "utf-8").trim();
+  } catch {
+    return null;
+  }
+}
+
+// ─── Rate limiter ─────────────────────────────────────────────────────────────
+
+interface RateBucket { count: number; resetTime: number }
+const rateLimitMap = new Map<string, RateBucket>();
+const RATE_LIMIT = 30;
+const RATE_WINDOW_MS = 60_000;
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  let bucket = rateLimitMap.get(ip);
+  if (!bucket || now >= bucket.resetTime) {
+    bucket = { count: 0, resetTime: now + RATE_WINDOW_MS };
+    rateLimitMap.set(ip, bucket);
+  }
+  bucket.count++;
+  return bucket.count <= RATE_LIMIT;
+}
+
+// ─── Body size limit ──────────────────────────────────────────────────────────
+
+const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
+
 // ─── Logger ───────────────────────────────────────────────────────────────────
 
 function openLogger(logPath: string, foreground: boolean): (entry: Record<string, unknown>) => void {
@@ -181,7 +226,7 @@ interface IpcContext {
   bundlerEndpoint: string;
 }
 
-function startIpcServer(ctx: IpcContext, log: ReturnType<typeof openLogger>): net.Server {
+function startIpcServer(ctx: IpcContext, log: ReturnType<typeof openLogger>, apiToken: string): net.Server {
   // Remove stale socket
   if (fs.existsSync(DAEMON_SOCK)) {
     fs.unlinkSync(DAEMON_SOCK);
@@ -189,17 +234,31 @@ function startIpcServer(ctx: IpcContext, log: ReturnType<typeof openLogger>): ne
 
   const server = net.createServer((socket) => {
     let buf = "";
+    let authenticated = false;
     socket.on("data", (data) => {
       buf += data.toString();
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
       for (const line of lines) {
         if (!line.trim()) continue;
-        let cmd: { command: string; id?: string; reason?: string };
+        let cmd: { command: string; id?: string; reason?: string; auth?: string };
         try {
-          cmd = JSON.parse(line) as { command: string; id?: string; reason?: string };
+          cmd = JSON.parse(line) as { command: string; id?: string; reason?: string; auth?: string };
         } catch {
           socket.write(JSON.stringify({ ok: false, error: "invalid_json" }) + "\n");
+          continue;
+        }
+
+        // First message must be auth
+        if (!authenticated) {
+          if (cmd.auth === apiToken) {
+            authenticated = true;
+            socket.write(JSON.stringify({ ok: true, authenticated: true }) + "\n");
+          } else {
+            log({ event: "ipc_auth_failed" });
+            socket.write(JSON.stringify({ ok: false, error: "unauthorized" }) + "\n");
+            socket.destroy();
+          }
           continue;
         }
 
@@ -547,11 +606,42 @@ export async function runDaemon(foreground = false): Promise<void> {
     log({ event: "pid_written", pid: process.pid, path: DAEMON_PID });
   }
 
+  // ── Generate and save API token ──────────────────────────────────────────
+  const apiToken = generateApiToken();
+  saveApiToken(apiToken);
+  log({ event: "auth_token_saved", path: DAEMON_TOKEN_FILE });
+
   // ── Start IPC socket ─────────────────────────────────────────────────────
-  const ipcServer = startIpcServer(ipcCtx, log);
+  const ipcServer = startIpcServer(ipcCtx, log, apiToken);
 
   // ── Start HTTP relay server (public endpoint) ────────────────────────────
   const httpPort = config.relay.listen_port ?? 4402;
+
+  /**
+   * Read request body with a size cap. Destroys the request and sends 413
+   * if the body exceeds MAX_BODY_SIZE. Returns null in that case.
+   */
+  function readBody(req: http.IncomingMessage, res: http.ServerResponse): Promise<string | null> {
+    return new Promise((resolve) => {
+      let body = "";
+      let size = 0;
+      req.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > MAX_BODY_SIZE) {
+          req.destroy();
+          res.writeHead(413, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "payload_too_large" }));
+          resolve(null);
+          return;
+        }
+        body += chunk.toString();
+      });
+      req.on("end", () => { resolve(body); });
+      req.on("error", () => { resolve(null); });
+    });
+  }
+
+  const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status"]);
 
   const httpServer = http.createServer(async (req, res) => {
     // CORS headers
@@ -562,6 +652,27 @@ export async function runDaemon(foreground = false): Promise<void> {
 
     const url = new URL(req.url || "/", `http://localhost:${httpPort}`);
     const pathname = url.pathname;
+
+    // Rate limiting (all endpoints)
+    const clientIp = (req.socket.remoteAddress ?? "unknown").replace(/^::ffff:/, "");
+    if (!checkRateLimit(clientIp)) {
+      log({ event: "rate_limited", ip: clientIp, path: pathname });
+      res.writeHead(429, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "too_many_requests" }));
+      return;
+    }
+
+    // Auth required on all POST endpoints (GET public paths are open)
+    if (req.method === "POST" || (req.method === "GET" && !PUBLIC_GET_PATHS.has(pathname))) {
+      const authHeader = req.headers["authorization"] ?? "";
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      if (token !== apiToken) {
+        log({ event: "http_unauthorized", ip: clientIp, path: pathname });
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+    }
 
     // Health / info
     if (pathname === "/" || pathname === "/health") {
@@ -594,10 +705,9 @@ export async function runDaemon(foreground = false): Promise<void> {
 
     // Receive hire proposal
     if (pathname === "/hire" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", async () => {
-        try {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
           const msg = JSON.parse(body) as Record<string, unknown>;
 
           // Feed into the hire listener's message handler
@@ -615,6 +725,7 @@ export async function runDaemon(foreground = false): Promise<void> {
           // Dedup
           const existing = db.getHireRequest(proposal.messageId);
           if (existing) {
+            log({ event: "hire_duplicate", id: proposal.messageId, status: existing.status });
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ status: existing.status, id: proposal.messageId }));
             return;
@@ -669,16 +780,14 @@ export async function runDaemon(foreground = false): Promise<void> {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "invalid_request" }));
         }
-      });
       return;
     }
 
     // Handshake acknowledgment endpoint
     if (pathname === "/handshake" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", () => {
-        try {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
           const msg = JSON.parse(body);
           log({ event: "handshake_received", from: msg.from, type: msg.type, note: msg.note });
           res.writeHead(200, { "Content-Type": "application/json" });
@@ -687,171 +796,156 @@ export async function runDaemon(foreground = false): Promise<void> {
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "invalid_request" }));
         }
-      });
       return;
     }
 
     // POST /hire/accepted — provider accepted, client notified
     if (pathname === "/hire/accepted" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", async () => {
-        try {
-          const msg = JSON.parse(body) as Record<string, unknown>;
-          const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
-          const from = String(msg.from ?? "");
-          log({ event: "hire_accepted_inbound", agreementId, from });
-          if (config.notifications.notify_on_hire_accepted) {
-            await notifier.notifyHireAccepted(agreementId, agreementId);
-          }
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid_request" }));
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
+        const from = String(msg.from ?? "");
+        log({ event: "hire_accepted_inbound", agreementId, from });
+        if (config.notifications.notify_on_hire_accepted) {
+          await notifier.notifyHireAccepted(agreementId, agreementId);
         }
-      });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
       return;
     }
 
     // POST /message — off-chain negotiation message
     if (pathname === "/message" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", () => {
-        try {
-          const msg = JSON.parse(body) as Record<string, unknown>;
-          const from = String(msg.from ?? "");
-          const to = String(msg.to ?? "");
-          const content = String(msg.content ?? "");
-          const timestamp = Number(msg.timestamp ?? Date.now());
-          log({ event: "message_received", from, to, timestamp, content_len: content.length });
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid_request" }));
-        }
-      });
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const from = String(msg.from ?? "");
+        const to = String(msg.to ?? "");
+        const content = String(msg.content ?? "");
+        const timestamp = Number(msg.timestamp ?? Date.now());
+        log({ event: "message_received", from, to, timestamp, content_len: content.length });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
       return;
     }
 
     // POST /delivery — provider committed a deliverable
     if (pathname === "/delivery" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", async () => {
-        try {
-          const msg = JSON.parse(body) as Record<string, unknown>;
-          const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
-          const deliverableHash = String(msg.deliverableHash ?? msg.deliverable_hash ?? "");
-          const from = String(msg.from ?? "");
-          log({ event: "delivery_received", agreementId, deliverableHash, from });
-          // Update DB: mark delivered
-          const active = db.listActiveHireRequests();
-          const found = active.find(r => r.agreement_id === agreementId);
-          if (found) db.updateHireRequestStatus(found.id, "delivered");
-          if (config.notifications.notify_on_delivery) {
-            await notifier.notifyDelivery(agreementId, deliverableHash, "");
-          }
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid_request" }));
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
+        const deliverableHash = String(msg.deliverableHash ?? msg.deliverable_hash ?? "");
+        const from = String(msg.from ?? "");
+        log({ event: "delivery_received", agreementId, deliverableHash, from });
+        // Update DB: mark delivered
+        const active = db.listActiveHireRequests();
+        const found = active.find(r => r.agreement_id === agreementId);
+        if (found) db.updateHireRequestStatus(found.id, "delivered");
+        if (config.notifications.notify_on_delivery) {
+          await notifier.notifyDelivery(agreementId, deliverableHash, "");
         }
-      });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
       return;
     }
 
     // POST /delivery/accepted — client accepted delivery, payment releasing
     if (pathname === "/delivery/accepted" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", () => {
-        try {
-          const msg = JSON.parse(body) as Record<string, unknown>;
-          const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
-          const from = String(msg.from ?? "");
-          log({ event: "delivery_accepted_inbound", agreementId, from });
-          // Update DB: mark complete
-          const all = db.listActiveHireRequests();
-          const found = all.find(r => r.agreement_id === agreementId);
-          if (found) db.updateHireRequestStatus(found.id, "complete");
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid_request" }));
-        }
-      });
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
+        const from = String(msg.from ?? "");
+        log({ event: "delivery_accepted_inbound", agreementId, from });
+        // Update DB: mark complete
+        const all = db.listActiveHireRequests();
+        const found = all.find(r => r.agreement_id === agreementId);
+        if (found) db.updateHireRequestStatus(found.id, "complete");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
       return;
     }
 
     // POST /dispute — dispute raised against this agent
     if (pathname === "/dispute" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", async () => {
-        try {
-          const msg = JSON.parse(body) as Record<string, unknown>;
-          const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
-          const reason = String(msg.reason ?? "");
-          const from = String(msg.from ?? "");
-          log({ event: "dispute_received", agreementId, reason, from });
-          if (config.notifications.notify_on_dispute) {
-            await notifier.notifyDispute(agreementId, from);
-          }
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid_request" }));
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
+        const reason = String(msg.reason ?? "");
+        const from = String(msg.from ?? "");
+        log({ event: "dispute_received", agreementId, reason, from });
+        if (config.notifications.notify_on_dispute) {
+          await notifier.notifyDispute(agreementId, from);
         }
-      });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
       return;
     }
 
     // POST /dispute/resolved — dispute resolved by arbitrator
     if (pathname === "/dispute/resolved" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", () => {
-        try {
-          const msg = JSON.parse(body) as Record<string, unknown>;
-          const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
-          const outcome = String(msg.outcome ?? "");
-          const from = String(msg.from ?? "");
-          log({ event: "dispute_resolved_inbound", agreementId, outcome, from });
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid_request" }));
-        }
-      });
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
+        const outcome = String(msg.outcome ?? "");
+        const from = String(msg.from ?? "");
+        log({ event: "dispute_resolved_inbound", agreementId, outcome, from });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
       return;
     }
 
     // POST /workroom/status — workroom lifecycle events
     if (pathname === "/workroom/status" && req.method === "POST") {
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", () => {
-        try {
-          const msg = JSON.parse(body) as Record<string, unknown>;
-          const event = String(msg.event ?? "");
-          const agentAddress = String(msg.agentAddress ?? config.wallet.contract_address);
-          const jobId = msg.jobId ? String(msg.jobId) : undefined;
-          const timestamp = Number(msg.timestamp ?? Date.now());
-          log({ event: "workroom_lifecycle", workroom_event: event, agentAddress, jobId, timestamp });
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "invalid_request" }));
-        }
-      });
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const event = String(msg.event ?? "");
+        const agentAddress = String(msg.agentAddress ?? config.wallet.contract_address);
+        const jobId = msg.jobId ? String(msg.jobId) : undefined;
+        const timestamp = Number(msg.timestamp ?? Date.now());
+        log({ event: "workroom_lifecycle", workroom_event: event, agentAddress, jobId, timestamp });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
       return;
     }
 
