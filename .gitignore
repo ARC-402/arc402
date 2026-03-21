@@ -38,10 +38,9 @@ E2E-TEST-SPEC.md
 python-sdk/examples/
 docs/audit-briefs/
 docs/post-audit-launch-checklist.md
-web/.next/
+**/.next/
+**/out/
 web/tsconfig.tsbuildinfo
-web/out/
-landing/.next/\nlanding/out/
 
 # ─── Private IP (not for public repo) ───
 reference/contracts/
@@ -104,8 +103,4 @@ cli/src/drain-v4.ts
 cli/test/
 DEPLOY-HANDSHAKE.md
 TODO.md
-landing/.next/
-landing/out/
 brand/
-arena/.next/
-arena/out/

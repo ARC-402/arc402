@@ -426,6 +426,81 @@ async function runCompleteOnboardingCeremony(
     console.log(" " + c.warning + " AgentRegistry address not configured — skipping");
   }
 
+  // ── Step 7: Workroom Init ─────────────────────────────────────────────────
+  console.log("\n" + c.dim("── Step 7: Workroom ────────────────────────────────────────────"));
+
+  let workroomInitialized = false;
+  let dockerFound = false;
+  try {
+    const dockerCheck = spawnSync("docker", ["--version"], { encoding: "utf-8", timeout: 5000 });
+    dockerFound = dockerCheck.status === 0;
+  } catch { dockerFound = false; }
+
+  if (dockerFound) {
+    console.log(" " + c.dim("Docker found — initializing workroom..."));
+    try {
+      const initResult = spawnSync(process.execPath, [process.argv[1], "workroom", "init"], {
+        encoding: "utf-8",
+        timeout: 120000,
+        env: { ...process.env },
+      });
+      workroomInitialized = initResult.status === 0;
+      if (workroomInitialized) {
+        console.log(" " + c.success + " Workroom initialized");
+      } else {
+        console.log(" " + c.warning + " Workroom init incomplete — run: arc402 workroom init");
+      }
+    } catch {
+      console.log(" " + c.warning + " Workroom init failed — run: arc402 workroom init");
+    }
+  } else {
+    console.log(" " + c.warning + " Docker not found");
+    console.log("   Install Docker: https://docs.docker.com/get-docker/");
+    console.log("   Or run daemon in host mode: " + c.white("arc402 daemon start --host"));
+  }
+
+  // ── Step 8: Daemon Start ──────────────────────────────────────────────────
+  console.log("\n" + c.dim("── Step 8: Daemon ──────────────────────────────────────────────"));
+
+  let daemonRunning = false;
+  const relayPort = 4402;
+
+  if (workroomInitialized) {
+    try {
+      const startResult = spawnSync(process.execPath, [process.argv[1], "workroom", "start"], {
+        encoding: "utf-8",
+        timeout: 30000,
+        env: { ...process.env },
+      });
+      daemonRunning = startResult.status === 0;
+      if (daemonRunning) {
+        console.log(" " + c.success + " Daemon online (port " + relayPort + ")");
+      } else {
+        console.log(" " + c.warning + " Daemon start failed — run: arc402 workroom start");
+      }
+    } catch {
+      console.log(" " + c.warning + " Daemon start failed — run: arc402 workroom start");
+    }
+  } else if (!dockerFound) {
+    try {
+      const startResult = spawnSync(process.execPath, [process.argv[1], "daemon", "start", "--host"], {
+        encoding: "utf-8",
+        timeout: 30000,
+        env: { ...process.env },
+      });
+      daemonRunning = startResult.status === 0;
+      if (daemonRunning) {
+        console.log(" " + c.success + " Daemon online — host mode (port " + relayPort + ")");
+      } else {
+        console.log(" " + c.warning + " Daemon not started — run: arc402 daemon start --host");
+      }
+    } catch {
+      console.log(" " + c.warning + " Daemon not started — run: arc402 daemon start --host");
+    }
+  } else {
+    console.log(" " + c.warning + " Daemon not started — run: arc402 workroom init first");
+  }
+
   // ── Step 6: Summary ───────────────────────────────────────────────────────
   const trustScore = await (async () => {
     try {
@@ -434,6 +509,16 @@ async function runCompleteOnboardingCeremony(
       return s.toString();
     } catch { return "100"; }
   })();
+
+  const workroomLabel = dockerFound
+    ? (workroomInitialized ? (daemonRunning ? c.green("✓ Running") : c.yellow("✓ Initialized")) : c.yellow("⚠ Init needed"))
+    : c.yellow("⚠ No Docker");
+  const daemonLabel = daemonRunning
+    ? c.green("✓ Online (port " + relayPort + ")")
+    : c.dim("not started");
+  const endpointLabel = agentEndpoint
+    ? c.white(agentEndpoint) + c.dim(` → localhost:${relayPort}`)
+    : c.dim("—");
 
   console.log("\n " + c.success + c.white(" Onboarding complete"));
   renderTree([
@@ -446,11 +531,12 @@ async function runCompleteOnboardingCeremony(
     { label: "Hire limit", value: c.white(hireLimit + " ETH") },
     { label: "Agent",      value: agentName ? c.white(agentName) : c.dim("not registered") },
     { label: "Service",    value: agentServiceType ? c.white(agentServiceType) : c.dim("—") },
-    { label: "Endpoint",   value: agentEndpoint ? c.white(agentEndpoint) : c.dim("—") },
+    { label: "Workroom",   value: workroomLabel },
+    { label: "Daemon",     value: daemonLabel },
+    { label: "Endpoint",   value: endpointLabel },
     { label: "Trust",      value: c.white(`${trustScore}`), last: true },
   ]);
   console.log("\n " + c.dim("Next: fund your wallet with 0.002 ETH on Base"));
-  console.log(" " + c.dim("      arc402 daemon start"));
 }
 
 function printOpenShellHint(): void {
