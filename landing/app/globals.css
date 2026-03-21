@@ -11,8 +11,8 @@
   --terminal-green: #4ade80;
   --terminal-blue: #60a5fa;
   --terminal-dim: #6b7280;
-  --mono: var(--font-vt323), 'VT323', monospace;
-  --sans: var(--font-ibm-plex), 'IBM Plex Sans', sans-serif;
+  --mono: 'Times New Roman', Times, serif;
+  --sans: var(--font-roboto), 'Roboto', sans-serif;
 }
 
 body {
