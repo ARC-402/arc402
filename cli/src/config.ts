@@ -61,7 +61,7 @@ export function loadConfig(): Arc402Config {
       network: "base-mainnet",
       rpcUrl: defaults.rpcUrl ?? "https://mainnet.base.org",
       trustRegistryAddress: defaults.trustRegistryAddress ?? "",
-      walletConnectProjectId: "2bc39e3b38de7ef7deeed1e3dbbe6ad6",
+      walletConnectProjectId: "455e9425343b9156fce1428250c9a54a",
       agentRegistryAddress: (defaults as unknown as Record<string,string>).agentRegistryV2Address ?? defaults.agentRegistryAddress,
       serviceAgreementAddress: defaults.serviceAgreementAddress,
       reputationOracleAddress: defaults.reputationOracleAddress,
