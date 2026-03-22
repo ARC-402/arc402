@@ -54,7 +54,7 @@ export function Viewport({ lines, scrollOffset, isAutoScroll }: ViewportProps) {
   const canScrollDown = scrollOffset > 0;
 
   return (
-    <Box flexDirection="column" flexGrow={1} overflow="hidden">
+    <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" flexGrow={1}>
         {paddedLines.map((line, i) => (
           <Text key={i}>{line}</Text>
