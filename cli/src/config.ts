@@ -35,6 +35,7 @@ export interface Arc402Config {
   migrationRegistryAddress?: string;
   handshakeAddress?: string;
   computeAgreementAddress?: string;
+  subscriptionAgreementAddress?: string;
   paymasterUrl?: string;    // CDP paymaster endpoint
   cdpKeyName?: string;      // CDP API key name (org/.../apiKeys/...)
   cdpPrivateKey?: string;   // CDP EC private key — base64 DER SEC1 (store in CDP_PRIVATE_KEY env var)
@@ -102,6 +103,8 @@ export function loadConfig(): Arc402Config {
       walletFactoryAddress: defaults.walletFactoryAddress,
       sessionChannelsAddress: defaults.sessionChannelsAddress,
       disputeModuleAddress: defaults.disputeModuleAddress,
+      computeAgreementAddress: defaults.computeAgreementAddress,
+      subscriptionAgreementAddress: defaults.subscriptionAgreementAddress,
       deviceId: thisDeviceId,
     };
     saveConfig(autoConfig);
@@ -182,6 +185,8 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     vouchingRegistryAddress:       "0x94519194Bf17865770faD59eF581feC512Ae99c9",
     migrationRegistryAddress:      "0xb60B62357b90F254f555f03B162a30E22890e3B5",
     handshakeAddress:              "0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3",
+    computeAgreementAddress:       "0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7",
+    subscriptionAgreementAddress:  "0xe1b6D3d0890E09582166EB450a78F6bff038CE5A",
   },
   "base-sepolia": {
     rpcUrl: "https://sepolia.base.org",

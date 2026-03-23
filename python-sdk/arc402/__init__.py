@@ -73,6 +73,10 @@ from .compute import ComputeAgreementClient, ComputeSession, ComputeUsageReport
 
 ARC402Operator = ARC402Wallet
 
+# Base Mainnet contract addresses
+COMPUTE_AGREEMENT_ADDRESS = "0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7"
+SUBSCRIPTION_AGREEMENT_ADDRESS = "0xe1b6D3d0890E09582166EB450a78F6bff038CE5A"
+
 __all__ = [
     "ARC402Wallet",
     "ARC402Operator",
@@ -149,6 +153,8 @@ __all__ = [
     "ComputeAgreementClient",
     "ComputeSession",
     "ComputeUsageReport",
+    "COMPUTE_AGREEMENT_ADDRESS",
+    "SUBSCRIPTION_AGREEMENT_ADDRESS",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.4.0"

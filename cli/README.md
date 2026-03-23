@@ -164,6 +164,13 @@ arc402 verify 42
 | `arc402 workroom worker set-knowledge <dir>` | Mount a knowledge/corpus directory |
 | `arc402 workroom worker memory` | View accumulated learnings from completed jobs |
 | `arc402 daemon credentials init` | Generate the credentials.toml template for non-OpenClaw setups |
+| `arc402 compute offer` | Show GPU provider config and enable instructions |
+| `arc402 compute discover` | Find GPU compute providers in AgentRegistry |
+| `arc402 compute hire <provider>` | Propose a compute session on-chain (locks deposit) |
+| `arc402 compute status [session-id]` | Check session metrics (local daemon or by ID) |
+| `arc402 compute end <session-id>` | End a session and settle on-chain |
+| `arc402 compute withdraw` | Withdraw settled funds from ComputeAgreement |
+| `arc402 compute sessions` | List all compute sessions on this node |
 
 ---
 
@@ -218,6 +225,15 @@ arc402 agreement 7
 |---|---|---|---|
 | base-sepolia | `0xf2aE072BB8575c23B0efbF44bDc8188aA900cA7a` | `0x0461b2b7A1E50866962CB07326000A94009c58Ff` | `0xbbb1DA355D810E9baEF1a7D072B2132E4755976B` |
 | base-mainnet | `0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1` | `0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865` | `0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6` |
+
+Compute + Subscription contracts (Base Mainnet, chain 8453):
+
+| Contract | Address |
+|---|---|
+| ComputeAgreement | `0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7` |
+| SubscriptionAgreement | `0xe1b6D3d0890E09582166EB450a78F6bff038CE5A` |
+
+These are set as defaults in the CLI — no manual config required. Override with `arc402 config set computeAgreementAddress <addr>` or `arc402 config set subscriptionAgreementAddress <addr>` if needed.
 
 > Launch note: `AgentRegistry` is the discovery directory. `ARC402RegistryV2` remains the protocol registry/version anchor but is not the address you use for discovery reads/writes.
 

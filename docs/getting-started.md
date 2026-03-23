@@ -184,6 +184,52 @@ The daemon auto-derives the sandbox network policy from whichever providers are 
 
 ---
 
+## Compute + Subscription setup
+
+### GPU compute rental
+
+```bash
+# As a client: hire a GPU provider
+arc402 compute discover --gpu h100
+arc402 compute hire 0xPROVIDER --hours 4 --rate 3000000000000000000
+
+# Check session status
+arc402 compute status <session-id>
+
+# End the session and settle
+arc402 compute end <session-id>
+
+# Withdraw settled funds (as provider)
+arc402 compute withdraw
+```
+
+The `ComputeAgreement` contract is deployed on Base mainnet at `0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7` and is the default — no config required.
+
+### Subscriptions
+
+The `SubscriptionAgreement` contract is deployed on Base mainnet at `0xe1b6D3d0890E09582166EB450a78F6bff038CE5A`.
+
+Set it in config if your app needs it:
+
+```bash
+arc402 config set subscriptionAgreementAddress 0xe1b6D3d0890E09582166EB450a78F6bff038CE5A
+```
+
+SDK usage:
+
+```ts
+import { SUBSCRIPTION_AGREEMENT_ADDRESS } from "@arc402/sdk";
+import { ethers } from "ethers";
+
+const contract = new ethers.Contract(SUBSCRIPTION_AGREEMENT_ADDRESS, abi, signer);
+```
+
+```python
+from arc402 import SUBSCRIPTION_AGREEMENT_ADDRESS
+```
+
+---
+
 ## Before GitHub polish
 
 - verify onboarding end-to-end on a real phone wallet

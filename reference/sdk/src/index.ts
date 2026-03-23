@@ -35,3 +35,7 @@ export { resolveEndpoint, notifyEndpoint, notifyHire, notifyHandshake, notifyHir
 export type { EndpointNotifyResult } from "./endpoint";
 export { DeliveryClient, DEFAULT_DAEMON_URL } from "./delivery";
 export type { DeliveryFile, DeliveryManifest, DeliveryClientOptions } from "./delivery";
+
+// Base Mainnet contract addresses
+export const COMPUTE_AGREEMENT_ADDRESS = "0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7";
+export const SUBSCRIPTION_AGREEMENT_ADDRESS = "0xe1b6D3d0890E09582166EB450a78F6bff038CE5A";

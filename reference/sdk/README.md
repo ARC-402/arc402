@@ -209,6 +209,24 @@ const tx0 = await governance.getTransaction(0n);
 console.log({ highestTier, metrics, tx0 });
 ```
 
+## Compute + Subscription
+
+The SDK ships mainnet addresses as named exports so you never need to hardcode them:
+
+```ts
+import {
+  ComputeAgreementClient,
+  COMPUTE_AGREEMENT_ADDRESS,
+  SUBSCRIPTION_AGREEMENT_ADDRESS,
+} from "@arc402/sdk";
+
+const compute = new ComputeAgreementClient(COMPUTE_AGREEMENT_ADDRESS, signer);
+```
+
+`ComputeAgreementClient` — propose, accept, and settle GPU compute sessions on Base mainnet (chain 8453).
+
+`SUBSCRIPTION_AGREEMENT_ADDRESS` — Base mainnet address for the SubscriptionAgreement contract. A `SubscriptionAgreementClient` wrapper is on the roadmap; use the raw address with ethers until then.
+
 ## Notes
 
 - The default settlement flow is propose -> accept -> commitDeliverable -> verifyDeliverable/autoRelease, with remediation required before dispute in normal cases. Direct dispute is reserved for explicit hard-fail cases: no delivery, hard deadline breach, clearly invalid/fraudulent deliverables, or safety-critical violations.

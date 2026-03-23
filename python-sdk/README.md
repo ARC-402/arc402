@@ -244,6 +244,28 @@ print(governance.threshold())
 print(governance.get_transaction(0))
 ```
 
+## Compute + Subscription
+
+The package exports mainnet addresses as constants so you never need to hardcode them:
+
+```python
+from arc402 import (
+    ComputeAgreementClient,
+    COMPUTE_AGREEMENT_ADDRESS,
+    SUBSCRIPTION_AGREEMENT_ADDRESS,
+)
+
+compute = ComputeAgreementClient(
+    address=COMPUTE_AGREEMENT_ADDRESS,
+    w3=Web3(Web3.HTTPProvider(os.environ["RPC_URL"])),
+    account=my_local_account,
+)
+```
+
+`ComputeAgreementClient` — propose, accept, and settle GPU compute sessions on Base mainnet (chain 8453).
+
+`SUBSCRIPTION_AGREEMENT_ADDRESS` — Base mainnet address for the SubscriptionAgreement contract. A `SubscriptionAgreementClient` wrapper is on the roadmap; use the raw address with web3 until then.
+
 ## Notes on current protocol coverage
 
 The SDK only wraps methods that exist in the current reference contracts.
