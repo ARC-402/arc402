@@ -1,9 +1,20 @@
 import { Command } from "commander";
 import * as net from "net";
-import { execSync, spawn } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import { execSync, spawn, spawnSync } from "child_process";
 import chalk from "chalk";
 import prompts from "prompts";
-import { configExists, loadConfig, getSubdomainApi } from "../config";
+import { ethers } from "ethers";
+import { configExists, loadConfig, saveConfig, getSubdomainApi, NETWORK_DEFAULTS } from "../config";
+import { startSpinner } from "../ui/spinner";
+import { c } from "../ui/colors";
+import { AGENT_REGISTRY_ABI } from "../abis";
+import { getClient, requireSigner } from "../client";
+import { executeContractWriteViaWallet } from "../wallet-router";
+import { runCmd, ARC402_DIR } from "../openshell-runtime";
+import { getDockerEnvFlags } from "../daemon/credentials";
 
 const DAEMON_PORT = 4402;
 
@@ -275,6 +286,393 @@ export function registerSetupCommands(program: Command): void {
       }
 
       console.log(chalk.green(`✅ ${subdomain}.arc402.xyz now points to ${short}`));
+    });
+
+  // ── arc402 setup full ─────────────────────────────────────────────────────
+  setup
+    .command("full")
+    .description("Full agent onboarding: prerequisites → wallet → registration → tunnel → workroom")
+    .requiredOption("--subdomain <name>", "Subdomain for your agent (e.g. megabrain → megabrain.arc402.xyz)")
+    .option("--name <name>", "Agent name for registry", "MyAgent")
+    .option("--service-type <type>", "Service type for registry", "ai.assistant")
+    .action(async (opts: { subdomain: string; name: string; serviceType: string }) => {
+      const subdomain = opts.subdomain.toLowerCase();
+      const SETUP_API_BASE = "https://api.arc402.xyz";
+      const TUNNEL_TOKEN_PATH = path.join(ARC402_DIR, "tunnel-token");
+      const TUNNEL_PID_PATH = path.join(ARC402_DIR, "tunnel.pid");
+      const WORKROOM_IMAGE = "arc402-workroom";
+      const WORKROOM_CONTAINER = "arc402-workroom";
+
+      console.log(c.brightCyan("\n◈ arc402 setup full\n"));
+      console.log(c.dim(`Subdomain: ${subdomain}.arc402.xyz\n`));
+
+      // ── Phase 1: Prerequisites ──────────────────────────────────────────────
+
+      console.log(c.white("Phase 1: Prerequisites"));
+
+      // Node.js >= 18
+      const nodeMajor = parseInt(process.versions.node.split(".")[0], 10);
+      if (nodeMajor < 18) {
+        console.error(c.failure + " " + c.red(`Node.js >= 18 required (found ${process.versions.node})`));
+        process.exit(1);
+      }
+      console.log(" " + c.success + c.white(` Node.js ${process.versions.node}`));
+
+      // Docker
+      const dockerSpin = startSpinner("Checking Docker…");
+      try {
+        execSync("docker info", { stdio: "pipe" });
+        dockerSpin.succeed("Docker running");
+      } catch {
+        dockerSpin.fail("Docker not running — start Docker Desktop and try again");
+        process.exit(1);
+      }
+
+      // cloudflared
+      const cfSpin = startSpinner("Checking cloudflared…");
+      try {
+        execSync("which cloudflared", { stdio: "pipe" });
+        cfSpin.succeed("cloudflared installed");
+      } catch {
+        cfSpin.fail("cloudflared not installed");
+        const platform = os.platform();
+        if (platform === "darwin") {
+          console.log(c.dim("  brew install cloudflare/cloudflare/cloudflared"));
+        } else if (platform === "linux") {
+          console.log(c.dim("  curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb"));
+          console.log(c.dim("  sudo dpkg -i cloudflared.deb"));
+        } else {
+          console.log(c.dim("  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"));
+        }
+        process.exit(1);
+      }
+
+      // Config + private key
+      const cfgSpin = startSpinner("Loading config…");
+      if (!configExists()) {
+        cfgSpin.fail("No config found — run 'arc402 config init' first");
+        process.exit(1);
+      }
+      const config = loadConfig();
+      if (!config.privateKey) {
+        cfgSpin.fail("No private key in config — run 'arc402 config init' first");
+        process.exit(1);
+      }
+      cfgSpin.succeed("Config loaded");
+
+      // ── Phase 2: Wallet ─────────────────────────────────────────────────────
+
+      console.log(c.white("\nPhase 2: Wallet"));
+
+      if (!config.walletContractAddress) {
+        console.error(" " + c.failure + " " + c.red("No walletContractAddress in config."));
+        console.error(c.dim("  Run 'arc402 wallet deploy' first (requires MetaMask/WalletConnect for the owner wallet)."));
+        process.exit(1);
+      }
+      console.log(" " + c.success + c.dim(" Wallet: ") + c.white(config.walletContractAddress));
+
+      const balSpin = startSpinner("Checking wallet balance…");
+      let walletBalance: bigint;
+      try {
+        const { provider: balProvider } = await getClient(config);
+        walletBalance = await balProvider.getBalance(config.walletContractAddress);
+      } catch (e) {
+        balSpin.fail(`Balance check failed: ${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      }
+      if (walletBalance < ethers.parseEther("0.0005")) {
+        balSpin.fail(`Wallet balance too low: ${ethers.formatEther(walletBalance)} ETH (need >= 0.0005)`);
+        console.error(c.dim(`  Fund ${config.walletContractAddress} with at least 0.0005 ETH on Base.`));
+        process.exit(1);
+      }
+      balSpin.succeed(`Wallet balance: ${ethers.formatEther(walletBalance)} ETH`);
+
+      // ── Phase 3: Agent Registration ─────────────────────────────────────────
+
+      console.log(c.white("\nPhase 3: Agent Registration"));
+
+      const registryAddress =
+        config.agentRegistryV2Address ??
+        (NETWORK_DEFAULTS[config.network] as unknown as Record<string, string | undefined>)?.agentRegistryV2Address;
+      if (!registryAddress) {
+        console.error(" " + c.failure + " " + c.red("agentRegistryV2Address missing in config."));
+        console.error(c.dim("  Run: arc402 config set agentRegistryV2Address <address>"));
+        process.exit(1);
+      }
+
+      const { provider: regProvider, signer } = await requireSigner(config);
+      const registry = new ethers.Contract(registryAddress, AGENT_REGISTRY_ABI, regProvider);
+
+      const regCheckSpin = startSpinner("Checking agent registration…");
+      let isRegistered = false;
+      try {
+        isRegistered = await registry.isRegistered(config.walletContractAddress);
+      } catch (e) {
+        regCheckSpin.fail(`Registry read failed: ${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      }
+
+      if (isRegistered) {
+        regCheckSpin.succeed("Already registered in AgentRegistry");
+      } else {
+        regCheckSpin.update("Registering agent in AgentRegistry…");
+        try {
+          const tx = await executeContractWriteViaWallet(
+            config.walletContractAddress!,
+            signer,
+            registryAddress,
+            AGENT_REGISTRY_ABI,
+            "register",
+            [opts.name, [], opts.serviceType, `https://${subdomain}.arc402.xyz`, ""],
+          );
+          await tx.wait();
+          regCheckSpin.succeed("Agent registered in AgentRegistry");
+        } catch (e) {
+          regCheckSpin.fail(`Registration failed: ${e instanceof Error ? e.message : String(e)}`);
+          console.error(c.dim("  Try manually: arc402 agent register --name <name> --service-type <type>"));
+          process.exit(1);
+        }
+      }
+
+      // Claim subdomain
+      const apiBase = getSubdomainApi(config);
+      const subSpin = startSpinner(`Claiming ${subdomain}.arc402.xyz…`);
+      try {
+        const checkRes = await fetch(`${apiBase}/check/${subdomain}`);
+        const checkData = await checkRes.json() as { available?: boolean };
+        if (!checkData.available) {
+          subSpin.succeed(`${subdomain}.arc402.xyz already claimed`);
+        } else {
+          const regRes = await fetch(`${apiBase}/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subdomain, walletAddress: config.walletContractAddress }),
+          });
+          const regData = await regRes.json() as { url?: string; error?: string };
+          if (!regRes.ok) {
+            subSpin.fail(`Subdomain registration failed: ${regData.error ?? regRes.statusText}`);
+            process.exit(1);
+          }
+          subSpin.succeed(`Subdomain registered: ${regData.url ?? `https://${subdomain}.arc402.xyz`}`);
+        }
+      } catch (e) {
+        subSpin.fail(`Failed to claim subdomain: ${e instanceof Error ? e.message : String(e)}`);
+        process.exit(1);
+      }
+
+      // ── Phase 4: Tunnel ─────────────────────────────────────────────────────
+
+      console.log(c.white("\nPhase 4: Tunnel"));
+
+      if (!fs.existsSync(TUNNEL_TOKEN_PATH)) {
+        const provSpin = startSpinner("Provisioning Cloudflare Tunnel…");
+        const wallet = new ethers.Wallet(config.privateKey);
+        const walletAddress = config.walletContractAddress || wallet.address;
+        const timestamp = Math.floor(Date.now() / 1000);
+        const message = `arc402-provision:${subdomain}:${timestamp}`;
+        const signature = await wallet.signMessage(message);
+
+        let provRes: Response;
+        try {
+          provRes = await fetch(`${SETUP_API_BASE}/tunnel/provision`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subdomain, walletAddress, signature, timestamp }),
+          });
+        } catch {
+          provSpin.fail("Failed to reach provisioner API");
+          process.exit(1);
+        }
+
+        const provData = await provRes.json() as {
+          success?: boolean; error?: string; tunnelId?: string; token?: string;
+        };
+
+        if (!provData.success || !provData.token) {
+          provSpin.fail(`Provisioning failed: ${provData.error || "unknown error"}`);
+          process.exit(1);
+        }
+        provSpin.succeed(`Tunnel created: ${provData.tunnelId}`);
+
+        fs.mkdirSync(ARC402_DIR, { recursive: true });
+        fs.writeFileSync(TUNNEL_TOKEN_PATH, provData.token, { mode: 0o600 });
+        console.log(" " + c.success + c.white(" Tunnel token saved to ~/.arc402/tunnel-token"));
+      } else {
+        console.log(" " + c.success + c.white(" Tunnel token already exists"));
+      }
+
+      // Save endpoint in config
+      const fqdn = `https://${subdomain}.arc402.xyz`;
+      saveConfig({ ...config, endpoint: fqdn });
+
+      // Start cloudflared if not already running
+      let tunnelAlreadyRunning = false;
+      if (fs.existsSync(TUNNEL_PID_PATH)) {
+        const existingPid = parseInt(fs.readFileSync(TUNNEL_PID_PATH, "utf-8").trim(), 10);
+        try {
+          process.kill(existingPid, 0);
+          tunnelAlreadyRunning = true;
+          console.log(" " + c.success + c.white(` Tunnel already running (PID ${existingPid})`));
+        } catch { /* not running */ }
+      }
+
+      if (!tunnelAlreadyRunning) {
+        const cfStartSpin = startSpinner("Starting cloudflared tunnel in background…");
+        const token = fs.readFileSync(TUNNEL_TOKEN_PATH, "utf-8").trim();
+        const cfChild = spawn("cloudflared", ["tunnel", "run", "--token", token], {
+          detached: true,
+          stdio: "ignore",
+        });
+        cfChild.unref();
+        fs.writeFileSync(TUNNEL_PID_PATH, String(cfChild.pid));
+        cfStartSpin.update("Waiting 5s for tunnel to connect…");
+        await sleep(5000);
+        try {
+          process.kill(cfChild.pid!, 0);
+          cfStartSpin.succeed(`Tunnel running (PID ${cfChild.pid})`);
+        } catch {
+          cfStartSpin.fail("Tunnel process died — run 'arc402 tunnel start --foreground' to see logs");
+          process.exit(1);
+        }
+      }
+
+      // Quick tunnel health check (best-effort — workroom may not be up yet)
+      const tunnelHealthSpin = startSpinner(`Checking ${subdomain}.arc402.xyz/health…`);
+      try {
+        const healthRes = await fetch(`${fqdn}/health`, { signal: AbortSignal.timeout(8000) });
+        if (healthRes.ok) {
+          tunnelHealthSpin.succeed(`Tunnel reachable: ${subdomain}.arc402.xyz`);
+        } else {
+          tunnelHealthSpin.stop();
+          console.log(" " + c.warning + " " + c.yellow(`Health check returned ${healthRes.status} — workroom not up yet, continuing…`));
+        }
+      } catch {
+        tunnelHealthSpin.stop();
+        console.log(" " + c.warning + " " + c.yellow("Tunnel health check timed out — may still be propagating, continuing…"));
+      }
+
+      // ── Phase 5: Workroom ───────────────────────────────────────────────────
+
+      console.log(c.white("\nPhase 5: Workroom"));
+
+      // Build image if needed
+      const imageRes = runCmd("docker", ["image", "inspect", WORKROOM_IMAGE, "--format", "{{.Id}}"]);
+      if (!imageRes.ok) {
+        const workroomSrc = path.resolve(__dirname, "..", "..", "..", "workroom");
+        if (!fs.existsSync(path.join(workroomSrc, "Dockerfile"))) {
+          console.error(" " + c.failure + " " + c.red(`Workroom Dockerfile not found at ${workroomSrc}/Dockerfile`));
+          console.error(c.dim("  Run 'arc402 workroom init' manually after this command."));
+          process.exit(1);
+        }
+        const buildSpin = startSpinner("Building workroom Docker image…");
+        const buildResult = spawnSync(
+          "docker",
+          ["build", "-f", path.join(workroomSrc, "Dockerfile"), "-t", WORKROOM_IMAGE, workroomSrc],
+          { stdio: "inherit" },
+        );
+        if (buildResult.status !== 0) {
+          buildSpin.fail("Failed to build workroom image");
+          process.exit(1);
+        }
+        buildSpin.succeed("Workroom image built");
+      } else {
+        console.log(" " + c.success + c.white(" Workroom image exists"));
+      }
+
+      // Start container if not running
+      const runningRes = runCmd("docker", ["inspect", WORKROOM_CONTAINER, "--format", "{{.State.Running}}"]);
+      if (runningRes.ok && runningRes.stdout.trim() === "true") {
+        console.log(" " + c.success + c.white(" Workroom already running"));
+      } else {
+        // Remove stopped container if exists
+        const existsRes = runCmd("docker", ["inspect", WORKROOM_CONTAINER, "--format", "{{.State.Status}}"]);
+        if (existsRes.ok) {
+          runCmd("docker", ["rm", "-f", WORKROOM_CONTAINER]);
+        }
+
+        const providerEnvFlags = await getDockerEnvFlags();
+        const cliRoot = path.resolve(__dirname, "..", "..", "..");
+        const jobsDir = path.join(ARC402_DIR, "jobs");
+        const workerDir = path.join(ARC402_DIR, "worker");
+        const arenaDir = path.join(ARC402_DIR, "arena");
+        for (const d of [jobsDir, workerDir, arenaDir]) {
+          fs.mkdirSync(d, { recursive: true });
+        }
+
+        const workroomSpin = startSpinner("Starting workroom container…");
+        const dockerArgs = [
+          "run", "-d",
+          "--name", WORKROOM_CONTAINER,
+          "--restart", "unless-stopped",
+          "--cap-add", "NET_ADMIN",
+          "-v", `${ARC402_DIR}:/workroom/.arc402:rw`,
+          "-v", `${cliRoot}:/workroom/runtime:ro`,
+          "-v", `${jobsDir}:/workroom/jobs:rw`,
+          "-v", `${workerDir}:/workroom/worker:rw`,
+          "-v", `${arenaDir}:/workroom/arena:rw`,
+          "-e", `ARC402_MACHINE_KEY=${config.privateKey}`,
+          "-e", `TELEGRAM_BOT_TOKEN=${process.env.TELEGRAM_BOT_TOKEN ?? ""}`,
+          "-e", `TELEGRAM_CHAT_ID=${process.env.TELEGRAM_CHAT_ID ?? ""}`,
+          "-e", `ARC402_DAEMON_PROCESS=1`,
+          "-e", `ARC402_DAEMON_FOREGROUND=1`,
+          ...providerEnvFlags,
+          "-p", "4402:4402",
+          WORKROOM_IMAGE,
+        ];
+
+        const startResult = spawnSync("docker", dockerArgs, { stdio: "inherit" });
+        if (startResult.status !== 0) {
+          workroomSpin.fail("Failed to start workroom container");
+          console.error(c.dim("  Check logs: docker logs arc402-workroom"));
+          process.exit(1);
+        }
+
+        // Wait for daemon health (up to 30s)
+        workroomSpin.update("Waiting for daemon to become healthy on :4402…");
+        let healthy = false;
+        for (let i = 0; i < 15; i++) {
+          await sleep(2000);
+          try {
+            const hr = await fetch("http://localhost:4402/health", { signal: AbortSignal.timeout(2000) });
+            if (hr.ok) { healthy = true; break; }
+          } catch { /* not ready yet */ }
+        }
+
+        if (healthy) {
+          workroomSpin.succeed("Workroom daemon healthy on port 4402");
+        } else {
+          workroomSpin.fail("Daemon did not become healthy in time");
+          console.error(c.dim("  Check logs: docker logs arc402-workroom"));
+          process.exit(1);
+        }
+      }
+
+      // ── Phase 6: Final Verify ───────────────────────────────────────────────
+
+      console.log(c.white("\nPhase 6: Verify"));
+
+      const finalSpin = startSpinner(`Verifying ${fqdn}/health…`);
+      try {
+        const finalRes = await fetch(`${fqdn}/health`, { signal: AbortSignal.timeout(15000) });
+        if (finalRes.ok) {
+          finalSpin.succeed(`Agent live at ${fqdn}`);
+        } else {
+          finalSpin.stop();
+          console.log(" " + c.warning + " " + c.yellow(`Health check returned ${finalRes.status} — agent may need a moment`));
+        }
+      } catch {
+        finalSpin.stop();
+        console.log(" " + c.warning + " " + c.yellow("Final health check timed out — tunnel may still be propagating"));
+      }
+
+      // ── Success summary ─────────────────────────────────────────────────────
+
+      console.log("\n" + c.brightCyan("◈ Agent Online") + "\n" + c.dim("─────────────────────────────────────────────"));
+      console.log(" " + c.success + c.dim("  Endpoint  ") + c.white(fqdn));
+      console.log(" " + c.success + c.dim("  Wallet    ") + c.white(config.walletContractAddress!));
+      console.log(" " + c.success + c.dim("  Workroom  ") + c.white("arc402 workroom status"));
+      console.log(" " + c.success + c.dim("  Tunnel    ") + c.white("arc402 tunnel status"));
+      console.log();
     });
 
   setup
