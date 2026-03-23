@@ -514,7 +514,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
         DisputeOutcome outcome,
         uint256 providerAward,
         uint256 subscriberAward
-    ) external onlyOwner nonReentrant {
+    ) external nonReentrant onlyOwner {
         Subscription storage s = _getSubscription(subscriptionId);
         if (!s.disputed) revert NotDisputed();
         if (block.timestamp < s.disputeOpenedAt + DISPUTE_WINDOW) revert DisputeWindowNotElapsed();
