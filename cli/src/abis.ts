@@ -177,6 +177,35 @@ export const ARC402_WALLET_MACHINE_KEY_ABI = [
   "function authorizedMachineKeys(address key) external view returns (bool)",
 ] as const;
 
+export const COMPUTE_AGREEMENT_ABI = [
+  // Write methods
+  "function proposeSession(bytes32 sessionId, address provider, uint256 ratePerHour, uint256 maxHours, bytes32 gpuSpecHash, address token) external payable",
+  "function acceptSession(bytes32 sessionId) external",
+  "function startSession(bytes32 sessionId) external",
+  "function submitUsageReport(bytes32 sessionId, uint256 periodStart, uint256 periodEnd, uint256 computeMinutes, uint256 avgUtilization, bytes providerSignature, bytes32 metricsHash) external",
+  "function endSession(bytes32 sessionId) external",
+  "function disputeSession(bytes32 sessionId) external",
+  "function cancelSession(bytes32 sessionId) external",
+  "function resolveDispute(bytes32 sessionId, uint256 providerAmount, uint256 clientAmount) external",
+  "function claimDisputeTimeout(bytes32 sessionId) external",
+  "function withdraw(address token) external",
+  // Read methods
+  "function getSession(bytes32 sessionId) external view returns (tuple(address client, address provider, address token, uint256 ratePerHour, uint256 maxHours, uint256 depositAmount, uint256 startedAt, uint256 endedAt, uint256 consumedMinutes, uint256 proposedAt, uint256 disputedAt, bytes32 gpuSpecHash, uint8 status))",
+  "function calculateCost(bytes32 sessionId) external view returns (uint256)",
+  "function getUsageReports(bytes32 sessionId) external view returns (tuple(uint256 periodStart, uint256 periodEnd, uint256 computeMinutes, uint256 avgUtilization, bytes providerSignature, bytes32 metricsHash)[])",
+  "function pendingWithdrawals(address user, address token) external view returns (uint256)",
+  // Events
+  "event SessionProposed(bytes32 indexed sessionId, address indexed client, address indexed provider, uint256 ratePerHour, uint256 maxHours, address token)",
+  "event SessionAccepted(bytes32 indexed sessionId)",
+  "event SessionStarted(bytes32 indexed sessionId, uint256 startedAt)",
+  "event UsageReported(bytes32 indexed sessionId, uint256 computeMinutes, uint256 periodEnd)",
+  "event SessionCompleted(bytes32 indexed sessionId, uint256 totalMinutes, uint256 totalPaid, uint256 refunded)",
+  "event SessionDisputed(bytes32 indexed sessionId, address disputant)",
+  "event SessionCancelled(bytes32 indexed sessionId)",
+  "event DisputeResolved(bytes32 indexed sessionId, uint256 providerAmount, uint256 clientAmount)",
+  "event Withdrawn(address indexed recipient, address indexed token, uint256 amount)",
+] as const;
+
 export const ARC402_WALLET_PASSKEY_ABI = [
   "function setPasskey(bytes32 pubKeyX, bytes32 pubKeyY) external",
   "function clearPasskey() external",

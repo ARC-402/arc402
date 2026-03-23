@@ -155,6 +155,10 @@ async function signReport(
 
 // ─── Main class ───────────────────────────────────────────────────────────────
 
+const SUBMIT_USAGE_REPORT_ABI = [
+  "function submitUsageReport(bytes32 sessionId, uint256 periodStart, uint256 periodEnd, uint256 computeMinutes, uint256 avgUtilization, bytes providerSignature, bytes32 metricsHash) external",
+];
+
 export class ComputeMetering {
   private sessions: Map<string, SessionMeteringState> = new Map();
   private wallet: ethers.Wallet;
@@ -162,19 +166,22 @@ export class ComputeMetering {
   private contractAddress: string;
   private meteringIntervalMs: number;
   private reportIntervalMs: number;
+  private onchainProvider: ethers.JsonRpcProvider | undefined;
 
   constructor(
     providerPrivateKey: string,
     chainId: number,
     contractAddress: string,
     meteringIntervalSeconds = 30,
-    reportIntervalMinutes   = 15
+    reportIntervalMinutes   = 15,
+    onchainProvider?: ethers.JsonRpcProvider,
   ) {
     this.wallet              = new ethers.Wallet(providerPrivateKey);
     this.chainId             = chainId;
     this.contractAddress     = contractAddress;
     this.meteringIntervalMs  = meteringIntervalSeconds * 1000;
     this.reportIntervalMs    = reportIntervalMinutes * 60 * 1000;
+    this.onchainProvider     = onchainProvider;
   }
 
   /**
@@ -354,7 +361,28 @@ export class ComputeMetering {
       fs.writeFileSync(reportFile, JSON.stringify(report, null, 2), { mode: 0o600 });
     } catch { /* non-fatal */ }
 
+    // Submit on-chain if provider is configured
+    if (this.onchainProvider && this.contractAddress) {
+      void this._submitOnChain(report).catch(() => { /* non-fatal */ });
+    }
+
     return report;
+  }
+
+  private async _submitOnChain(report: UsageReport): Promise<void> {
+    if (!this.onchainProvider) return;
+    const signer = this.wallet.connect(this.onchainProvider);
+    const contract = new ethers.Contract(this.contractAddress, SUBMIT_USAGE_REPORT_ABI, signer);
+    const tx = await contract.submitUsageReport(
+      report.sessionId,
+      BigInt(report.periodStart),
+      BigInt(report.periodEnd),
+      BigInt(report.computeMinutes),
+      BigInt(report.avgUtilization),
+      report.providerSignature,
+      report.metricsHash,
+    );
+    await tx.wait();
   }
 
   private _loadReportsFromDisk(sessionId: string): UsageReport[] {

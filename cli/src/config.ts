@@ -34,6 +34,7 @@ export interface Arc402Config {
   vouchingRegistryAddress?: string;
   migrationRegistryAddress?: string;
   handshakeAddress?: string;
+  computeAgreementAddress?: string;
   paymasterUrl?: string;    // CDP paymaster endpoint
   cdpKeyName?: string;      // CDP API key name (org/.../apiKeys/...)
   cdpPrivateKey?: string;   // CDP EC private key — base64 DER SEC1 (store in CDP_PRIVATE_KEY env var)

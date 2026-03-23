@@ -9,6 +9,7 @@ import {
   runCmd,
 } from "../openshell-runtime";
 import { DAEMON_LOG, DAEMON_TOML } from "../daemon/config";
+import { CREDENTIALS_PATH, getEnabledProviders, getDockerEnvFlags } from "../daemon/credentials";
 import { c } from "../ui/colors";
 import { startSpinner } from "../ui/spinner";
 import { renderTree } from "../ui/tree";
@@ -61,6 +62,8 @@ const POLICY_FILE = path.join(ARC402_DIR, "openshell-policy.yaml");
 const ARENA_POLICY_FILE = path.join(ARC402_DIR, "arena-policy.yaml");
 const ARENA_DATA_DIR = path.join(ARC402_DIR, "arena");
 const WORKROOM_DIR = path.join(__dirname, "..", "..", "..", "workroom"); // relative to cli/dist
+// Template ships at workroom/credentials.template.toml, resolved from cli/dist/commands/
+const CREDENTIALS_TEMPLATE = path.resolve(__dirname, "..", "..", "..", "workroom", "credentials.template.toml");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -84,15 +87,20 @@ function imageExists(): boolean {
   return r.ok;
 }
 
-function buildImage(): boolean {
+function buildImage(useGpu = false): boolean {
   // Find the workroom directory (contains Dockerfile)
   const workroomSrc = path.resolve(__dirname, "..", "..", "..", "workroom");
-  if (!fs.existsSync(path.join(workroomSrc, "Dockerfile"))) {
+  const dockerfile = useGpu ? "Dockerfile.gpu" : "Dockerfile";
+  if (!fs.existsSync(path.join(workroomSrc, dockerfile))) {
+    if (useGpu) {
+      console.error(`Dockerfile.gpu not found at ${workroomSrc}/Dockerfile.gpu`);
+      return false;
+    }
     console.error(`Dockerfile not found at ${workroomSrc}/Dockerfile`);
     return false;
   }
-  console.log("Building ARC-402 Workroom image...");
-  const result = spawnSync("docker", ["build", "-t", WORKROOM_IMAGE, workroomSrc], {
+  console.log(`Building ARC-402 Workroom image (${dockerfile})...`);
+  const result = spawnSync("docker", ["build", "-f", path.join(workroomSrc, dockerfile), "-t", WORKROOM_IMAGE, workroomSrc], {
     stdio: "inherit",
   });
   return result.status === 0;
@@ -169,6 +177,72 @@ export function registerWorkroomCommands(program: Command): void {
         console.log(" " + c.success + c.white(" Arena policy exists"));
       }
 
+      // ── Credentials template ──────────────────────────────────────────────
+      const workerDir = path.dirname(CREDENTIALS_PATH);
+      if (!fs.existsSync(workerDir)) {
+        fs.mkdirSync(workerDir, { recursive: true });
+      }
+      if (!fs.existsSync(CREDENTIALS_PATH)) {
+        if (fs.existsSync(CREDENTIALS_TEMPLATE)) {
+          fs.copyFileSync(CREDENTIALS_TEMPLATE, CREDENTIALS_PATH);
+          console.log(" " + c.success + c.white(" credentials.toml installed at " + CREDENTIALS_PATH));
+          console.log(c.dim("   Edit it to enable providers: set enabled = true and export API keys."));
+        } else {
+          console.log(" " + c.warning + " " + c.yellow("credentials.template.toml not found — skipping credentials setup"));
+        }
+      } else {
+        console.log(" " + c.success + c.white(" credentials.toml found"));
+      }
+
+      // ── Provider check + policy integration ──────────────────────────────
+      const providers = await getEnabledProviders();
+      if (providers.length > 0) {
+        console.log(c.dim("\nEnabled providers:"));
+        for (const p of providers) {
+          const keyStatus = p.hasKey
+            ? c.success + c.white(` key found`)
+            : c.warning + " " + c.yellow("key MISSING — export " + (p.env ?? ""));
+          console.log(`  ${c.dim("Provider:")} ${c.white(p.name)} ${c.dim("(" + p.hosts.join(", ") + ")")} — ${keyStatus}`);
+        }
+
+        // Add provider hosts to policy file if it exists
+        if (fs.existsSync(POLICY_FILE)) {
+          let policy = fs.readFileSync(POLICY_FILE, "utf-8");
+          let changed = false;
+          for (const p of providers) {
+            for (const host of p.hosts) {
+              if (!policy.includes(`host: ${host}`)) {
+                // Append a new network_policy entry for this provider
+                const entry = [
+                  `  provider_${p.name}:`,
+                  `    name: provider-${p.name}`,
+                  `    endpoints:`,
+                  `      - host: ${host}`,
+                  `        port: 443`,
+                  `        protocol: rest`,
+                  `        tls: terminate`,
+                  `        enforcement: enforce`,
+                  `        access: read-write`,
+                  `    binaries: *a1`,
+                ].join("\n");
+                policy += "\n" + entry + "\n";
+                changed = true;
+              }
+            }
+          }
+          if (changed) {
+            fs.writeFileSync(POLICY_FILE, policy, "utf-8");
+            console.log(" " + c.success + c.white(" Policy updated with provider hosts"));
+          } else {
+            console.log(" " + c.success + c.white(" Provider hosts already in policy"));
+          }
+        } else {
+          console.log(c.dim("   (Policy file not yet created — provider hosts will be added on next init after policy setup)"));
+        }
+      } else if (fs.existsSync(CREDENTIALS_PATH)) {
+        console.log(c.dim("   No providers enabled in credentials.toml — edit to enable providers."));
+      }
+
       // Build image
       if (!imageExists()) {
         if (!buildImage()) {
@@ -195,7 +269,10 @@ export function registerWorkroomCommands(program: Command): void {
   workroom
     .command("start")
     .description("Start the ARC-402 Workroom (always-on governed container with daemon inside).")
-    .action(async () => {
+    .option("--compute", "Enable GPU compute mode: uses Dockerfile.gpu and passes --gpus all --runtime nvidia to docker run")
+    .action(async (opts: { compute?: boolean }) => {
+      const useGpu = !!opts.compute;
+
       if (!dockerAvailable()) {
         console.error("Docker is not available.");
         process.exit(1);
@@ -213,7 +290,7 @@ export function registerWorkroomCommands(program: Command): void {
 
       // Build image if needed
       if (!imageExists()) {
-        if (!buildImage()) {
+        if (!buildImage(useGpu)) {
           console.error("Failed to build workroom image.");
           process.exit(1);
         }
@@ -230,6 +307,9 @@ export function registerWorkroomCommands(program: Command): void {
         process.exit(1);
       }
 
+      // Collect provider env flags from credentials.toml
+      const providerEnvFlags = await getDockerEnvFlags();
+
       // CLI runtime path
       const cliRoot = path.resolve(__dirname, "..", "..", "..");
 
@@ -240,6 +320,8 @@ export function registerWorkroomCommands(program: Command): void {
         "--name", WORKROOM_CONTAINER,
         "--restart", "unless-stopped",
         "--cap-add", "NET_ADMIN", // Required for iptables
+        // GPU pass-through (only when --compute flag is set)
+        ...(useGpu ? ["--gpus", "all", "--runtime", "nvidia"] : []),
         // Mount config (read-write for daemon state/logs)
         "-v", `${ARC402_DIR}:/workroom/.arc402:rw`,
         // Mount CLI runtime (read-only)
@@ -256,6 +338,8 @@ export function registerWorkroomCommands(program: Command): void {
         "-e", `TELEGRAM_CHAT_ID=${telegramChat}`,
         "-e", `ARC402_DAEMON_PROCESS=1`,
         "-e", `ARC402_DAEMON_FOREGROUND=1`,
+        // Inject enabled provider API keys (never written to container disk)
+        ...providerEnvFlags,
         // Expose relay port
         "-p", "4402:4402",
         WORKROOM_IMAGE,
@@ -529,9 +613,13 @@ export function registerWorkroomCommands(program: Command): void {
       const workerDir = path.join(ARC402_DIR, "worker");
       const memoryDir = path.join(workerDir, "memory");
       const skillsDir = path.join(workerDir, "skills");
+      const knowledgeDir = path.join(workerDir, "knowledge");
+      const datasetsDir = path.join(workerDir, "datasets");
 
       fs.mkdirSync(memoryDir, { recursive: true });
       fs.mkdirSync(skillsDir, { recursive: true });
+      fs.mkdirSync(knowledgeDir, { recursive: true });
+      fs.mkdirSync(datasetsDir, { recursive: true });
 
       // Generate default worker SOUL.md
       const soulPath = path.join(workerDir, "SOUL.md");
@@ -576,6 +664,25 @@ Write these learnings concisely. They will be available on your next job.
         console.log(" " + c.success + c.dim(` Worker SOUL.md created: ${soulPath}`));
       } else {
         console.log(" " + c.success + c.dim(` Worker SOUL.md already exists: ${soulPath}`));
+      }
+
+      // Generate IDENTITY.md
+      const identityPath = path.join(workerDir, "IDENTITY.md");
+      if (!fs.existsSync(identityPath)) {
+        fs.writeFileSync(identityPath, `# Worker Identity
+- **Name:** ${opts.name}
+- **Emoji:** 🔧
+- **Capabilities:** []
+- **Model:** ${opts.model || "default"}
+- **Created:** ${new Date().toISOString()}
+
+## Specialisation
+Describe what this worker specialises in. This is injected into every job prompt.
+
+## Personality
+How should this worker communicate? Professional? Casual? Technical?
+`);
+        console.log(" " + c.success + c.dim(` Worker IDENTITY.md created: ${identityPath}`));
       }
 
       // Generate default MEMORY.md

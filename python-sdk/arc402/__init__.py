@@ -68,6 +68,8 @@ from .endpoint import (
     notify_message,
     DEFAULT_REGISTRY_ADDRESS,
 )
+from .delivery import DeliveryClient, DeliveryFile, DeliveryManifest, DEFAULT_DAEMON_URL
+from .compute import ComputeAgreementClient, ComputeSession, ComputeUsageReport
 
 ARC402Operator = ARC402Wallet
 
@@ -140,6 +142,13 @@ __all__ = [
     "notify_dispute",
     "notify_message",
     "DEFAULT_REGISTRY_ADDRESS",
+    "DeliveryClient",
+    "DeliveryFile",
+    "DeliveryManifest",
+    "DEFAULT_DAEMON_URL",
+    "ComputeAgreementClient",
+    "ComputeSession",
+    "ComputeUsageReport",
 ]
 
 __version__ = "0.2.0"

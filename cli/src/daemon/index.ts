@@ -35,6 +35,7 @@ import { UserOpsManager, buildAcceptCalldata } from "./userops";
 import { generateReceipt, extractLearnings, createJobDirectory, cleanJobDirectory } from "./job-lifecycle";
 import { FileDeliveryManager } from "./file-delivery";
 import { DeliveryClient } from "./delivery-client";
+import { COMPUTE_AGREEMENT_ABI } from "../abis";
 
 // ─── State DB ─────────────────────────────────────────────────────────────────
 
@@ -551,13 +552,17 @@ export async function runDaemon(foreground = false): Promise<void> {
   let computeMetering: ComputeMetering | null = null;
   let computeSessions: ComputeSessionManager | null = null;
 
+  // Machine key signer — used for on-chain compute contract calls
+  const machineKeySigner = new ethers.Wallet(machinePrivateKey, provider);
+
   if (config.compute.enabled) {
     computeMetering = new ComputeMetering(
       machinePrivateKey,
       config.network.chain_id,
-      config.wallet.contract_address,
+      config.compute.compute_agreement_address || config.wallet.contract_address,
       config.compute.metering_interval_seconds,
-      config.compute.report_interval_minutes
+      config.compute.report_interval_minutes,
+      config.compute.compute_agreement_address ? provider : undefined,
     );
     computeSessions = new ComputeSessionManager(computeMetering);
     log({ event: "compute_enabled", gpu_spec: config.compute.gpu_spec, rate_wei: config.compute.rate_per_hour_wei });
@@ -1131,6 +1136,17 @@ export async function runDaemon(foreground = false): Promise<void> {
         if (config.compute.auto_accept_compute) {
           computeSessions.acceptSession(proposal.sessionId);
           log({ event: "compute_auto_accepted", sessionId: proposal.sessionId });
+          // Wire to on-chain: provider calls acceptSession
+          if (config.compute.compute_agreement_address) {
+            try {
+              const caContract = new ethers.Contract(config.compute.compute_agreement_address, COMPUTE_AGREEMENT_ABI, machineKeySigner);
+              const tx = await caContract.acceptSession(proposal.sessionId);
+              await tx.wait();
+              log({ event: "compute_accept_onchain", sessionId: proposal.sessionId, txHash: tx.hash });
+            } catch (onchainErr) {
+              log({ event: "compute_accept_onchain_error", sessionId: proposal.sessionId, error: String(onchainErr) });
+            }
+          }
         }
         const status = config.compute.auto_accept_compute ? "accepted" : "proposed";
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -1162,6 +1178,17 @@ export async function runDaemon(foreground = false): Promise<void> {
           return;
         }
         log({ event: "compute_accepted", sessionId });
+        // Wire to on-chain: provider calls acceptSession
+        if (config.compute.compute_agreement_address) {
+          try {
+            const caContract = new ethers.Contract(config.compute.compute_agreement_address, COMPUTE_AGREEMENT_ABI, machineKeySigner);
+            const tx = await caContract.acceptSession(sessionId);
+            await tx.wait();
+            log({ event: "compute_accept_onchain", sessionId, txHash: tx.hash });
+          } catch (onchainErr) {
+            log({ event: "compute_accept_onchain_error", sessionId, error: String(onchainErr) });
+          }
+        }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "accepted", sessionId }));
       } catch (err) {
@@ -1192,6 +1219,17 @@ export async function runDaemon(foreground = false): Promise<void> {
           return;
         }
         log({ event: "compute_started", sessionId });
+        // Wire to on-chain: provider calls startSession
+        if (config.compute.compute_agreement_address) {
+          try {
+            const caContract = new ethers.Contract(config.compute.compute_agreement_address, COMPUTE_AGREEMENT_ABI, machineKeySigner);
+            const tx = await caContract.startSession(sessionId);
+            await tx.wait();
+            log({ event: "compute_start_onchain", sessionId, txHash: tx.hash });
+          } catch (onchainErr) {
+            log({ event: "compute_start_onchain_error", sessionId, error: String(onchainErr) });
+          }
+        }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "active", sessionId }));
       } catch (err) {
@@ -1258,6 +1296,17 @@ export async function runDaemon(foreground = false): Promise<void> {
           costWei: r.costWei.toString(),
           refundWei: r.refundWei.toString(),
         });
+        // Wire to on-chain: call endSession
+        if (config.compute.compute_agreement_address) {
+          try {
+            const caContract = new ethers.Contract(config.compute.compute_agreement_address, COMPUTE_AGREEMENT_ABI, machineKeySigner);
+            const tx = await caContract.endSession(sessionId);
+            await tx.wait();
+            log({ event: "compute_end_onchain", sessionId, txHash: tx.hash });
+          } catch (onchainErr) {
+            log({ event: "compute_end_onchain_error", sessionId, error: String(onchainErr) });
+          }
+        }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           status:          "completed",
@@ -1296,6 +1345,17 @@ export async function runDaemon(foreground = false): Promise<void> {
         log({ event: "compute_disputed", sessionId });
         if (config.notifications.notify_on_dispute) {
           await notifier.notifyDispute(sessionId, String(msg.from ?? "client"));
+        }
+        // Wire to on-chain: call disputeSession
+        if (config.compute.compute_agreement_address) {
+          try {
+            const caContract = new ethers.Contract(config.compute.compute_agreement_address, COMPUTE_AGREEMENT_ABI, machineKeySigner);
+            const tx = await caContract.disputeSession(sessionId);
+            await tx.wait();
+            log({ event: "compute_dispute_onchain", sessionId, txHash: tx.hash });
+          } catch (onchainErr) {
+            log({ event: "compute_dispute_onchain_error", sessionId, error: String(onchainErr) });
+          }
         }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "disputed", sessionId }));

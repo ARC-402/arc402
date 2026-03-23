@@ -88,6 +88,7 @@ export interface DaemonConfig {
     auto_accept_compute: boolean;
     min_session_hours: number;
     max_session_hours: number;
+    compute_agreement_address: string;
   };
   delivery: {
     max_file_size_mb: number;
@@ -214,15 +215,16 @@ function withDefaults(raw: Record<string, unknown>): DaemonConfig {
       http_auth_token: str(work.http_auth_token),
     },
     compute: {
-      enabled:                   bool(compute.enabled, false),
-      gpu_spec:                  str(compute.gpu_spec),
-      rate_per_hour_wei:         str(compute.rate_per_hour_wei, "0"),
-      max_concurrent_sessions:   num(compute.max_concurrent_sessions, 1),
-      metering_interval_seconds: num(compute.metering_interval_seconds, 30),
-      report_interval_minutes:   num(compute.report_interval_minutes, 15),
-      auto_accept_compute:       bool(compute.auto_accept_compute, false),
-      min_session_hours:         num(compute.min_session_hours, 1),
-      max_session_hours:         num(compute.max_session_hours, 24),
+      enabled:                    bool(compute.enabled, false),
+      gpu_spec:                   str(compute.gpu_spec),
+      rate_per_hour_wei:          str(compute.rate_per_hour_wei, "0"),
+      max_concurrent_sessions:    num(compute.max_concurrent_sessions, 1),
+      metering_interval_seconds:  num(compute.metering_interval_seconds, 30),
+      report_interval_minutes:    num(compute.report_interval_minutes, 15),
+      auto_accept_compute:        bool(compute.auto_accept_compute, false),
+      min_session_hours:          num(compute.min_session_hours, 1),
+      max_session_hours:          num(compute.max_session_hours, 24),
+      compute_agreement_address:  str(compute.compute_agreement_address),
     },
     delivery: {
       max_file_size_mb: num(delivery.max_file_size_mb, 100),
