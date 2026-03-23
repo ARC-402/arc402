@@ -100,11 +100,11 @@ contract AcceptingDA {
 /// @notice Mock DA that tries to re-enter resolveDisputeDetailed from resolveDisputeFee.
 contract ReentrantResolveDA {
     SubscriptionAgreement internal sa;
-    uint256 internal targetId;
+    bytes32 internal targetId;
 
     constructor(SubscriptionAgreement _sa) { sa = _sa; }
 
-    function setTarget(uint256 id) external { targetId = id; }
+    function setTarget(bytes32 id) external { targetId = id; }
 
     function openDispute(
         uint256,
@@ -157,6 +157,10 @@ contract SubscriptionAgreementTest is Test {
         token.mint(alice,    1_000_000e6);
         token.mint(bob,      1_000_000e6);
         token.mint(provider, 1_000_000e6);
+    }
+
+    function _subId(address sub, uint256 offId) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(sub, offId));
     }
 
     // ─── createOffering ───────────────────────────────────────────────────────
@@ -229,8 +233,8 @@ contract SubscriptionAgreementTest is Test {
         uint256 aliceBefore = alice.balance;
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
-        assertEq(subId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        assertEq(subId, _subId(alice, offeringId));
 
         // Deposit deducted from alice
         assertEq(alice.balance, aliceBefore - PRICE);
@@ -261,7 +265,7 @@ contract SubscriptionAgreementTest is Test {
         vm.prank(alice);
         sa.subscribe{value: 3 * PRICE}(offeringId, 3);
 
-        SubscriptionAgreement.Subscription memory s = sa.getSubscription(1);
+        SubscriptionAgreement.Subscription memory s = sa.getSubscription(_subId(alice, offeringId));
         assertEq(s.deposited, 3 * PRICE);
         assertEq(s.consumed,  PRICE);     // only first period consumed at subscribe
 
@@ -275,7 +279,7 @@ contract SubscriptionAgreementTest is Test {
 
         vm.startPrank(alice);
         token.approve(address(sa), 300e6);
-        uint256 subId = sa.subscribe(offeringId, 3);
+        bytes32 subId = sa.subscribe(offeringId, 3);
         vm.stopPrank();
 
         SubscriptionAgreement.Subscription memory s = sa.getSubscription(subId);
@@ -395,9 +399,11 @@ contract SubscriptionAgreementTest is Test {
         assertTrue(sa.hasAccess(offeringId, alice));
         assertTrue(sa.hasAccess(offeringId, bob));
 
-        // Two separate subscription IDs
-        assertEq(sa.latestSubscription(offeringId, alice), 1);
-        assertEq(sa.latestSubscription(offeringId, bob),   2);
+        // Two separate deterministic subscription IDs
+        bytes32 aliceSubId = _subId(alice, offeringId);
+        bytes32 bobSubId   = _subId(bob,   offeringId);
+        assertTrue(sa.getSubscription(aliceSubId).active);
+        assertTrue(sa.getSubscription(bobSubId).active);
 
         // Provider credited for both
         assertEq(sa.pendingWithdrawals(provider, address(0)), 2 * PRICE);
@@ -410,10 +416,10 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
 
         // Before period ends — cannot renew
-        vm.prank(keeper);
+        vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.NotYetRenewable.selector);
         sa.renewSubscription(subId);
 
@@ -421,7 +427,7 @@ contract SubscriptionAgreementTest is Test {
         skip(PERIOD + 1);
 
         uint256 expectedEnd = block.timestamp + PERIOD; // late renewal anchors to now
-        vm.prank(keeper);
+        vm.prank(alice);
         sa.renewSubscription(subId);
 
         SubscriptionAgreement.Subscription memory s = sa.getSubscription(subId);
@@ -432,19 +438,25 @@ contract SubscriptionAgreementTest is Test {
         assertEq(sa.pendingWithdrawals(provider, address(0)), 2 * PRICE);
     }
 
-    function test_renew_byAnyone_keeper_compatible() public {
+    function test_renew_onlySubscriberOrProvider() public {
         vm.prank(provider);
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
-
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 2 * PRICE}(offeringId, 2);
-
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
         skip(PERIOD + 1);
-
-        // Keeper (unrelated address) can renew
+        // keeper (unrelated address) cannot renew
         vm.prank(keeper);
+        vm.expectRevert(SubscriptionAgreement.NotSubscriberOrProvider.selector);
         sa.renewSubscription(subId);
-
+        // subscriber can renew
+        vm.prank(alice);
+        sa.renewSubscription(subId);
+        assertTrue(sa.getSubscription(subId).active);
+        // advance again
+        skip(PERIOD + 1);
+        // provider can renew
+        vm.prank(provider);
+        sa.renewSubscription(subId);
         assertTrue(sa.getSubscription(subId).active);
     }
 
@@ -454,14 +466,14 @@ contract SubscriptionAgreementTest is Test {
 
         // Subscribe for exactly 1 period
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         // No deposit left after first period
         assertEq(sa.getSubscription(subId).deposited - sa.getSubscription(subId).consumed, 0);
 
         skip(PERIOD + 1);
 
-        vm.prank(keeper);
+        vm.prank(alice);
         sa.renewSubscription(subId);
 
         SubscriptionAgreement.Subscription memory s = sa.getSubscription(subId);
@@ -480,7 +492,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 2 * PRICE}(offeringId, 2);
+        bytes32 subId = sa.subscribe{value: 2 * PRICE}(offeringId, 2);
         // deposited=2P, consumed=P (first period), remaining=P
 
         // Add dust: topUp P/2 → deposited=2.5P, remaining=1.5P
@@ -489,14 +501,14 @@ contract SubscriptionAgreementTest is Test {
 
         // Advance past period 1 end, renew period 2
         skip(PERIOD + 1);
-        vm.prank(keeper);
+        vm.prank(alice);
         sa.renewSubscription(subId);
         // consumed=2P, remaining=0.5P, currentPeriodEnd advanced by PERIOD
 
         // Advance past period 2 end, renew → insufficient deposit → expires, refund dust
         skip(PERIOD + 1);
         uint256 aliceBefore = sa.pendingWithdrawals(alice, address(0));
-        vm.prank(keeper);
+        vm.prank(alice);
         sa.renewSubscription(subId);
 
         uint256 aliceAfter = sa.pendingWithdrawals(alice, address(0));
@@ -509,14 +521,14 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 2 * PRICE}(offeringId, 2);
+        bytes32 subId = sa.subscribe{value: 2 * PRICE}(offeringId, 2);
 
         vm.prank(alice);
         sa.cancel(subId);
 
         skip(PERIOD + 1);
 
-        vm.prank(keeper);
+        vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.NotActive.selector);
         sa.renewSubscription(subId);
     }
@@ -529,7 +541,7 @@ contract SubscriptionAgreementTest is Test {
 
         // Subscribe for 3 periods: deposited = 3*PRICE, consumed = PRICE (first period)
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
 
         vm.prank(alice);
         sa.cancel(subId);
@@ -553,7 +565,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.cancel(subId);
@@ -572,7 +584,7 @@ contract SubscriptionAgreementTest is Test {
 
         vm.startPrank(alice);
         token.approve(address(sa), 300e6);
-        uint256 subId = sa.subscribe(offeringId, 3);
+        bytes32 subId = sa.subscribe(offeringId, 3);
 
         sa.cancel(subId);
         vm.stopPrank();
@@ -586,7 +598,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(bob);
         vm.expectRevert(SubscriptionAgreement.NotSubscriber.selector);
@@ -598,7 +610,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.cancel(subId);
@@ -615,7 +627,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.topUp{value: 2 * PRICE}(subId, 2 * PRICE);
@@ -629,7 +641,7 @@ contract SubscriptionAgreementTest is Test {
 
         vm.startPrank(alice);
         token.approve(address(sa), 500e6);
-        uint256 subId = sa.subscribe(offeringId, 1);
+        bytes32 subId = sa.subscribe(offeringId, 1);
 
         sa.topUp(subId, 200e6);
         vm.stopPrank();
@@ -642,7 +654,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(bob);
         vm.expectRevert(SubscriptionAgreement.NotSubscriber.selector);
@@ -654,7 +666,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.InvalidAmount.selector);
@@ -666,7 +678,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(provider);
         sa.deactivateOffering(offeringId);
@@ -723,7 +735,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.cancel(subId);
@@ -752,7 +764,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 sub1 = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 sub1 = sa.subscribe{value: PRICE}(offeringId, 1);
 
         skip(PERIOD + 1); // let period expire
         vm.prank(alice);
@@ -760,10 +772,10 @@ contract SubscriptionAgreementTest is Test {
 
         // Re-subscribe
         vm.prank(alice);
-        uint256 sub2 = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 sub2 = sa.subscribe{value: PRICE}(offeringId, 1);
 
-        assertTrue(sub2 > sub1);
-        assertEq(sa.latestSubscription(offeringId, alice), sub2);
+        assertEq(sub1, sub2); // same deterministic ID
+        assertTrue(sa.getSubscription(sub1).active);
         assertTrue(sa.hasAccess(offeringId, alice));
     }
 
@@ -842,7 +854,7 @@ contract SubscriptionAgreementTest is Test {
         // Subscribe 2 periods, then cancel → credits 1 period refund to attacker
         vm.deal(attackerAddr, 2 * PRICE);
         vm.prank(attackerAddr);
-        uint256 subId = sa.subscribe{value: 2 * PRICE}(offeringId2, 2);
+        bytes32 subId = sa.subscribe{value: 2 * PRICE}(offeringId2, 2);
 
         vm.prank(attackerAddr);
         sa.cancel(subId); // refund = PRICE credited to attacker
@@ -864,7 +876,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
         // consumed = PRICE, remaining = 2*PRICE
 
         vm.prank(alice);
@@ -872,8 +884,9 @@ contract SubscriptionAgreementTest is Test {
 
         assertTrue(sa.getSubscription(subId).disputed);
 
-        // Renew blocked
+        // Renew blocked — skip(PERIOD + 1) is > 24 hours so dispute window is satisfied too
         skip(PERIOD + 1);
+        vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.AlreadyDisputed.selector);
         sa.renewSubscription(subId);
 
@@ -891,11 +904,12 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
 
+        skip(24 hours + 1);
         sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.SUBSCRIBER_WINS, 0, 0);
 
         // Remaining 2*PRICE refunded to alice
@@ -907,12 +921,13 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
         // remaining = 2*PRICE
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
 
+        skip(24 hours + 1);
         // Split 50/50
         uint256 provBefore = sa.pendingWithdrawals(provider, address(0));
         sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.SPLIT, PRICE, PRICE);
@@ -926,12 +941,13 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
         // remaining = 2*PRICE
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
 
+        skip(24 hours + 1);
         // SPLIT: only allocate half — dust goes to subscriber
         sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.SPLIT, PRICE / 2, PRICE / 2);
 
@@ -944,12 +960,13 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
         // remaining = 2*PRICE
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
 
+        skip(24 hours + 1);
         vm.expectRevert(SubscriptionAgreement.InvalidSplit.selector);
         sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.SPLIT, 2 * PRICE, PRICE);
     }
@@ -959,11 +976,12 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
 
+        skip(24 hours + 1);
         sa.resolveDisputeDetailed(
             subId,
             SubscriptionAgreement.DisputeOutcome.HUMAN_REVIEW_REQUIRED,
@@ -980,7 +998,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(bob);
         vm.expectRevert(SubscriptionAgreement.NotSubscriber.selector);
@@ -992,7 +1010,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
@@ -1007,7 +1025,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
@@ -1073,7 +1091,7 @@ contract SubscriptionAgreementTest is Test {
 
         vm.deal(alice, total + 1 ether);
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: total}(offeringId, periods);
+        bytes32 subId = sa.subscribe{value: total}(offeringId, periods);
 
         SubscriptionAgreement.Subscription memory s = sa.getSubscription(subId);
         assertEq(s.deposited, total);
@@ -1095,7 +1113,7 @@ contract SubscriptionAgreementTest is Test {
         token.mint(alice, total);
         vm.startPrank(alice);
         token.approve(address(sa), total);
-        uint256 subId = sa.subscribe(offeringId, periods);
+        bytes32 subId = sa.subscribe(offeringId, periods);
         vm.stopPrank();
 
         assertEq(sa.getSubscription(subId).deposited, total);
@@ -1113,7 +1131,7 @@ contract SubscriptionAgreementTest is Test {
 
         vm.deal(alice, total);
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: total}(offeringId, periods);
+        bytes32 subId = sa.subscribe{value: total}(offeringId, periods);
 
         vm.prank(alice);
         sa.cancel(subId);
@@ -1130,7 +1148,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         uint256 aliceBefore = alice.balance;
 
@@ -1154,7 +1172,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         uint256 aliceBefore = alice.balance;
 
@@ -1175,7 +1193,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         uint256 aliceBefore  = alice.balance;
         uint256 daBefore     = address(goodDA).balance;
@@ -1200,7 +1218,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
@@ -1208,6 +1226,7 @@ contract SubscriptionAgreementTest is Test {
         // Tell the reentrant DA which subscriptionId to target
         reDA.setTarget(subId);
 
+        skip(24 hours + 1);
         // resolveDisputeDetailed: DA.resolveDisputeFee tries to re-enter → nonReentrant blocks it
         // The outer call still succeeds (try/catch swallows DA error)
         sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.SUBSCRIBER_WINS, 0, 0);
@@ -1227,11 +1246,12 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 1); // cap=1
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
 
+        skip(24 hours + 1);
         // Owner selects HUMAN_REVIEW — no decrement
         sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.HUMAN_REVIEW_REQUIRED, 0, 0);
 
@@ -1260,7 +1280,7 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         vm.prank(alice);
         sa.disputeSubscription(subId);
@@ -1279,23 +1299,23 @@ contract SubscriptionAgreementTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 4 * PRICE}(offeringId, 4);
+        bytes32 subId = sa.subscribe{value: 4 * PRICE}(offeringId, 4);
         // deposited=4P, consumed=P, remaining=3P
 
         // Skip 2+ periods; first renewal anchors currentPeriodEnd to now + PERIOD
         skip(2 * PERIOD + 1);
 
-        vm.prank(keeper);
+        vm.prank(alice);
         sa.renewSubscription(subId); // period 2 — anchored to block.timestamp + PERIOD
 
         // Second renewal is now NotYetRenewable (new end = now + PERIOD, not yet elapsed)
-        vm.prank(keeper);
+        vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.NotYetRenewable.selector);
         sa.renewSubscription(subId);
 
         // Skip another full period; now the second renewal is valid
         skip(PERIOD + 1);
-        vm.prank(keeper);
+        vm.prank(alice);
         sa.renewSubscription(subId); // period 3
 
         SubscriptionAgreement.Subscription memory s = sa.getSubscription(subId);
@@ -1303,5 +1323,163 @@ contract SubscriptionAgreementTest is Test {
         assertTrue(s.active);
         // Provider credited 3 periods total
         assertEq(sa.pendingWithdrawals(provider, address(0)), 3 * PRICE);
+    }
+
+    // ─── Fix 2: renewSubscription restriction tests ───────────────────────────
+
+    function test_renew_revert_notSubscriberOrProvider() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        vm.prank(alice);
+        bytes32 subId = sa.subscribe{value: 2 * PRICE}(offeringId, 2);
+        skip(PERIOD + 1);
+        vm.prank(bob);
+        vm.expectRevert(SubscriptionAgreement.NotSubscriberOrProvider.selector);
+        sa.renewSubscription(subId);
+    }
+
+    // ─── Fix 1: dispute window tests ─────────────────────────────────────────
+
+    function test_resolveDispute_revert_windowNotElapsed() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        vm.prank(alice);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        vm.prank(alice);
+        sa.disputeSubscription(subId);
+        // Immediately try to resolve — window not elapsed
+        vm.expectRevert(SubscriptionAgreement.DisputeWindowNotElapsed.selector);
+        sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.SUBSCRIBER_WINS, 0, 0);
+    }
+
+    // ─── Fix 3: updateMaxSubscribers tests ───────────────────────────────────
+
+    function test_updateMaxSubscribers_increaseCap() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 1);
+        vm.prank(provider);
+        sa.updateMaxSubscribers(offeringId, 5);
+        assertEq(sa.getOffering(offeringId).maxSubscribers, 5);
+    }
+
+    function test_updateMaxSubscribers_revert_notProvider() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 1);
+        vm.prank(alice);
+        vm.expectRevert(SubscriptionAgreement.NotProvider.selector);
+        sa.updateMaxSubscribers(offeringId, 5);
+    }
+
+    function test_updateMaxSubscribers_revert_belowCurrentCount() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        vm.prank(alice);
+        sa.subscribe{value: PRICE}(offeringId, 1);
+        vm.prank(bob);
+        sa.subscribe{value: PRICE}(offeringId, 1);
+        // 2 subscribers — trying to set cap to 1 should fail
+        vm.prank(provider);
+        vm.expectRevert(SubscriptionAgreement.NewMaxBelowCount.selector);
+        sa.updateMaxSubscribers(offeringId, 1);
+    }
+
+    function test_updateMaxSubscribers_setUnlimited() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 2);
+        vm.prank(alice);
+        sa.subscribe{value: PRICE}(offeringId, 1);
+        vm.prank(bob);
+        sa.subscribe{value: PRICE}(offeringId, 1);
+        // Set to 0 (unlimited) even with 2 subscribers
+        vm.prank(provider);
+        sa.updateMaxSubscribers(offeringId, 0);
+        assertEq(sa.getOffering(offeringId).maxSubscribers, 0);
+    }
+
+    // ─── Fix 4: claimDisputeTimeout tests ────────────────────────────────────
+
+    function test_claimDisputeTimeout_refundsSubscriber() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        vm.prank(alice);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        // consumed = PRICE, remaining = 2*PRICE
+        vm.prank(alice);
+        sa.disputeSubscription(subId);
+        // Skip past dispute timeout
+        skip(7 days + 1);
+        // Anyone can claim
+        sa.claimDisputeTimeout(subId);
+        assertFalse(sa.getSubscription(subId).active);
+        assertFalse(sa.getSubscription(subId).disputed);
+        assertEq(sa.pendingWithdrawals(alice, address(0)), 2 * PRICE);
+        assertEq(sa.getOffering(offeringId).subscriberCount, 0);
+    }
+
+    function test_claimDisputeTimeout_revert_notDisputed() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        vm.prank(alice);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        vm.expectRevert(SubscriptionAgreement.NotDisputed.selector);
+        sa.claimDisputeTimeout(subId);
+    }
+
+    function test_claimDisputeTimeout_revert_timeoutNotReached() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        vm.prank(alice);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        vm.prank(alice);
+        sa.disputeSubscription(subId);
+        skip(6 days); // only 6 days, not 7
+        vm.expectRevert(SubscriptionAgreement.DisputeTimeoutNotReached.selector);
+        sa.claimDisputeTimeout(subId);
+    }
+
+    // ─── Fix 5: bytes32 subscription ID tests ────────────────────────────────
+
+    function test_subscriptionId_deterministic() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        vm.prank(alice);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        assertEq(subId, keccak256(abi.encodePacked(alice, offeringId)));
+    }
+
+    function test_subscriptionId_uniquePerSubscriberAndOffering() public {
+        vm.startPrank(provider);
+        uint256 off1 = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        uint256 off2 = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        bytes32 aliceSub1 = sa.subscribe{value: PRICE}(off1, 1);
+        vm.prank(alice);
+        bytes32 aliceSub2 = sa.subscribe{value: PRICE}(off2, 1);
+        vm.prank(bob);
+        bytes32 bobSub1 = sa.subscribe{value: PRICE}(off1, 1);
+
+        assertTrue(aliceSub1 != aliceSub2);
+        assertTrue(aliceSub1 != bobSub1);
+        assertTrue(aliceSub2 != bobSub1);
+    }
+
+    function test_resubscribe_sameIdAfterExpiry() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+        vm.prank(alice);
+        bytes32 sub1 = sa.subscribe{value: PRICE}(offeringId, 1);
+        // Expire the subscription
+        skip(PERIOD + 1);
+        vm.prank(alice);
+        sa.renewSubscription(sub1); // deposit exhausted → expires
+        assertFalse(sa.getSubscription(sub1).active);
+        // Re-subscribe — same deterministic ID
+        vm.prank(alice);
+        bytes32 sub2 = sa.subscribe{value: PRICE}(offeringId, 1);
+        assertEq(sub1, sub2);
+        assertTrue(sa.getSubscription(sub2).active);
+        assertFalse(sa.getSubscription(sub2).cancelled);
     }
 }

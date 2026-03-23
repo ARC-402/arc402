@@ -36,7 +36,7 @@ contract ReentrantSubscriber {
         sa.subscribe{value: totalCost}(offeringId, periods);
     }
 
-    function cancel(uint256 subId) external {
+    function cancel(bytes32 subId) external {
         sa.cancel(subId);
     }
 }
@@ -53,7 +53,7 @@ contract DoubleRenewalAttacker {
 
     constructor(SubscriptionAgreement _sa) { sa = _sa; }
 
-    function attack(uint256 subscriptionId) external {
+    function attack(bytes32 subscriptionId) external {
         // First call: valid renewal (caller ensures enough time has passed)
         sa.renewSubscription(subscriptionId);
         // Second call: immediately — period not yet elapsed → must revert
@@ -72,7 +72,7 @@ contract GriefDisputeAttacker {
 
     constructor(SubscriptionAgreement _sa) { sa = _sa; }
 
-    function subscribeAndDispute(uint256 offeringId) external payable returns (uint256 subId) {
+    function subscribeAndDispute(uint256 offeringId) external payable returns (bytes32 subId) {
         subId = sa.subscribe{value: msg.value}(offeringId, 1);
         sa.disputeSubscription(subId);
     }
@@ -154,6 +154,10 @@ contract SubscriptionAgreementAttackerTest is Test {
         vm.deal(alice,    100 ether);
     }
 
+    function _subId(address sub, uint256 offId) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(sub, offId));
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Attack 1: Reentrancy on renewal
     // Attacker re-enters renewSubscription from the receive() hook.
@@ -174,7 +178,7 @@ contract SubscriptionAgreementAttackerTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
 
         skip(PERIOD + 1);
 
@@ -201,15 +205,18 @@ contract SubscriptionAgreementAttackerTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
 
         skip(PERIOD + 1);
 
-        DoubleRenewalAttacker attacker = new DoubleRenewalAttacker(sa);
-
-        // First renewal valid; second immediately → NotYetRenewable
+        // First renewal valid
+        vm.prank(alice);
+        sa.renewSubscription(subId);
+        // Second immediately — period not yet elapsed → NotYetRenewable
+        vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.NotYetRenewable.selector);
-        attacker.attack(subId);
+        sa.renewSubscription(subId);
+        assertEq(sa.getSubscription(subId).consumed, 2 * PRICE);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -223,7 +230,7 @@ contract SubscriptionAgreementAttackerTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId1 = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId1 = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
 
         // Cancel immediately → refund deposited - consumed = 2P
         vm.prank(alice);
@@ -238,8 +245,8 @@ contract SubscriptionAgreementAttackerTest is Test {
 
         // Re-subscribe — must pay first period again (no free reset)
         vm.prank(alice);
-        uint256 subId2 = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
-        assertEq(subId2, 2, "new subscription ID assigned");
+        bytes32 subId2 = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        assertEq(subId2, _subId(alice, offeringId));
 
         vm.prank(alice);
         sa.cancel(subId2);
@@ -265,10 +272,11 @@ contract SubscriptionAgreementAttackerTest is Test {
         vm.deal(address(attacker), 100 ether);
 
         // Cycle 1: subscribe + dispute
-        uint256 subId1 = attacker.subscribeAndDispute{value: PRICE}(offeringId);
+        bytes32 subId1 = attacker.subscribeAndDispute{value: PRICE}(offeringId);
         assertTrue(sa.getSubscription(subId1).disputed, "should be disputed");
 
         // Owner resolves SUBSCRIBER_WINS (refund of remaining = 0, first period already paid)
+        skip(24 hours + 1);
         sa.resolveDisputeDetailed(subId1, SubscriptionAgreement.DisputeOutcome.SUBSCRIBER_WINS, 0, 0);
 
         // Attacker got 0 tokens back (deposited=PRICE, consumed=PRICE, remaining=0)
@@ -288,7 +296,7 @@ contract SubscriptionAgreementAttackerTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offeringId, 3);
 
         // Provider deactivates mid-period
         vm.prank(provider);
@@ -299,6 +307,7 @@ contract SubscriptionAgreementAttackerTest is Test {
 
         // Alice can still renew (deposit not exhausted)
         skip(PERIOD + 1);
+        vm.prank(alice);
         sa.renewSubscription(subId);
         assertTrue(sa.getSubscription(subId).active, "existing subscription still renews after deactivation");
 
@@ -322,7 +331,7 @@ contract SubscriptionAgreementAttackerTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
         // deposited=PRICE, consumed=PRICE, remaining=0
 
         // TopUp 5 ETH
@@ -404,7 +413,7 @@ contract SubscriptionAgreementAttackerTest is Test {
         vm.prank(alice);
         sa.subscribe(offeringId, 3);
 
-        assertEq(sa.getSubscription(1).deposited, 300e6);
+        assertEq(sa.getSubscription(_subId(alice, offeringId)).deposited, 300e6);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -425,7 +434,7 @@ contract SubscriptionAgreementAttackerTest is Test {
         attacker.subscribe{value: 3 * PRICE}(offeringId, 3, 3 * PRICE);
 
         // Attacker cancels — gets 2P refund in pendingWithdrawals
-        attacker.cancel(1);
+        attacker.cancel(_subId(address(attacker), offeringId));
         uint256 refund = sa.pendingWithdrawals(address(attacker), address(0));
         assertEq(refund, 2 * PRICE);
 
@@ -454,7 +463,7 @@ contract SubscriptionAgreementAttackerTest is Test {
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offeringId, 1);
 
         uint256 aliceBefore  = alice.balance;
         uint256 contractBefore = address(sa).balance;

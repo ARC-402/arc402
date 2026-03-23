@@ -24,7 +24,7 @@ contract HalmosSubscriptionCheck is Test {
         uint256 total = price * periods;
         vm.deal(SUBSCRIBER, total);
         vm.prank(SUBSCRIBER);
-        uint256 subId = sa.subscribe{value: total}(offeringId, periods);
+        bytes32 subId = sa.subscribe{value: total}(offeringId, periods);
         SubscriptionAgreement.Subscription memory sub = sa.getSubscription(subId);
         assert(sub.deposited == total);
     }

@@ -15,14 +15,14 @@ import "../contracts/src/SubscriptionAgreement.sol";
 // ---------------------------------------------------------------------------
 contract ReentrantCancelOnWithdraw {
     SubscriptionAgreement public sa;
-    uint256 public subIdToCancel;   // live sub to try cancelling during callback
+    bytes32 public subIdToCancel;   // live sub to try cancelling during callback
     bool    public cancelWasBlocked;
 
     constructor(SubscriptionAgreement _sa) { sa = _sa; }
 
     /// @dev Fires on ETH receipt from withdraw(). Attempts to cancel a still-active sub.
     receive() external payable {
-        if (subIdToCancel != 0 && !cancelWasBlocked) {
+        if (subIdToCancel != bytes32(0) && !cancelWasBlocked) {
             try sa.cancel(subIdToCancel) {
                 // If we get here, reentrancy succeeded — BAD
             } catch {
@@ -32,14 +32,14 @@ contract ReentrantCancelOnWithdraw {
     }
 
     function doSubscribe(uint256 offeringId, uint256 periods)
-        external payable returns (uint256)
+        external payable returns (bytes32)
     {
         return sa.subscribe{value: msg.value}(offeringId, periods);
     }
 
-    function doCancel(uint256 subId)   external { sa.cancel(subId); }
+    function doCancel(bytes32 subId)   external { sa.cancel(subId); }
     function doWithdraw()              external { sa.withdraw(address(0)); }
-    function setSubIdToCancel(uint256 id) external { subIdToCancel = id; }
+    function setSubIdToCancel(bytes32 id) external { subIdToCancel = id; }
 }
 
 // ---------------------------------------------------------------------------
@@ -79,8 +79,9 @@ contract ReentrantERC20 {
         balanceOf[to]               += amt;
 
         // Attempt to re-enter cancel() on a live subscription
-        if (targetSubId != 0 && !innerCallBlocked) {
-            try sa.cancel(targetSubId) {
+        bytes32 subId = bytes32(targetSubId);
+        if (subId != bytes32(0) && !innerCallBlocked) {
+            try sa.cancel(subId) {
                 // Re-entry succeeded — BAD
             } catch {
                 innerCallBlocked = true;
@@ -97,7 +98,7 @@ contract DoubleRenewAttacker {
     SubscriptionAgreement public sa;
     constructor(SubscriptionAgreement _sa) { sa = _sa; }
 
-    function attack(uint256 subId) external {
+    function attack(bytes32 subId) external {
         sa.renewSubscription(subId);   // first: valid
         sa.renewSubscription(subId);   // second: NotYetRenewable
     }
@@ -113,12 +114,12 @@ contract SelfDealingProxy {
     constructor(SubscriptionAgreement _sa) { sa = _sa; }
 
     function doSubscribe(uint256 offeringId, uint256 periods)
-        external payable returns (uint256)
+        external payable returns (bytes32)
     {
         return sa.subscribe{value: msg.value}(offeringId, periods);
     }
 
-    function doCancel(uint256 subId)   external { sa.cancel(subId); }
+    function doCancel(bytes32 subId)   external { sa.cancel(subId); }
     function doWithdraw()              external { sa.withdraw(address(0)); }
     receive() external payable {}
 }
@@ -133,15 +134,15 @@ contract GriefCycleAttacker {
     receive() external payable {}
 
     function grabAllSlots(uint256 offeringId, uint256 n, uint256 price)
-        external payable returns (uint256[] memory ids)
+        external payable returns (bytes32[] memory ids)
     {
-        ids = new uint256[](n);
+        ids = new bytes32[](n);
         for (uint256 i = 0; i < n; i++) {
             ids[i] = sa.subscribe{value: price}(offeringId, 1);
         }
     }
 
-    function releaseAll(uint256[] calldata ids) external {
+    function releaseAll(bytes32[] calldata ids) external {
         for (uint256 i = 0; i < ids.length; i++) {
             sa.cancel(ids[i]);
         }
@@ -172,7 +173,7 @@ contract FlashLoanAttacker {
 
         // Simulate flash-borrowed tokens pre-loaded by test setup
         token.approve(address(sa), total);
-        uint256 subId = sa.subscribe(offeringId, periods);
+        bytes32 subId = sa.subscribe(offeringId, periods);
         sa.cancel(subId);
         // Only withdraw if there is something to pull (1-period sub has 0 refund)
         uint256 pending = sa.pendingWithdrawals(address(this), address(token));
@@ -279,6 +280,10 @@ contract SubscriptionAgreementAttackerV2 is Test {
         vm.deal(bob,      100 ether);
     }
 
+    function _subId(address sub, uint256 offId) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(sub, offId));
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Attack 1: Reentrancy on withdraw() — cross-function reentrance
     //
@@ -306,8 +311,8 @@ contract SubscriptionAgreementAttackerV2 is Test {
         vm.deal(address(attacker), 20 ether);
 
         // Subscribe to both offerings (2P each = 4P total)
-        uint256 sub1 = attacker.doSubscribe{value: 2 * PRICE}(off1, 2);
-        uint256 sub2 = attacker.doSubscribe{value: 2 * PRICE}(off2, 2);
+        bytes32 sub1 = attacker.doSubscribe{value: 2 * PRICE}(off1, 2);
+        bytes32 sub2 = attacker.doSubscribe{value: 2 * PRICE}(off2, 2);
 
         // Cancel sub1 → pendingWithdrawals[attacker][ETH] = P (refund of 1 period)
         attacker.doCancel(sub1);
@@ -366,13 +371,13 @@ contract SubscriptionAgreementAttackerV2 is Test {
         vm.prank(provider);
         uint256 ethOff = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
         vm.prank(alice);
-        uint256 sub1 = sa.subscribe{value: PRICE}(ethOff, 1);
+        bytes32 sub1 = sa.subscribe{value: PRICE}(ethOff, 1);
 
         // Alice approves malToken; arm the callback to cancel sub1 mid-subscribe
         malToken.mint(alice, 10 * PRICE);
         vm.prank(alice);
         malToken.approve(address(sa), 10 * PRICE);
-        malToken.setTargetSubId(sub1);
+        malToken.setTargetSubId(uint256(sub1));
 
         // Alice subscribes to the malToken offering — transferFrom fires callback
         vm.prank(alice);
@@ -410,20 +415,19 @@ contract SubscriptionAgreementAttackerV2 is Test {
         uint256 offId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 5 * PRICE}(offId, 5);
+        bytes32 subId = sa.subscribe{value: 5 * PRICE}(offId, 5);
 
-        // Warp to just past the first period end
         skip(PERIOD + 1);
 
-        DoubleRenewAttacker attacker = new DoubleRenewAttacker(sa);
-
-        // First renewal valid; second must revert
+        // First renewal: alice (subscriber) calls — valid
+        vm.prank(alice);
+        sa.renewSubscription(subId);
+        // Second immediately: NotYetRenewable
+        vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.NotYetRenewable.selector);
-        attacker.attack(subId);
-
-        // Deposit was only consumed once (first renewal never executed since tx reverted)
-        assertEq(sa.getSubscription(subId).consumed, PRICE,
-            "only initial period consumed: double-charge prevented");
+        sa.renewSubscription(subId);
+        // Only initial + 1 renewal consumed
+        assertEq(sa.getSubscription(subId).consumed, 2 * PRICE, "only 2 periods consumed: double-charge prevented");
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -464,7 +468,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
         uint256 offId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
 
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offId, 1);
         // deposited=P, consumed=P, remaining=0
 
         // TopUp a large amount
@@ -545,7 +549,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
         vm.deal(address(proxy), 5 * PRICE);
 
         // Proxy subscribes — msg.sender = proxy ≠ provider, so SelfDealing doesn't fire
-        uint256 subId = proxy.doSubscribe{value: 2 * PRICE}(offId, 2);
+        bytes32 subId = proxy.doSubscribe{value: 2 * PRICE}(offId, 2);
         assertEq(sa.getSubscription(subId).subscriber, address(proxy), "proxy is subscriber");
         // subscriberCount inflated
         assertEq(sa.getOffering(offId).subscriberCount, 1, "count inflated");
@@ -603,9 +607,9 @@ contract SubscriptionAgreementAttackerV2 is Test {
         vm.deal(atk2, 10 ether);
         vm.deal(atk3, 10 ether);
 
-        vm.prank(atk1); uint256 sub1 = sa.subscribe{value: PRICE}(offId, 1);
-        vm.prank(atk2); uint256 sub2 = sa.subscribe{value: PRICE}(offId, 1);
-        vm.prank(atk3); uint256 sub3 = sa.subscribe{value: PRICE}(offId, 1);
+        vm.prank(atk1); bytes32 sub1 = sa.subscribe{value: PRICE}(offId, 1);
+        vm.prank(atk2); bytes32 sub2 = sa.subscribe{value: PRICE}(offId, 1);
+        vm.prank(atk3); bytes32 sub3 = sa.subscribe{value: PRICE}(offId, 1);
 
         assertEq(sa.getOffering(offId).subscriberCount, 3, "all 3 slots filled");
 
@@ -660,7 +664,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
 
         // Alice prepays 3 periods
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offId, 3);
         // deposited=3P, consumed=P, remaining=2P
 
         // Period 1 ends. Keeper is "about to" renew. Alice front-runs with cancel.
@@ -671,6 +675,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
 
         // Keeper's renewSubscription now fails (NotActive — cancel sets active=false)
         skip(2); // past period end
+        vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.NotActive.selector);
         sa.renewSubscription(subId);
 
@@ -706,7 +711,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
 
         // Alice subscribes for exactly 1 period
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offId, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offId, 1);
         // deposited=P, consumed=P, remaining=0
 
         uint256 periodEnd = sa.getSubscription(subId).currentPeriodEnd;
@@ -717,6 +722,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
         // No-op calls cannot extend currentPeriodEnd
         // Dispute requires an active non-cancelled sub — let's try various calls
         // Renew: NotYetRenewable (not at period end yet)
+        vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.NotYetRenewable.selector);
         sa.renewSubscription(subId);
         assertEq(sa.getSubscription(subId).currentPeriodEnd, periodEnd,
@@ -729,6 +735,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
         assertFalse(sa.hasAccess(offId, alice), "access expired after period");
 
         // Renew with 0 remaining deposit → expires subscription (no extension)
+        vm.prank(alice);
         sa.renewSubscription(subId);
         assertFalse(sa.getSubscription(subId).active, "subscription expired: no funds");
         assertFalse(sa.hasAccess(offId, alice),        "no access after expiry");
@@ -790,7 +797,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
 
         // Subscribe and verify no overflow — 365 days + block.timestamp fits in uint256
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: PRICE}(offMax, 1);
+        bytes32 subId = sa.subscribe{value: PRICE}(offMax, 1);
         assertTrue(sa.getSubscription(subId).currentPeriodEnd > block.timestamp,
             "period end is in the future");
     }
@@ -825,7 +832,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
         vm.prank(alice);
         sa.subscribe(tokOff, 3); // ERC-20 subscribe
         vm.prank(alice);
-        sa.cancel(1); // cancel → pendingWithdrawals[alice][token] = 200e18
+        sa.cancel(_subId(alice, tokOff)); // cancel → pendingWithdrawals[alice][token] = 200e18
 
         // alice has token pending, but tries to withdraw ETH
         vm.prank(alice);
@@ -838,7 +845,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
 
         // Case (b): ETH offering topUp with ERC-20 allowance (msg.value mismatch)
         vm.prank(alice);
-        uint256 ethSub = sa.subscribe{value: 2 * PRICE}(ethOff, 2);
+        bytes32 ethSub = sa.subscribe{value: 2 * PRICE}(ethOff, 2);
 
         // Try to topUp ETH offering while sending msg.value
         // (this is correct, but verify the inverse — sending value on ERC-20 topUp)
@@ -847,7 +854,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
         token.mint(bob, 1000e18);
         vm.prank(bob); token.approve(address(sa), 1000e18);
         vm.prank(bob);
-        uint256 bobSub = sa.subscribe(tokOff2, 2); // ERC-20
+        bytes32 bobSub = sa.subscribe(tokOff2, 2); // ERC-20
 
         // topUp ERC-20 subscription with ETH value → MsgValueWithToken
         vm.deal(bob, 10 ether);
@@ -896,7 +903,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
         // Subscribe: SA's accounting records deposited=3000, consumed=1000
         // SA's ACTUAL fotToken balance = 2700 (10% fee taken on transferFrom)
         vm.prank(alice);
-        uint256 subId = sa.subscribe(offId, fotPeriods);
+        bytes32 subId = sa.subscribe(offId, fotPeriods);
 
         uint256 saBalance = fotToken.balanceOf(address(sa));
         assertEq(saBalance, 2700, "SA received only 2700 (10% fee applied)");
@@ -951,7 +958,7 @@ contract SubscriptionAgreementAttackerV2 is Test {
 
         // Alice subscribes for 3 periods
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 3 * PRICE}(offId, 3);
+        bytes32 subId = sa.subscribe{value: 3 * PRICE}(offId, 3);
         assertTrue(sa.hasAccess(offId, alice), "alice has access before deactivation");
 
         // Provider deactivates mid-period
@@ -965,7 +972,8 @@ contract SubscriptionAgreementAttackerV2 is Test {
 
         // Alice can still renew (deposit is sufficient)
         skip(PERIOD + 1);
-        sa.renewSubscription(subId); // keeper-callable
+        vm.prank(alice);
+        sa.renewSubscription(subId);
         assertEq(sa.getSubscription(subId).consumed, 2 * PRICE, "second period processed");
 
         // New subscriber is blocked
@@ -1006,26 +1014,28 @@ contract SubscriptionAgreementAttackerV2 is Test {
 
         // Cycle 1: subscribe 1 period, immediately dispute
         vm.prank(alice);
-        uint256 sub1 = sa.subscribe{value: PRICE}(offId, 1);
+        bytes32 sub1 = sa.subscribe{value: PRICE}(offId, 1);
         // deposited=P, consumed=P, remaining=0
 
         vm.prank(alice);
         sa.disputeSubscription(sub1);
 
         // Owner resolves SUBSCRIBER_WINS — remaining=0, alice gets nothing
+        skip(24 hours + 1);
         sa.resolveDisputeDetailed(sub1, SubscriptionAgreement.DisputeOutcome.SUBSCRIBER_WINS, 0, 0);
         assertEq(sa.pendingWithdrawals(alice,    address(0)), 0, "cycle1: alice gets 0");
         assertEq(sa.pendingWithdrawals(provider, address(0)), PRICE, "cycle1: provider earns P");
 
         // Cycle 2: subscribe 2 periods, dispute immediately (remaining=P)
         vm.prank(alice);
-        uint256 sub2 = sa.subscribe{value: 2 * PRICE}(offId, 2);
+        bytes32 sub2 = sa.subscribe{value: 2 * PRICE}(offId, 2);
         // deposited=2P, consumed=P, remaining=P
 
         vm.prank(alice);
         sa.disputeSubscription(sub2);
 
         // Owner resolves SUBSCRIBER_WINS — alice gets remaining=P back
+        skip(24 hours + 1);
         sa.resolveDisputeDetailed(sub2, SubscriptionAgreement.DisputeOutcome.SUBSCRIBER_WINS, 0, 0);
         assertEq(sa.pendingWithdrawals(alice, address(0)), PRICE, "cycle2: alice gets P back");
 

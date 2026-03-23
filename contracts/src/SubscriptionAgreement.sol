@@ -47,6 +47,7 @@ interface ISubscriptionDisputeArbitration {
  *  Dispute:
  *    disputeSubscription(subscriptionId) → subscriber freezes renewal
  *    resolveDisputeDetailed(...)         → owner resolves with DisputeOutcome enum
+ *    claimDisputeTimeout(subscriptionId) → subscriber claims refund after DISPUTE_TIMEOUT
  *    DisputeArbitration (optional)       → try/catch on DA calls
  *
  *  Payment tokens:
@@ -98,12 +99,19 @@ contract SubscriptionAgreement is ReentrancyGuard {
         bool    active;             // false if expired or resolved
         bool    cancelled;          // cancelled but may still have time remaining
         bool    disputed;           // frozen — awaiting owner resolution
+        uint256 disputeOpenedAt;    // timestamp when dispute was opened
     }
 
     // ─── Constants ────────────────────────────────────────────────────────────
 
     /// @notice Maximum allowed period for a subscription offering (365 days).
     uint256 public constant MAX_PERIOD = 365 days;
+
+    /// @notice Minimum time that must elapse after dispute opening before owner can resolve.
+    uint256 public constant DISPUTE_WINDOW = 24 hours;
+
+    /// @notice Time after which a subscriber may claim a full refund if dispute is unresolved.
+    uint256 public constant DISPUTE_TIMEOUT = 7 days;
 
     // ─── Storage ──────────────────────────────────────────────────────────────
 
@@ -119,14 +127,10 @@ contract SubscriptionAgreement is ReentrancyGuard {
     /// @notice Arbitrators approved for disputes.
     mapping(address => bool) public approvedArbitrators;
 
-    uint256 private _nextOfferingId      = 1;
-    uint256 private _nextSubscriptionId  = 1;
+    uint256 private _nextOfferingId = 1;
 
-    mapping(uint256 => Offering)     public offerings;
-    mapping(uint256 => Subscription) public subscriptions;
-
-    /// @notice Latest subscriptionId for (offeringId, subscriber). 0 = none.
-    mapping(uint256 => mapping(address => uint256)) public latestSubscription;
+    mapping(uint256 => Offering)    public offerings;
+    mapping(bytes32 => Subscription) public subscriptions;
 
     /// @notice Pull-payment balances: user => token => claimable amount.
     ///         token == address(0) for ETH.
@@ -144,20 +148,21 @@ contract SubscriptionAgreement is ReentrancyGuard {
         uint256 maxSubscribers
     );
     event OfferingDeactivated(uint256 indexed offeringId);
+    event MaxSubscribersUpdated(uint256 indexed offeringId, uint256 newMax);
     event Subscribed(
-        uint256 indexed subscriptionId,
+        bytes32 indexed subscriptionId,
         uint256 indexed offeringId,
         address indexed subscriber,
         uint256 currentPeriodEnd,
         uint256 deposited
     );
-    event Renewed(uint256 indexed subscriptionId, uint256 newPeriodEnd);
-    event Expired(uint256 indexed subscriptionId);
-    event SubscriptionCancelled(uint256 indexed subscriptionId, uint256 refund);
-    event ToppedUp(uint256 indexed subscriptionId, uint256 amount, uint256 newDeposited);
-    event SubscriptionDisputed(uint256 indexed subscriptionId, address indexed disputant);
+    event Renewed(bytes32 indexed subscriptionId, uint256 newPeriodEnd);
+    event Expired(bytes32 indexed subscriptionId);
+    event SubscriptionCancelled(bytes32 indexed subscriptionId, uint256 refund);
+    event ToppedUp(bytes32 indexed subscriptionId, uint256 amount, uint256 newDeposited);
+    event SubscriptionDisputed(bytes32 indexed subscriptionId, address indexed disputant);
     event DetailedDisputeResolved(
-        uint256 indexed subscriptionId,
+        bytes32 indexed subscriptionId,
         DisputeOutcome outcome,
         uint256 providerAmount,
         uint256 subscriberAmount
@@ -178,6 +183,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
     error SubscriptionNotFound();
     error NotSubscriber();
     error NotProvider();
+    error NotSubscriberOrProvider();
     error SelfDealing();
     error MaxSubscribersReached();
     error InsufficientDeposit(uint256 required, uint256 provided);
@@ -195,6 +201,9 @@ contract SubscriptionAgreement is ReentrancyGuard {
     error InvalidPeriodSeconds();
     error InvalidPrice();
     error InvalidAmount();
+    error DisputeWindowNotElapsed();
+    error DisputeTimeoutNotReached();
+    error NewMaxBelowCount();
 
     // ─── Modifier ─────────────────────────────────────────────────────────────
 
@@ -284,6 +293,20 @@ contract SubscriptionAgreement is ReentrancyGuard {
         emit OfferingDeactivated(offeringId);
     }
 
+    /**
+     * @notice Provider updates the maxSubscribers cap on an offering.
+     *         newMax must be 0 (unlimited) or >= current subscriberCount.
+     * @param offeringId  Target offering.
+     * @param newMax      New cap (0 = unlimited).
+     */
+    function updateMaxSubscribers(uint256 offeringId, uint256 newMax) external nonReentrant {
+        Offering storage o = _getOffering(offeringId);
+        if (msg.sender != o.provider) revert NotProvider();
+        if (newMax != 0 && newMax < o.subscriberCount) revert NewMaxBelowCount();
+        o.maxSubscribers = newMax;
+        emit MaxSubscribersUpdated(offeringId, newMax);
+    }
+
     // ─── Subscriber functions ─────────────────────────────────────────────────
 
     /**
@@ -292,14 +315,15 @@ contract SubscriptionAgreement is ReentrancyGuard {
      *         SA-2: self-dealing — subscriber != offering.provider.
      *         SA-3: exact ETH deposit required, no overpayment.
      *         ETH: send exact msg.value. ERC-20: pre-approve this contract.
+     *         Subscription ID is deterministic: keccak256(subscriber, offeringId).
      * @param offeringId  Target offering.
      * @param periods     Number of periods to deposit for (minimum 1).
-     * @return subscriptionId  Assigned subscription ID.
+     * @return subscriptionId  Deterministic subscription ID.
      */
     function subscribe(
         uint256 offeringId,
         uint256 periods
-    ) external payable nonReentrant returns (uint256 subscriptionId) {
+    ) external payable nonReentrant returns (bytes32 subscriptionId) {
         if (periods == 0) revert InvalidPeriods();
 
         Offering storage o = _getOffering(offeringId);
@@ -312,11 +336,9 @@ contract SubscriptionAgreement is ReentrancyGuard {
         }
 
         // Prevent double-subscription (must cancel or expire first)
-        uint256 existingId = latestSubscription[offeringId][msg.sender];
-        if (existingId != 0) {
-            Subscription storage existing = subscriptions[existingId];
-            if (existing.active && !existing.cancelled) revert AlreadyActive();
-        }
+        subscriptionId = keccak256(abi.encodePacked(msg.sender, offeringId));
+        Subscription storage existing = subscriptions[subscriptionId];
+        if (existing.subscriber != address(0) && existing.active && !existing.cancelled) revert AlreadyActive();
 
         uint256 price  = o.pricePerPeriod;
         uint256 period = o.periodSeconds;
@@ -331,7 +353,6 @@ contract SubscriptionAgreement is ReentrancyGuard {
         }
 
         // SA-5: effects before interactions (pendingWithdrawals credit below is an effect)
-        subscriptionId = _nextSubscriptionId++;
         uint256 periodEnd = block.timestamp + period;
 
         Subscription storage s = subscriptions[subscriptionId];
@@ -342,30 +363,33 @@ contract SubscriptionAgreement is ReentrancyGuard {
         s.deposited       = total;
         s.consumed        = price;  // first period consumed immediately
         s.active          = true;
+        s.cancelled       = false;
+        s.disputed        = false;
+        s.disputeOpenedAt = 0;
 
         // Credit first period to provider (pull-payment)
         pendingWithdrawals[o.provider][o.token] += price;
 
         o.subscriberCount += 1;
-        latestSubscription[offeringId][msg.sender] = subscriptionId;
 
         emit Subscribed(subscriptionId, offeringId, msg.sender, periodEnd, total);
     }
 
     /**
      * @notice Advance a subscription by one period, paying the provider.
-     *         Keeper-compatible — anyone may call (deposit is already locked).
+     *         Only the subscriber or the offering's provider may call.
      *         If deposit is exhausted, subscription becomes inactive.
      * @param subscriptionId  Subscription to renew.
      */
-    function renewSubscription(uint256 subscriptionId) external nonReentrant {
+    function renewSubscription(bytes32 subscriptionId) external nonReentrant {
         Subscription storage s = _getSubscription(subscriptionId);
+        Offering storage o = offerings[s.offeringId];
+        if (msg.sender != s.subscriber && msg.sender != o.provider) revert NotSubscriberOrProvider();
         if (!s.active)    revert NotActive();
         if (s.cancelled)  revert AlreadyCancelled();
         if (s.disputed)   revert AlreadyDisputed();
         if (block.timestamp < s.currentPeriodEnd) revert NotYetRenewable();
 
-        Offering storage o = offerings[s.offeringId];
         uint256 price     = o.pricePerPeriod;
         uint256 period    = o.periodSeconds;
         uint256 remaining = s.deposited - s.consumed;
@@ -397,7 +421,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
      *         Access continues until currentPeriodEnd (already-paid period).
      * @param subscriptionId  Subscription to cancel.
      */
-    function cancel(uint256 subscriptionId) external nonReentrant {
+    function cancel(bytes32 subscriptionId) external nonReentrant {
         Subscription storage s = _getSubscription(subscriptionId);
         if (msg.sender != s.subscriber) revert NotSubscriber();
         if (!s.active)   revert NotActive();
@@ -427,7 +451,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
      * @param subscriptionId  Subscription to top up.
      * @param amount          Tokens to add (must be > 0).
      */
-    function topUp(uint256 subscriptionId, uint256 amount) external payable nonReentrant {
+    function topUp(bytes32 subscriptionId, uint256 amount) external payable nonReentrant {
         if (amount == 0) revert InvalidAmount();
 
         Subscription storage s = _getSubscription(subscriptionId);
@@ -456,7 +480,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
      *         If DisputeArbitration is configured, a formal dispute is opened
      *         (forward ETH as msg.value for DA fee collection).
      */
-    function disputeSubscription(uint256 subscriptionId) external payable nonReentrant {
+    function disputeSubscription(bytes32 subscriptionId) external payable nonReentrant {
         Subscription storage s = _getSubscription(subscriptionId);
         if (msg.sender != s.subscriber) revert NotSubscriber();
         if (!s.active)   revert NotActive();
@@ -465,6 +489,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
 
         // SA-5: effects first
         s.disputed = true;
+        s.disputeOpenedAt = block.timestamp;
 
         Offering storage o = offerings[s.offeringId];
         _callOpenFormalDispute(subscriptionId, s, o);
@@ -478,19 +503,21 @@ contract SubscriptionAgreement is ReentrancyGuard {
      *         SPLIT: providerAward + subscriberAward must not exceed remaining deposit.
      *         PROVIDER_WINS / SUBSCRIBER_WINS: derived from remaining deposit.
      *         HUMAN_REVIEW_REQUIRED: no settlement, subscription stays disputed.
+     *         Resolution can only occur after DISPUTE_WINDOW has elapsed since dispute opened.
      * @param subscriptionId  Disputed subscription to resolve.
      * @param outcome         Resolution type.
      * @param providerAward   Tokens awarded to provider (SPLIT only).
      * @param subscriberAward Tokens awarded to subscriber (SPLIT only).
      */
     function resolveDisputeDetailed(
-        uint256 subscriptionId,
+        bytes32 subscriptionId,
         DisputeOutcome outcome,
         uint256 providerAward,
         uint256 subscriberAward
     ) external onlyOwner nonReentrant {
         Subscription storage s = _getSubscription(subscriptionId);
         if (!s.disputed) revert NotDisputed();
+        if (block.timestamp < s.disputeOpenedAt + DISPUTE_WINDOW) revert DisputeWindowNotElapsed();
 
         if (outcome == DisputeOutcome.HUMAN_REVIEW_REQUIRED) {
             emit DetailedDisputeResolved(subscriptionId, outcome, 0, 0);
@@ -528,11 +555,35 @@ contract SubscriptionAgreement is ReentrancyGuard {
         // Notify DA to settle fees/bonds (ignore failures)
         if (disputeArbitration != address(0)) {
             try ISubscriptionDisputeArbitration(disputeArbitration).resolveDisputeFee(
-                subscriptionId, uint8(outcome)
+                uint256(subscriptionId), uint8(outcome)
             ) {} catch {}
         }
 
         emit DetailedDisputeResolved(subscriptionId, outcome, providerAward, subscriberAward);
+    }
+
+    /**
+     * @notice Subscriber claims a full refund if their dispute has not been resolved
+     *         within DISPUTE_TIMEOUT. Settles as SUBSCRIBER_WINS automatically.
+     * @param subscriptionId  Disputed subscription where timeout has elapsed.
+     */
+    function claimDisputeTimeout(bytes32 subscriptionId) external nonReentrant {
+        Subscription storage s = _getSubscription(subscriptionId);
+        if (!s.disputed) revert NotDisputed();
+        if (block.timestamp < s.disputeOpenedAt + DISPUTE_TIMEOUT) revert DisputeTimeoutNotReached();
+
+        Offering storage o = offerings[s.offeringId];
+        uint256 remaining = s.deposited - s.consumed;
+
+        s.active   = false;
+        s.disputed = false;
+        s.consumed = s.deposited;
+        o.subscriberCount -= 1;
+
+        address tok = o.token;
+        if (remaining > 0) pendingWithdrawals[s.subscriber][tok] += remaining;
+
+        emit DetailedDisputeResolved(subscriptionId, DisputeOutcome.SUBSCRIBER_WINS, 0, remaining);
     }
 
     /**
@@ -564,9 +615,9 @@ contract SubscriptionAgreement is ReentrancyGuard {
      *         Use for strict access — only fully active subscribers.
      */
     function isActiveSubscriber(uint256 offeringId, address subscriber) external view returns (bool) {
-        uint256 subId = latestSubscription[offeringId][subscriber];
-        if (subId == 0) return false;
+        bytes32 subId = keccak256(abi.encodePacked(subscriber, offeringId));
         Subscription storage s = subscriptions[subId];
+        if (s.subscriber == address(0)) return false;
         return s.active && !s.cancelled && block.timestamp <= s.currentPeriodEnd;
     }
 
@@ -575,9 +626,10 @@ contract SubscriptionAgreement is ReentrancyGuard {
      *         Use for content gating (daemon checks this before serving).
      */
     function hasAccess(uint256 offeringId, address subscriber) external view returns (bool) {
-        uint256 subId = latestSubscription[offeringId][subscriber];
-        if (subId == 0) return false;
-        return block.timestamp <= subscriptions[subId].currentPeriodEnd;
+        bytes32 subId = keccak256(abi.encodePacked(subscriber, offeringId));
+        Subscription storage s = subscriptions[subId];
+        if (s.subscriber == address(0)) return false;
+        return block.timestamp <= s.currentPeriodEnd;
     }
 
     /// @notice Return full offering struct.
@@ -586,7 +638,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
     }
 
     /// @notice Return full subscription struct.
-    function getSubscription(uint256 subscriptionId) external view returns (Subscription memory) {
+    function getSubscription(bytes32 subscriptionId) external view returns (Subscription memory) {
         return subscriptions[subscriptionId];
     }
 
@@ -597,7 +649,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
         if (o.provider == address(0)) revert OfferingNotFound();
     }
 
-    function _getSubscription(uint256 subscriptionId) internal view returns (Subscription storage s) {
+    function _getSubscription(bytes32 subscriptionId) internal view returns (Subscription storage s) {
         s = subscriptions[subscriptionId];
         if (s.subscriber == address(0)) revert SubscriptionNotFound();
     }
@@ -614,7 +666,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
      *      pendingWithdrawals entry and no recovery path.
      */
     function _callOpenFormalDispute(
-        uint256 subscriptionId,
+        bytes32 subscriptionId,
         Subscription storage s,
         Offering storage o
     ) internal {
@@ -629,7 +681,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
         uint256 remaining = s.deposited - s.consumed;
         bool daCallSucceeded;
         try ISubscriptionDisputeArbitration(disputeArbitration).openDispute{value: msg.value}(
-            subscriptionId,
+            uint256(subscriptionId),
             ISubscriptionDisputeArbitration.DisputeMode.UNILATERAL,
             ISubscriptionDisputeArbitration.DisputeClass.HARD_FAILURE,
             msg.sender,
