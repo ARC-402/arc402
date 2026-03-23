@@ -109,3 +109,4 @@ products/arc-402/contracts/lib/
 # Plugin tools/ dir — must not be ignored by the global tools/ rule
 !plugin/src/tools/
 !plugin/src/tools/*.ts
+.wake/
