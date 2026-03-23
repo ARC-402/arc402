@@ -26,11 +26,15 @@ import {
   DAEMON_SOCK,
   type DaemonConfig,
 } from "./config";
+import { ComputeMetering } from "./compute-metering";
+import { ComputeSessionManager } from "./compute-session";
 import { verifyWallet, getWalletBalance } from "./wallet-monitor";
 import { buildNotifier } from "./notify";
 import { HireListener } from "./hire-listener";
 import { UserOpsManager, buildAcceptCalldata } from "./userops";
 import { generateReceipt, extractLearnings, createJobDirectory, cleanJobDirectory } from "./job-lifecycle";
+import { FileDeliveryManager } from "./file-delivery";
+import { DeliveryClient } from "./delivery-client";
 
 // ─── State DB ─────────────────────────────────────────────────────────────────
 
@@ -51,6 +55,7 @@ export interface HireRequestRow {
 export interface DaemonDB {
   insertHireRequest(row: Omit<HireRequestRow, "created_at" | "updated_at">): void;
   getHireRequest(id: string): HireRequestRow | undefined;
+  getHireRequestByAgreementId(agreementId: string): HireRequestRow | undefined;
   updateHireRequestStatus(id: string, status: string, rejectReason?: string): void;
   listPendingHireRequests(): HireRequestRow[];
   listActiveHireRequests(): HireRequestRow[];
@@ -117,6 +122,7 @@ function openStateDB(dbPath: string): DaemonDB {
   `);
 
   const getHireRequest = db.prepare(`SELECT * FROM hire_requests WHERE id = ?`);
+  const getHireRequestByAgreementId = db.prepare(`SELECT * FROM hire_requests WHERE agreement_id = ? ORDER BY created_at DESC LIMIT 1`);
   const updateStatus = db.prepare(`UPDATE hire_requests SET status = ?, reject_reason = ?, updated_at = ? WHERE id = ?`);
   const listPending = db.prepare(`SELECT * FROM hire_requests WHERE status = 'pending_approval' ORDER BY created_at ASC`);
   const listActive = db.prepare(`SELECT * FROM hire_requests WHERE status IN ('accepted', 'delivered') ORDER BY created_at ASC`);
@@ -129,6 +135,9 @@ function openStateDB(dbPath: string): DaemonDB {
     },
     getHireRequest(id) {
       return getHireRequest.get(id) as HireRequestRow | undefined;
+    },
+    getHireRequestByAgreementId(agreementId) {
+      return getHireRequestByAgreementId.get(agreementId) as HireRequestRow | undefined;
     },
     updateHireRequestStatus(id, status, rejectReason) {
       updateStatus.run(status, rejectReason ?? null, Date.now(), id);
@@ -521,6 +530,39 @@ export async function runDaemon(foreground = false): Promise<void> {
   // ── Setup notifier ───────────────────────────────────────────────────────
   const notifier = buildNotifier(config);
 
+  // ── File delivery subsystem ──────────────────────────────────────────────
+  const fileDelivery = new FileDeliveryManager({
+    maxFileSizeMb: config.delivery.max_file_size_mb,
+    maxJobSizeMb:  config.delivery.max_job_size_mb,
+  });
+  fileDelivery.setPartyResolver((agreementId) => {
+    const row = db.getHireRequestByAgreementId(agreementId);
+    if (!row) return null;
+    return {
+      hirerAddress:    row.hirer_address,
+      providerAddress: config.wallet.contract_address,
+    };
+  });
+  const deliveryClient = new DeliveryClient({ autoDownload: config.delivery.auto_download });
+  deliveryClient.log = log;
+  log({ event: "file_delivery_ready", serve_files: config.delivery.serve_files, auto_download: config.delivery.auto_download });
+
+  // ── Compute rental subsystem ─────────────────────────────────────────────
+  let computeMetering: ComputeMetering | null = null;
+  let computeSessions: ComputeSessionManager | null = null;
+
+  if (config.compute.enabled) {
+    computeMetering = new ComputeMetering(
+      machinePrivateKey,
+      config.network.chain_id,
+      config.wallet.contract_address,
+      config.compute.metering_interval_seconds,
+      config.compute.report_interval_minutes
+    );
+    computeSessions = new ComputeSessionManager(computeMetering);
+    log({ event: "compute_enabled", gpu_spec: config.compute.gpu_spec, rate_wei: config.compute.rate_per_hour_wei });
+  }
+
   // ── Step 10: Start relay listener ───────────────────────────────────────
   const hireListener = new HireListener(config, db, notifier, config.wallet.contract_address);
 
@@ -692,8 +734,9 @@ export async function runDaemon(foreground = false): Promise<void> {
       return;
     }
 
-    // Auth required on all POST endpoints (GET public paths are open)
-    if (req.method === "POST" || (req.method === "GET" && !PUBLIC_GET_PATHS.has(pathname))) {
+    // Auth required on all POST endpoints (GET public paths are open).
+    // /job/* GET routes use party auth (verifyPartyAccess) instead of daemon bearer token.
+    if (req.method === "POST" || (req.method === "GET" && !PUBLIC_GET_PATHS.has(pathname) && !pathname.startsWith("/job/"))) {
       const authHeader = req.headers["authorization"] ?? "";
       const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
       if (token !== apiToken) {
@@ -882,14 +925,23 @@ export async function runDaemon(foreground = false): Promise<void> {
         const msg = JSON.parse(body) as Record<string, unknown>;
         const agreementId = String(msg.agreementId ?? msg.agreement_id ?? "");
         const deliverableHash = String(msg.deliverableHash ?? msg.deliverable_hash ?? "");
+        const filesUrl = String(msg.files_url ?? msg.filesUrl ?? "");
         const from = String(msg.from ?? "");
-        log({ event: "delivery_received", agreementId, deliverableHash, from });
+        log({ event: "delivery_received", agreementId, deliverableHash, from, has_files_url: !!filesUrl });
         // Update DB: mark delivered
         const active = db.listActiveHireRequests();
         const found = active.find(r => r.agreement_id === agreementId);
         if (found) db.updateHireRequestStatus(found.id, "delivered");
         if (config.notifications.notify_on_delivery) {
           await notifier.notifyDelivery(agreementId, deliverableHash, "");
+        }
+        // Auto-download and verify if files_url provided and auto_download enabled
+        if (filesUrl && config.delivery.auto_download) {
+          void deliveryClient.handleDeliveryNotification({ agreementId, deliverableHash, filesUrl })
+            .then(result => {
+              if (result) log({ event: "delivery_auto_downloaded", agreementId, ok: result.ok, root_hash_match: result.rootHashMatch, files: result.fileResults.length });
+            })
+            .catch(err => log({ event: "delivery_download_error", agreementId, error: String(err) }));
         }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
@@ -1011,10 +1063,337 @@ export async function runDaemon(foreground = false): Promise<void> {
       if (statusAuthed) {
         statusPayload.active_agreements = db.listActiveHireRequests().length;
         statusPayload.pending_approval = db.listPendingHireRequests().length;
+        if (config.delivery.serve_files) {
+          const deliveriesDir = path.join(DAEMON_DIR, "deliveries");
+          let totalDeliveries = 0, totalFiles = 0;
+          if (fs.existsSync(deliveriesDir)) {
+            const entries = fs.readdirSync(deliveriesDir);
+            totalDeliveries = entries.length;
+            for (const entry of entries) {
+              const entryPath = path.join(deliveriesDir, entry);
+              if (fs.statSync(entryPath).isDirectory()) {
+                totalFiles += fs.readdirSync(entryPath).filter(f => f !== "_manifest.json").length;
+              }
+            }
+          }
+          statusPayload.file_delivery = { total_deliveries: totalDeliveries, total_files: totalFiles };
+        }
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(statusPayload));
       return;
+    }
+
+    // ── Compute rental routes ─────────────────────────────────────────────
+
+    // POST /compute/propose — client proposes a compute session
+    if (pathname === "/compute/propose" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        if (!computeSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "compute_disabled" }));
+          return;
+        }
+        const proposal = {
+          sessionId:           String(msg.sessionId ?? ""),
+          clientAddress:       String(msg.clientAddress ?? msg.client ?? ""),
+          providerAddress:     config.wallet.contract_address,
+          ratePerHourWei:      config.compute.rate_per_hour_wei,
+          maxHours:            Number(msg.maxHours ?? 1),
+          gpuSpecHash:         String(msg.gpuSpecHash ?? "0x0000000000000000000000000000000000000000000000000000000000000000"),
+          workloadDescription: String(msg.workloadDescription ?? ""),
+          depositAmount:       String(msg.depositAmount ?? "0"),
+          proposedAt:          Math.floor(Date.now() / 1000),
+        };
+        if (!proposal.sessionId) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "sessionId required" }));
+          return;
+        }
+        // Check capacity
+        const activeSessions = computeSessions.countByStatus("active");
+        if (activeSessions >= config.compute.max_concurrent_sessions) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ status: "rejected", reason: "at_capacity" }));
+          return;
+        }
+        const result = computeSessions.handleProposal(proposal);
+        if (!result.ok) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: result.error }));
+          return;
+        }
+        log({ event: "compute_proposed", sessionId: proposal.sessionId, client: proposal.clientAddress });
+        // Auto-accept if configured
+        if (config.compute.auto_accept_compute) {
+          computeSessions.acceptSession(proposal.sessionId);
+          log({ event: "compute_auto_accepted", sessionId: proposal.sessionId });
+        }
+        const status = config.compute.auto_accept_compute ? "accepted" : "proposed";
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status, sessionId: proposal.sessionId }));
+      } catch (err) {
+        log({ event: "compute_propose_error", error: String(err) });
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
+      return;
+    }
+
+    // POST /compute/accept — provider accepts a proposed session
+    if (pathname === "/compute/accept" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const sessionId = String(msg.sessionId ?? "");
+        if (!computeSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "compute_disabled" }));
+          return;
+        }
+        const result = computeSessions.acceptSession(sessionId);
+        if (!result.ok) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: result.error }));
+          return;
+        }
+        log({ event: "compute_accepted", sessionId });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "accepted", sessionId }));
+      } catch (err) {
+        log({ event: "compute_accept_error", error: String(err) });
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
+      return;
+    }
+
+    // POST /compute/started — provider marks session as started
+    if (pathname === "/compute/started" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const sessionId      = String(msg.sessionId ?? "");
+        const accessEndpoint = msg.accessEndpoint ? String(msg.accessEndpoint) : undefined;
+        if (!computeSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "compute_disabled" }));
+          return;
+        }
+        const result = computeSessions.startSession(sessionId, accessEndpoint);
+        if (!result.ok) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: result.error }));
+          return;
+        }
+        log({ event: "compute_started", sessionId });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "active", sessionId }));
+      } catch (err) {
+        log({ event: "compute_started_error", error: String(err) });
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
+      return;
+    }
+
+    // POST /compute/metrics — get current metrics (polling endpoint)
+    if (pathname === "/compute/metrics" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const sessionId = String(msg.sessionId ?? "");
+        if (!computeMetering || !computeSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "compute_disabled" }));
+          return;
+        }
+        const session = computeSessions.getSession(sessionId);
+        if (!session) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "session_not_found" }));
+          return;
+        }
+        const current = computeMetering.getCurrentMetrics(sessionId);
+        const reports = computeMetering.getUsageReports(sessionId);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ sessionId, current, reports, consumedMinutes: session.consumedMinutes }));
+      } catch (err) {
+        log({ event: "compute_metrics_error", error: String(err) });
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
+      return;
+    }
+
+    // POST /compute/end — either party ends the session
+    if (pathname === "/compute/end" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const sessionId = String(msg.sessionId ?? "");
+        if (!computeSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "compute_disabled" }));
+          return;
+        }
+        const endResult = await computeSessions.endSession(sessionId);
+        if (!endResult.ok) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: endResult.error }));
+          return;
+        }
+        const r = endResult.result!;
+        log({
+          event: "compute_ended",
+          sessionId,
+          consumedMinutes: r.consumedMinutes,
+          costWei: r.costWei.toString(),
+          refundWei: r.refundWei.toString(),
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          status:          "completed",
+          sessionId,
+          consumedMinutes: r.consumedMinutes,
+          costWei:         r.costWei.toString(),
+          refundWei:       r.refundWei.toString(),
+          reports:         r.reports,
+        }));
+      } catch (err) {
+        log({ event: "compute_end_error", error: String(err) });
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
+      return;
+    }
+
+    // POST /compute/dispute — client disputes a session
+    if (pathname === "/compute/dispute" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const sessionId = String(msg.sessionId ?? "");
+        if (!computeSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "compute_disabled" }));
+          return;
+        }
+        const result = computeSessions.disputeSession(sessionId);
+        if (!result.ok) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: result.error }));
+          return;
+        }
+        log({ event: "compute_disputed", sessionId });
+        if (config.notifications.notify_on_dispute) {
+          await notifier.notifyDispute(sessionId, String(msg.from ?? "client"));
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "disputed", sessionId }));
+      } catch (err) {
+        log({ event: "compute_dispute_error", error: String(err) });
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
+      return;
+    }
+
+    // GET /compute/session/:id — session details
+    if (pathname.startsWith("/compute/session/") && req.method === "GET") {
+      const sessionId = pathname.slice("/compute/session/".length);
+      if (!computeSessions) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "compute_disabled" }));
+        return;
+      }
+      const session = computeSessions.getSession(sessionId);
+      if (!session) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "session_not_found" }));
+        return;
+      }
+      const current = computeMetering ? computeMetering.getCurrentMetrics(sessionId) : null;
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ session, current }));
+      return;
+    }
+
+    // GET /compute/sessions — list all sessions
+    if (pathname === "/compute/sessions" && req.method === "GET") {
+      if (!computeSessions) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "compute_disabled" }));
+        return;
+      }
+      const sessions = computeSessions.listSessions();
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ sessions, count: sessions.length }));
+      return;
+    }
+
+    // ── File delivery routes ──────────────────────────────────────────────
+    // POST /job/:id/upload — store a file (daemon auth required via global gate above)
+    if (pathname.startsWith("/job/") && req.method === "POST") {
+      const parts = pathname.split("/");
+      // /job/<id>/upload → ["", "job", "<id>", "upload"]
+      if (parts.length === 4 && parts[3] === "upload") {
+        const agreementId = parts[2];
+        if (!config.delivery.serve_files) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "file_delivery_disabled" }));
+          return;
+        }
+        await fileDelivery.handleUpload(req, res, agreementId, log);
+        return;
+      }
+    }
+
+    // GET /job/:id/files, GET /job/:id/files/:name, GET /job/:id/manifest — party-gated
+    if (pathname.startsWith("/job/") && req.method === "GET") {
+      const parts = pathname.split("/");
+      // /job/<id>/files/<name> → ["", "job", "<id>", "files", "<name>"]
+      if (parts.length === 5 && parts[3] === "files") {
+        const agreementId = parts[2];
+        const filename = decodeURIComponent(parts[4]);
+        if (!config.delivery.serve_files) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "file_delivery_disabled" }));
+          return;
+        }
+        fileDelivery.handleDownloadFile(req, res, agreementId, filename, apiToken, log);
+        return;
+      }
+      // /job/<id>/files → ["", "job", "<id>", "files"]
+      if (parts.length === 4 && parts[3] === "files") {
+        const agreementId = parts[2];
+        if (!config.delivery.serve_files) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "file_delivery_disabled" }));
+          return;
+        }
+        fileDelivery.handleListFiles(req, res, agreementId, apiToken, log);
+        return;
+      }
+      // /job/<id>/manifest → ["", "job", "<id>", "manifest"]
+      if (parts.length === 4 && parts[3] === "manifest") {
+        const agreementId = parts[2];
+        if (!config.delivery.serve_files) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "file_delivery_disabled" }));
+          return;
+        }
+        fileDelivery.handleManifest(req, res, agreementId, apiToken, log);
+        return;
+      }
     }
 
     // 404

@@ -78,6 +78,23 @@ export interface DaemonConfig {
     http_url: string;
     http_auth_token: string;
   };
+  compute: {
+    enabled: boolean;
+    gpu_spec: string;
+    rate_per_hour_wei: string;
+    max_concurrent_sessions: number;
+    metering_interval_seconds: number;
+    report_interval_minutes: number;
+    auto_accept_compute: boolean;
+    min_session_hours: number;
+    max_session_hours: number;
+  };
+  delivery: {
+    max_file_size_mb: number;
+    max_job_size_mb: number;
+    auto_download: boolean;
+    serve_files: boolean;
+  };
 }
 
 function resolveEnvValue(value: string, field: string): string {
@@ -120,7 +137,9 @@ function withDefaults(raw: Record<string, unknown>): DaemonConfig {
   const notifDiscord = (notif.discord as Record<string, unknown>) ?? {};
   const notifWebhook = (notif.webhook as Record<string, unknown>) ?? {};
   const notifEmail = (notif.email as Record<string, unknown>) ?? {};
-  const work = (raw.work as Record<string, unknown>) ?? {};
+  const work     = (raw.work     as Record<string, unknown>) ?? {};
+  const compute  = (raw.compute  as Record<string, unknown>) ?? {};
+  const delivery = (raw.delivery as Record<string, unknown>) ?? {};
 
   return {
     wallet: {
@@ -193,6 +212,23 @@ function withDefaults(raw: Record<string, unknown>): DaemonConfig {
       exec_command: str(work.exec_command),
       http_url: str(work.http_url),
       http_auth_token: str(work.http_auth_token),
+    },
+    compute: {
+      enabled:                   bool(compute.enabled, false),
+      gpu_spec:                  str(compute.gpu_spec),
+      rate_per_hour_wei:         str(compute.rate_per_hour_wei, "0"),
+      max_concurrent_sessions:   num(compute.max_concurrent_sessions, 1),
+      metering_interval_seconds: num(compute.metering_interval_seconds, 30),
+      report_interval_minutes:   num(compute.report_interval_minutes, 15),
+      auto_accept_compute:       bool(compute.auto_accept_compute, false),
+      min_session_hours:         num(compute.min_session_hours, 1),
+      max_session_hours:         num(compute.max_session_hours, 24),
+    },
+    delivery: {
+      max_file_size_mb: num(delivery.max_file_size_mb, 100),
+      max_job_size_mb:  num(delivery.max_job_size_mb, 500),
+      auto_download:    bool(delivery.auto_download, true),
+      serve_files:      bool(delivery.serve_files, true),
     },
   };
 }
@@ -340,4 +376,21 @@ handler = "noop"               # exec | http | noop
 exec_command = ""              # called with agreementId and spec as args (exec mode)
 http_url = ""                  # POST {agreementId, specHash, deadline} as JSON (http mode)
 http_auth_token = "env:WORKER_AUTH_TOKEN"
+
+[compute]
+enabled = false                          # Enable GPU compute rental
+gpu_spec = ""                            # GPU model identifier (e.g. nvidia-h100-80gb)
+rate_per_hour_wei = "0"                  # Wei per GPU-hour (0 = disabled)
+max_concurrent_sessions = 1             # Usually 1 (one GPU per session)
+metering_interval_seconds = 30          # nvidia-smi poll interval
+report_interval_minutes = 15            # Usage report generation interval
+auto_accept_compute = false             # Auto-accept compute proposals
+min_session_hours = 1                   # Minimum session duration
+max_session_hours = 24                  # Maximum session duration
+
+[delivery]
+max_file_size_mb = 100           # Maximum size for a single uploaded file (MB)
+max_job_size_mb = 500            # Maximum total size for all files in a job (MB)
+auto_download = true             # Auto-download and verify files on delivery notification
+serve_files = true               # Serve file endpoints (/job/:id/files, /job/:id/manifest)
 `;
