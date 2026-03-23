@@ -68,6 +68,66 @@ contract ReentrancyAttacker {
     }
 }
 
+/// @notice Mock DA that always reverts on openDispute (tests SA-1 refund path B).
+contract RevertingDA {
+    function openDispute(
+        uint256,
+        ISubscriptionDisputeArbitration.DisputeMode,
+        ISubscriptionDisputeArbitration.DisputeClass,
+        address, address, address, uint256, address
+    ) external payable returns (uint256) {
+        revert("DA: always fails");
+    }
+    function resolveDisputeFee(uint256, uint8) external {}
+    function isEligibleArbitrator(address) external pure returns (bool) { return false; }
+}
+
+/// @notice Mock DA that accepts the call and keeps the ETH (tests SA-1 success path).
+contract AcceptingDA {
+    function openDispute(
+        uint256,
+        ISubscriptionDisputeArbitration.DisputeMode,
+        ISubscriptionDisputeArbitration.DisputeClass,
+        address, address, address, uint256, address
+    ) external payable returns (uint256) {
+        return msg.value; // keep ETH, return feeRequired = msg.value
+    }
+    function resolveDisputeFee(uint256, uint8) external {}
+    function isEligibleArbitrator(address) external pure returns (bool) { return true; }
+    receive() external payable {}
+}
+
+/// @notice Mock DA that tries to re-enter resolveDisputeDetailed from resolveDisputeFee.
+contract ReentrantResolveDA {
+    SubscriptionAgreement internal sa;
+    uint256 internal targetId;
+
+    constructor(SubscriptionAgreement _sa) { sa = _sa; }
+
+    function setTarget(uint256 id) external { targetId = id; }
+
+    function openDispute(
+        uint256,
+        ISubscriptionDisputeArbitration.DisputeMode,
+        ISubscriptionDisputeArbitration.DisputeClass,
+        address, address, address, uint256, address
+    ) external payable returns (uint256) {
+        return 0;
+    }
+
+    function resolveDisputeFee(uint256, uint8) external {
+        // Attempt reentrant resolve — must be blocked by nonReentrant
+        try sa.resolveDisputeDetailed(
+            targetId,
+            SubscriptionAgreement.DisputeOutcome.PROVIDER_WINS,
+            0,
+            0
+        ) {} catch {}
+    }
+
+    function isEligibleArbitrator(address) external pure returns (bool) { return true; }
+}
+
 // ─── Main test contract ───────────────────────────────────────────────────────
 
 contract SubscriptionAgreementTest is Test {
@@ -1033,5 +1093,180 @@ contract SubscriptionAgreementTest is Test {
 
         // Refund = deposited - consumed = total - PRICE = (periods-1)*PRICE
         assertEq(sa.pendingWithdrawals(alice, address(0)), (periods - 1) * PRICE);
+    }
+
+    // ─── SA-1 fix: dispute fee ETH refund paths ───────────────────────────────
+
+    /// @notice If DA is not configured and subscriber sends ETH, it must be refunded.
+    function test_SA1_disputeFee_refundedWhenNoDa() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+
+        vm.prank(alice);
+        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+
+        uint256 aliceBefore = alice.balance;
+
+        // DA not set; subscriber sends 0.1 ETH as a fee — must get it back
+        vm.prank(alice);
+        sa.disputeSubscription{value: 0.1 ether}(subId);
+
+        // Alice's ETH fully refunded (net cost = 0 for the fee)
+        assertEq(alice.balance, aliceBefore);
+        // Dispute still opened
+        assertTrue(sa.getSubscription(subId).disputed);
+    }
+
+    /// @notice DA configured, DA call fails — ETH must be refunded to subscriber.
+    function test_SA1_disputeFee_refundedWhenDaFails() public {
+        // Deploy a DA that always reverts
+        RevertingDA badDA = new RevertingDA();
+        sa.setDisputeArbitration(address(badDA));
+
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+
+        vm.prank(alice);
+        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+
+        uint256 aliceBefore = alice.balance;
+
+        vm.prank(alice);
+        sa.disputeSubscription{value: 0.1 ether}(subId);
+
+        // Refunded despite DA failure
+        assertEq(alice.balance, aliceBefore);
+        assertTrue(sa.getSubscription(subId).disputed);
+    }
+
+    /// @notice DA configured and call succeeds — ETH is forwarded to DA (not stuck).
+    function test_SA1_disputeFee_forwardedToDaOnSuccess() public {
+        AcceptingDA goodDA = new AcceptingDA();
+        sa.setDisputeArbitration(address(goodDA));
+
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+
+        vm.prank(alice);
+        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+
+        uint256 aliceBefore  = alice.balance;
+        uint256 daBefore     = address(goodDA).balance;
+
+        vm.prank(alice);
+        sa.disputeSubscription{value: 0.05 ether}(subId);
+
+        // Alice paid the fee
+        assertEq(alice.balance, aliceBefore - 0.05 ether);
+        // DA received the fee
+        assertEq(address(goodDA).balance, daBefore + 0.05 ether);
+    }
+
+    // ─── SA-2 fix: resolveDisputeDetailed nonReentrant ────────────────────────
+
+    /// @notice A malicious DA that tries to re-enter resolveDisputeDetailed must be blocked.
+    function test_SA2_resolveDispute_reentrantDABlocked() public {
+        ReentrantResolveDA reDA = new ReentrantResolveDA(sa);
+        sa.setDisputeArbitration(address(reDA));
+
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+
+        vm.prank(alice);
+        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+
+        vm.prank(alice);
+        sa.disputeSubscription(subId);
+
+        // Tell the reentrant DA which subscriptionId to target
+        reDA.setTarget(subId);
+
+        // resolveDisputeDetailed: DA.resolveDisputeFee tries to re-enter → nonReentrant blocks it
+        // The outer call still succeeds (try/catch swallows DA error)
+        sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.SUBSCRIBER_WINS, 0, 0);
+
+        // Settled exactly once
+        assertFalse(sa.getSubscription(subId).disputed);
+        assertFalse(sa.getSubscription(subId).active);
+        // Subscriber got full remaining (= 0 since 1 period fully consumed)
+        assertEq(sa.pendingWithdrawals(alice, address(0)), 0);
+    }
+
+    // ─── SA-3: HUMAN_REVIEW_REQUIRED subscriberCount occupancy ───────────────
+
+    /// @notice HUMAN_REVIEW_REQUIRED leaves subscriberCount occupied — documented LOW.
+    function test_SA3_humanReview_countSlotOccupied() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 1); // cap=1
+
+        vm.prank(alice);
+        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+
+        vm.prank(alice);
+        sa.disputeSubscription(subId);
+
+        // Owner selects HUMAN_REVIEW — no decrement
+        sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.HUMAN_REVIEW_REQUIRED, 0, 0);
+
+        // Slot still occupied
+        assertEq(sa.getOffering(offeringId).subscriberCount, 1);
+
+        // Bob cannot subscribe (cap=1, slot taken)
+        vm.prank(bob);
+        vm.expectRevert(SubscriptionAgreement.MaxSubscribersReached.selector);
+        sa.subscribe{value: PRICE}(offeringId, 1);
+
+        // Owner eventually resolves definitively — slot freed
+        sa.resolveDisputeDetailed(subId, SubscriptionAgreement.DisputeOutcome.SUBSCRIBER_WINS, 0, 0);
+        assertEq(sa.getOffering(offeringId).subscriberCount, 0);
+
+        // Now bob can subscribe
+        vm.prank(bob);
+        sa.subscribe{value: PRICE}(offeringId, 1);
+    }
+
+    // ─── SA-4: hasAccess during dispute ───────────────────────────────────────
+
+    /// @notice hasAccess returns true during a disputed subscription's current period.
+    function test_SA4_hasAccess_trueWhileDisputed() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+
+        vm.prank(alice);
+        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+
+        vm.prank(alice);
+        sa.disputeSubscription(subId);
+
+        // Still has access — current period is paid
+        assertTrue(sa.hasAccess(offeringId, alice));
+        // isActiveSubscriber checks active && !cancelled but NOT !disputed; also true
+        assertTrue(sa.isActiveSubscriber(offeringId, alice));
+    }
+
+    // ─── Multiple-period catchup renewals ────────────────────────────────────
+
+    /// @notice Keeper can renew multiple times in one block if >1 period elapsed.
+    function test_renew_catchupMultiplePeriods() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+
+        vm.prank(alice);
+        uint256 subId = sa.subscribe{value: 4 * PRICE}(offeringId, 4);
+        // deposited=4P, consumed=P, remaining=3P
+
+        // Skip 2+ periods so 2 renewals are possible
+        skip(2 * PERIOD + 1);
+
+        vm.prank(keeper);
+        sa.renewSubscription(subId); // period 2
+        vm.prank(keeper);
+        sa.renewSubscription(subId); // period 3
+
+        SubscriptionAgreement.Subscription memory s = sa.getSubscription(subId);
+        assertEq(s.consumed, 3 * PRICE);
+        assertTrue(s.active);
+        // Provider credited 3 periods total
+        assertEq(sa.pendingWithdrawals(provider, address(0)), 3 * PRICE);
     }
 }

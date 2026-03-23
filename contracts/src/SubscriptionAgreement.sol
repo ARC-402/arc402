@@ -473,7 +473,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
         DisputeOutcome outcome,
         uint256 providerAward,
         uint256 subscriberAward
-    ) external onlyOwner {
+    ) external onlyOwner nonReentrant {
         Subscription storage s = _getSubscription(subscriptionId);
         if (!s.disputed) revert NotDisputed();
 
@@ -590,14 +590,29 @@ contract SubscriptionAgreement is ReentrancyGuard {
     /**
      * @dev Open a formal dispute in DisputeArbitration if configured.
      *      Uses try/catch — DA failure must not block the dispute itself.
+     *
+     *  SA-1 fix: ETH forwarded as dispute fee must never be silently trapped.
+     *    - If DA is not configured: require msg.value == 0 (caller shouldn't
+     *      send ETH when there is no DA to receive it).
+     *    - If DA call reverts (caught): refund msg.value to msg.sender.
+     *      Without this, the ETH would remain in this contract with no
+     *      pendingWithdrawals entry and no recovery path.
      */
     function _callOpenFormalDispute(
         uint256 subscriptionId,
         Subscription storage s,
         Offering storage o
     ) internal {
-        if (disputeArbitration == address(0)) return;
+        if (disputeArbitration == address(0)) {
+            // No DA configured — any ETH sent is a user error; refund it.
+            if (msg.value > 0) {
+                (bool ok,) = msg.sender.call{value: msg.value}("");
+                if (!ok) revert TransferFailed();
+            }
+            return;
+        }
         uint256 remaining = s.deposited - s.consumed;
+        bool daCallSucceeded;
         try ISubscriptionDisputeArbitration(disputeArbitration).openDispute{value: msg.value}(
             subscriptionId,
             ISubscriptionDisputeArbitration.DisputeMode.UNILATERAL,
@@ -607,6 +622,17 @@ contract SubscriptionAgreement is ReentrancyGuard {
             o.provider,
             remaining,
             o.token
-        ) {} catch {}
+        ) {
+            daCallSucceeded = true;
+        } catch {}
+
+        // If DA call failed and subscriber sent ETH for the fee, refund it.
+        // Without this, msg.value would remain in this contract with no
+        // withdrawal path (the EVM returns ETH from a reverted sub-call to
+        // the calling contract, not to the original msg.sender).
+        if (!daCallSucceeded && msg.value > 0) {
+            (bool ok,) = msg.sender.call{value: msg.value}("");
+            if (!ok) revert TransferFailed();
+        }
     }
 }
