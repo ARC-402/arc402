@@ -100,6 +100,11 @@ contract SubscriptionAgreement is ReentrancyGuard {
         bool    disputed;           // frozen — awaiting owner resolution
     }
 
+    // ─── Constants ────────────────────────────────────────────────────────────
+
+    /// @notice Maximum allowed period for a subscription offering (365 days).
+    uint256 public constant MAX_PERIOD = 365 days;
+
     // ─── Storage ──────────────────────────────────────────────────────────────
 
     /// @notice Contract owner — resolves disputes, updates DA, approves arbitrators.
@@ -135,6 +140,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
         uint256 pricePerPeriod,
         uint256 periodSeconds,
         address token,
+        bytes32 contentHash,
         uint256 maxSubscribers
     );
     event OfferingDeactivated(uint256 indexed offeringId);
@@ -250,7 +256,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
         uint256 maxSubscribers
     ) external nonReentrant returns (uint256 offeringId) {
         if (pricePerPeriod == 0) revert InvalidPrice();
-        if (periodSeconds  == 0) revert InvalidPeriodSeconds();
+        if (periodSeconds  == 0 || periodSeconds > MAX_PERIOD) revert InvalidPeriodSeconds();
 
         offeringId = _nextOfferingId++;
 
@@ -264,7 +270,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
         o.maxSubscribers = maxSubscribers;
         o.createdAt      = block.timestamp;
 
-        emit OfferingCreated(offeringId, msg.sender, pricePerPeriod, periodSeconds, token, maxSubscribers);
+        emit OfferingCreated(offeringId, msg.sender, pricePerPeriod, periodSeconds, token, contentHash, maxSubscribers);
     }
 
     /**
@@ -312,7 +318,9 @@ contract SubscriptionAgreement is ReentrancyGuard {
             if (existing.active && !existing.cancelled) revert AlreadyActive();
         }
 
-        uint256 total = o.pricePerPeriod * periods;
+        uint256 price  = o.pricePerPeriod;
+        uint256 period = o.periodSeconds;
+        uint256 total  = price * periods;
 
         // SA-3: collect deposit
         if (o.token == address(0)) {
@@ -324,7 +332,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
 
         // SA-5: effects before interactions (pendingWithdrawals credit below is an effect)
         subscriptionId = _nextSubscriptionId++;
-        uint256 periodEnd = block.timestamp + o.periodSeconds;
+        uint256 periodEnd = block.timestamp + period;
 
         Subscription storage s = subscriptions[subscriptionId];
         s.subscriber      = msg.sender;
@@ -332,11 +340,11 @@ contract SubscriptionAgreement is ReentrancyGuard {
         s.startedAt       = block.timestamp;
         s.currentPeriodEnd = periodEnd;
         s.deposited       = total;
-        s.consumed        = o.pricePerPeriod;  // first period consumed immediately
+        s.consumed        = price;  // first period consumed immediately
         s.active          = true;
 
         // Credit first period to provider (pull-payment)
-        pendingWithdrawals[o.provider][o.token] += o.pricePerPeriod;
+        pendingWithdrawals[o.provider][o.token] += price;
 
         o.subscriberCount += 1;
         latestSubscription[offeringId][msg.sender] = subscriptionId;
@@ -358,13 +366,18 @@ contract SubscriptionAgreement is ReentrancyGuard {
         if (block.timestamp < s.currentPeriodEnd) revert NotYetRenewable();
 
         Offering storage o = offerings[s.offeringId];
+        uint256 price     = o.pricePerPeriod;
+        uint256 period    = o.periodSeconds;
         uint256 remaining = s.deposited - s.consumed;
 
-        if (remaining >= o.pricePerPeriod) {
+        if (remaining >= price) {
             // SA-5: effects first, then credit
-            s.consumed         += o.pricePerPeriod;
-            s.currentPeriodEnd += o.periodSeconds;
-            pendingWithdrawals[o.provider][o.token] += o.pricePerPeriod;
+            // If renewal is late, anchor new period to now rather than old end
+            s.consumed        += price;
+            s.currentPeriodEnd = (block.timestamp > s.currentPeriodEnd
+                ? block.timestamp
+                : s.currentPeriodEnd) + period;
+            pendingWithdrawals[o.provider][o.token] += price;
             emit Renewed(subscriptionId, s.currentPeriodEnd);
         } else {
             // Deposit exhausted — expire subscription
@@ -393,6 +406,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
 
         // SA-5: effects before credit
         s.cancelled = true;
+        s.active    = false;
 
         Offering storage o = offerings[s.offeringId];
         uint256 refund = s.deposited - s.consumed;
@@ -423,6 +437,7 @@ contract SubscriptionAgreement is ReentrancyGuard {
         if (s.disputed)  revert AlreadyDisputed();
 
         Offering storage o = offerings[s.offeringId];
+        if (!o.active) revert OfferingInactive();
 
         if (o.token == address(0)) {
             if (msg.value != amount) revert InsufficientDeposit(amount, msg.value);

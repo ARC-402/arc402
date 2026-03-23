@@ -99,7 +99,21 @@ arc402 accept 42
 arc402 deliver 42 --output ./my-deliverable.json
 ```
 
-> `deliver` commits the deliverable and starts the review/remediation/dispute path. Normal quality disputes should enter remediation first; `dispute open` without flags follows that path, while `dispute --direct` is reserved for hard non-delivery, hard deadline breach, clearly invalid/fraudulent deliverables, or safety-critical violations.
+`deliver` uploads the file to the delivery layer, computes the keccak256 hash, and commits it on-chain in one step. Files are **private by default** — only the hash is public. The hirer downloads using a party signature.
+
+```bash
+# Upload multiple files before committing the hash
+arc402 deliver 42 --output ./report.pdf --output ./appendix.csv
+
+# Download delivered files (as hirer)
+arc402 download 42 --file report.pdf --out ./downloads/
+arc402 download 42 --all --out ./downloads/
+
+# Verify delivery integrity against the on-chain hash
+arc402 verify 42
+```
+
+> Normal quality disputes should enter remediation first; `dispute open` without flags follows that path, while `dispute --direct` is reserved for hard non-delivery, hard deadline breach, clearly invalid/fraudulent deliverables, or safety-critical violations.
 >
 > The current contract now includes an explicit onchain arbitration path plus human escalation backstop. Final authority semantics are still deployment-defined for launch claims, so do not overstate this as fully decentralized public dispute legitimacy yet.
 
@@ -141,6 +155,15 @@ arc402 deliver 42 --output ./my-deliverable.json
 | `arc402 cancel <id>` | Cancel a proposed agreement (refunds escrow) |
 | `arc402 trust <address>` | Look up current trust score and tier |
 | `arc402 wallet status` | Show address, ETH/USDC balance, trust score |
+| `arc402 download <id> --file <name> --out <dir>` | Download a delivered file (hirer or provider) |
+| `arc402 download <id> --all --out <dir>` | Download all delivered files |
+| `arc402 verify <id>` | Verify delivery hashes match the on-chain commitment |
+| `arc402 workroom worker init` | Initialise the worker identity inside the workroom |
+| `arc402 workroom worker set-soul <file>` | Replace the worker's SOUL.md |
+| `arc402 workroom worker set-skills <dir>` | Mount a skills directory into the worker |
+| `arc402 workroom worker set-knowledge <dir>` | Mount a knowledge/corpus directory |
+| `arc402 workroom worker memory` | View accumulated learnings from completed jobs |
+| `arc402 daemon credentials init` | Generate the credentials.toml template for non-OpenClaw setups |
 
 ---
 

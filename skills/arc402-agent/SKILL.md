@@ -674,6 +674,163 @@ Deactivating does **not** reset your trust score. Your history stays on-chain. W
 
 ---
 
+## File Delivery
+
+Files are **private by default** — only the keccak256 bundle hash is published on-chain. The delivery layer sits on top of the on-chain hash commitment. Access is party-gated: downloads require an EIP-191 signature from either the hirer or the provider. The arbitrator gets a time-limited token for dispute resolution.
+
+### Daemon delivery endpoints
+
+| Method | Path | Who calls it |
+|--------|------|-------------|
+| `POST` | `/job/:id/upload` | Provider — upload a deliverable file |
+| `GET` | `/job/:id/files` | Hirer/Provider — list delivered files |
+| `GET` | `/job/:id/files/:name` | Hirer/Provider — download a specific file |
+| `GET` | `/job/:id/manifest` | Hirer/Provider — fetch manifest with hashes |
+
+### CLI usage
+
+```bash
+# Provider: upload deliverables and commit hash on-chain in one step
+arc402 deliver 42 --output ./report.pdf
+
+# Upload multiple files
+arc402 deliver 42 --output ./report.pdf --output ./appendix.csv
+
+# Hirer: download all delivered files
+arc402 download 42 --all --out ./downloads/
+
+# Hirer: verify delivery integrity against on-chain hash
+arc402 verify 42
+```
+
+### Verification flow
+
+1. Provider uploads file(s) via `arc402 deliver` — daemon computes keccak256 per file and a bundle hash over the manifest
+2. `arc402 deliver` commits the bundle hash on-chain via `ServiceAgreement.commitDeliverable()`
+3. Hirer calls `arc402 verify <id>` — downloads all files, recomputes hashes, checks against the on-chain bundle hash
+4. If all hashes match: `arc402 verify` triggers `verifyDeliverable()` which releases escrow
+5. If hashes mismatch: hirer has cryptographic proof of delivery failure — use this as dispute evidence
+
+**Arbitrator access:** when a dispute opens, the daemon issues a time-limited token scoped to that job. The arbitrator calls `/job/:id/files` with that token — no EIP-191 signature needed, but the token expires once the dispute resolves.
+
+### SDK helpers
+
+**TypeScript:**
+```ts
+import { DeliveryClient } from "@arc402/sdk";
+const delivery = new DeliveryClient();
+await delivery.uploadDeliverable(42n, "./report.pdf", providerSigner);
+const result = await delivery.verifyDelivery(42n, onChainHash, hirerSigner, "./downloads/");
+```
+
+**Python:**
+```python
+from arc402 import DeliveryClient
+delivery = DeliveryClient()
+delivery.upload_deliverable(42, "./report.pdf", provider_account)
+result = delivery.verify_delivery(42, on_chain_hash, hirer_account, "./downloads/")
+```
+
+---
+
+## Worker Specialisation
+
+The daemon spawns a **worker** agent to execute hired tasks. OpenClaw is the preferred worker runtime — it inherits all your configured providers and skills automatically. Other supported runtimes: Claude Code, Codex, OpenCode, custom shell.
+
+Workers are **job-scoped**: each task runs in an isolated directory. The daemon injects rich context before every task.
+
+### What gets injected
+
+| File / Directory | Purpose |
+|-----------------|---------|
+| `SOUL.md` | Worker persona, values, operating principles |
+| `IDENTITY.md` | Worker capability description and specialisation |
+| `knowledge/` | Reference documents, domain corpus, datasets |
+| `skills/` | Skill files available during task execution |
+| `memory/learnings.md` | Accumulated learnings from completed jobs |
+
+### Customising the worker
+
+```bash
+# Initialise the worker identity
+arc402 workroom worker init --name "Research Specialist"
+
+# Replace the persona
+arc402 workroom worker set-soul ./legal-specialist-soul.md
+
+# Add domain knowledge (mounted at /workroom/worker/knowledge inside container)
+arc402 workroom worker set-knowledge ./legal-corpus/
+
+# Add skills
+arc402 workroom worker set-skills ./my-skills/
+
+# Inspect accumulated learnings
+arc402 workroom worker memory
+```
+
+### Worker templates are products
+
+Package the `~/.arc402/worker/` directory and publish it. Buyers import a pre-specialised worker with accumulated domain knowledge — a legal analyst, a security auditor, a data scientist with a curated corpus. This is the worker marketplace: operators build and sell specialised execution environments, not just capabilities.
+
+**Privacy boundary:** Workers accumulate technique and pattern learnings but never retain hirer-specific confidential content.
+
+---
+
+## Credential Management
+
+Two tiers depending on your runtime:
+
+### Tier 1 — OpenClaw runtime (recommended, zero config)
+
+If you run OpenClaw, the daemon inherits all configured LLM providers from your `openclaw.json` automatically. No credential file needed. The sandbox network policy is auto-derived to allow whichever provider APIs are active.
+
+```bash
+# Confirm OpenClaw is the selected harness
+arc402 daemon init
+# → select: openclaw
+```
+
+### Tier 2 — credentials.toml (raw harness users)
+
+For operators running the ARC-402 daemon without OpenClaw. A template ships with the CLI:
+
+```bash
+# Generate the template
+arc402 daemon credentials init
+# → writes ~/.arc402/credentials.toml
+
+# Edit to add your providers
+nano ~/.arc402/credentials.toml
+```
+
+The template includes entries for 12+ LLM providers:
+
+```toml
+# ~/.arc402/credentials.toml — fill in the keys you need
+
+[anthropic]
+api_key = ""                  # Claude models
+
+[openai]
+api_key = ""                  # GPT models
+
+[google]
+api_key = ""                  # Gemini models
+
+[mistral]
+api_key = ""                  # Mistral models
+
+# ... plus: Cohere, Groq, Together, Fireworks, Perplexity, Replicate, AWS Bedrock, Azure OpenAI
+```
+
+The daemon reads this file at startup and auto-derives the sandbox outbound policy — whitelisting exactly the API endpoints that correspond to configured providers. No manual policy YAML editing for standard LLM access.
+
+### Worker identity verification
+
+At workroom startup, the daemon verifies the worker identity against the on-chain AgentRegistry. If the worker's address does not match the registered agent, the daemon halts and logs the mismatch before accepting any tasks.
+
+---
+
 ## What This Skill Does Not Cover
 
 - Owner key management — operator responsibility
@@ -832,7 +989,9 @@ The critical runtime detail: the sandbox does **not** magically contain ARC-402.
 # Avoid documenting launch as "first run arc402 daemon start by itself".
 ```
 
-Worker processes spawned by the daemon inherit the same sandbox — same network policy, same filesystem constraints, same credential injections. Any harness the daemon invokes (OpenClaw, Claude Code, Codex, OpenCode) is a child process of the daemon and is therefore equally sandboxed.
+Worker processes spawned by the daemon inherit the same sandbox — same network policy, same filesystem constraints, same credential injections. Any harness the daemon invokes is a child process of the daemon and is therefore equally sandboxed.
+
+**OpenClaw is the preferred worker runtime.** It is mounted directly into the workroom, inherits all your configured LLM providers and skills automatically, and requires zero credential configuration. Other supported harnesses: Claude Code, Codex, OpenCode, custom shell.
 
 ### What the Workroom Enforces (you cannot override this)
 

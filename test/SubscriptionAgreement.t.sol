@@ -208,6 +208,18 @@ contract SubscriptionAgreementTest is Test {
         sa.createOffering(PRICE, 0, address(0), HASH, 0);
     }
 
+    function test_createOffering_revert_periodExceedsMax() public {
+        vm.prank(provider);
+        vm.expectRevert(SubscriptionAgreement.InvalidPeriodSeconds.selector);
+        sa.createOffering(PRICE, 365 days + 1, address(0), HASH, 0);
+    }
+
+    function test_createOffering_maxPeriodExactlyAllowed() public {
+        vm.prank(provider);
+        uint256 id = sa.createOffering(PRICE, 365 days, address(0), HASH, 0);
+        assertEq(sa.getOffering(id).periodSeconds, 365 days);
+    }
+
     // ─── subscribe (ETH) ──────────────────────────────────────────────────────
 
     function test_subscribe_ETH_onePeriod() public {
@@ -408,13 +420,13 @@ contract SubscriptionAgreementTest is Test {
         // Skip to after period end
         skip(PERIOD + 1);
 
-        uint256 prevPeriodEnd = sa.getSubscription(subId).currentPeriodEnd;
+        uint256 expectedEnd = block.timestamp + PERIOD; // late renewal anchors to now
         vm.prank(keeper);
         sa.renewSubscription(subId);
 
         SubscriptionAgreement.Subscription memory s = sa.getSubscription(subId);
         assertEq(s.consumed,        2 * PRICE);  // two periods consumed
-        assertEq(s.currentPeriodEnd, prevPeriodEnd + PERIOD);
+        assertEq(s.currentPeriodEnd, expectedEnd);
 
         // Provider credited for second period
         assertEq(sa.pendingWithdrawals(provider, address(0)), 2 * PRICE);
@@ -505,7 +517,7 @@ contract SubscriptionAgreementTest is Test {
         skip(PERIOD + 1);
 
         vm.prank(keeper);
-        vm.expectRevert(SubscriptionAgreement.AlreadyCancelled.selector);
+        vm.expectRevert(SubscriptionAgreement.NotActive.selector);
         sa.renewSubscription(subId);
     }
 
@@ -524,7 +536,7 @@ contract SubscriptionAgreementTest is Test {
 
         SubscriptionAgreement.Subscription memory s = sa.getSubscription(subId);
         assertTrue(s.cancelled);
-        assertTrue(s.active); // still active (has remaining time)
+        assertFalse(s.active); // inactive after cancel
 
         // 2 periods refunded
         assertEq(sa.pendingWithdrawals(alice, address(0)), 2 * PRICE);
@@ -592,7 +604,7 @@ contract SubscriptionAgreementTest is Test {
         sa.cancel(subId);
 
         vm.prank(alice);
-        vm.expectRevert(SubscriptionAgreement.AlreadyCancelled.selector);
+        vm.expectRevert(SubscriptionAgreement.NotActive.selector);
         sa.cancel(subId);
     }
 
@@ -647,6 +659,21 @@ contract SubscriptionAgreementTest is Test {
         vm.prank(alice);
         vm.expectRevert(SubscriptionAgreement.InvalidAmount.selector);
         sa.topUp{value: 0}(subId, 0);
+    }
+
+    function test_topUp_revert_offeringInactive() public {
+        vm.prank(provider);
+        uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
+
+        vm.prank(alice);
+        uint256 subId = sa.subscribe{value: PRICE}(offeringId, 1);
+
+        vm.prank(provider);
+        sa.deactivateOffering(offeringId);
+
+        vm.prank(alice);
+        vm.expectRevert(SubscriptionAgreement.OfferingInactive.selector);
+        sa.topUp{value: PRICE}(subId, PRICE);
     }
 
     // ─── deactivateOffering ───────────────────────────────────────────────────
@@ -1246,7 +1273,7 @@ contract SubscriptionAgreementTest is Test {
 
     // ─── Multiple-period catchup renewals ────────────────────────────────────
 
-    /// @notice Keeper can renew multiple times in one block if >1 period elapsed.
+    /// @notice Late renewal anchors to block.timestamp; second renewal requires another full period.
     function test_renew_catchupMultiplePeriods() public {
         vm.prank(provider);
         uint256 offeringId = sa.createOffering(PRICE, PERIOD, address(0), HASH, 0);
@@ -1255,11 +1282,19 @@ contract SubscriptionAgreementTest is Test {
         uint256 subId = sa.subscribe{value: 4 * PRICE}(offeringId, 4);
         // deposited=4P, consumed=P, remaining=3P
 
-        // Skip 2+ periods so 2 renewals are possible
+        // Skip 2+ periods; first renewal anchors currentPeriodEnd to now + PERIOD
         skip(2 * PERIOD + 1);
 
         vm.prank(keeper);
-        sa.renewSubscription(subId); // period 2
+        sa.renewSubscription(subId); // period 2 — anchored to block.timestamp + PERIOD
+
+        // Second renewal is now NotYetRenewable (new end = now + PERIOD, not yet elapsed)
+        vm.prank(keeper);
+        vm.expectRevert(SubscriptionAgreement.NotYetRenewable.selector);
+        sa.renewSubscription(subId);
+
+        // Skip another full period; now the second renewal is valid
+        skip(PERIOD + 1);
         vm.prank(keeper);
         sa.renewSubscription(subId); // period 3
 

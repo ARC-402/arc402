@@ -29,6 +29,20 @@ if [ ! -f "$POLICY_FILE" ]; then
   exit 1
 fi
 
+# ─── Phase 0b: Auto-derive LLM provider endpoints from OpenClaw config ────
+#
+# If OpenClaw config is mounted, read it and ensure all configured LLM
+# providers have their API endpoints in the network policy. This runs
+# BEFORE host resolution so the derived hosts get resolved too.
+
+OPENCLAW_CONFIG="/home/workroom/.openclaw/openclaw.json"
+if [ -f "$OPENCLAW_CONFIG" ]; then
+  log "OpenClaw config found — deriving LLM provider endpoints..."
+  /derive-policy.sh "$OPENCLAW_CONFIG" "$POLICY_FILE" || log "WARN: Policy derivation failed (non-fatal)"
+else
+  log "No OpenClaw config mounted — using static policy only"
+fi
+
 # ─── Phase 1: Resolve all policy hosts (DNS is still open) ─────────────────
 #
 # We resolve hostnames BEFORE applying the DROP policy. Once DROP is active,
@@ -128,7 +142,58 @@ if [ ! -f "$DAEMON_ENTRY" ]; then
   exit 1
 fi
 
+# ─── Phase 5b: Worker identity + agent runtimes on PATH ────────────────────
+
+WORKER_DIR="/workroom/.arc402/worker"
+
+# Verify worker identity
+if [ -f "$WORKER_DIR/SOUL.md" ]; then
+  log "Worker SOUL.md: found"
+else
+  log "WARN: No worker SOUL.md — agent will use generic identity"
+  log "  Run 'arc402 worker init' on the host to create one"
+fi
+
+if [ -f "$WORKER_DIR/config.json" ]; then
+  WORKER_NAME=$(jq -r '.name // "unnamed"' "$WORKER_DIR/config.json" 2>/dev/null || echo "unnamed")
+  WORKER_CAPS=$(jq -r '.capabilities // [] | join(", ")' "$WORKER_DIR/config.json" 2>/dev/null || echo "none")
+  log "Worker: $WORKER_NAME | Capabilities: $WORKER_CAPS"
+else
+  log "WARN: No worker config.json"
+fi
+
+# Check knowledge/datasets/skills directories
+for dir in knowledge datasets skills; do
+  if [ -d "$WORKER_DIR/$dir" ]; then
+    count=$(find "$WORKER_DIR/$dir" -type f 2>/dev/null | wc -l)
+    log "Worker $dir/: $count files"
+  fi
+done
+
+# Add agent runtimes to PATH
+PATH_ADDITIONS=""
+# OpenClaw (preferred runtime)
+if [ -d "/workroom/openclaw" ]; then
+  PATH_ADDITIONS="/workroom/openclaw:$PATH_ADDITIONS"
+  log "OpenClaw runtime found at /workroom/openclaw"
+fi
+# Claude Code
+if [ -d "/workroom/claude-code" ]; then
+  PATH_ADDITIONS="/workroom/claude-code:$PATH_ADDITIONS"
+  log "Claude Code found at /workroom/claude-code"
+fi
+if [ -n "$PATH_ADDITIONS" ]; then
+  export PATH="$PATH_ADDITIONS$PATH"
+fi
+
+# Verify Claude auth
+if [ -f "/home/workroom/.claude.json" ]; then
+  log "AUTH OK: Claude auth file found"
+else
+  log "WARN: No Claude auth — mount -v ~/.claude.json:/home/workroom/.claude.json:ro"
+fi
+
 # ─── Phase 6: Drop privileges and start daemon ────────────────────────────
 
 log "Starting ARC-402 daemon as user 'workroom'..."
-exec su -s /bin/bash workroom -c "node $DAEMON_ENTRY --foreground"
+exec su -s /bin/bash workroom -c "export PATH='$PATH' && export ARC402_WORKER_DIR='$WORKER_DIR' && node $DAEMON_ENTRY --foreground"

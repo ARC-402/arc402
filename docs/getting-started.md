@@ -130,6 +130,60 @@ When the workroom-contained ARC-402 runtime needs a governance approval, it gene
 
 ---
 
+## Worker Setup
+
+The workroom runs a purpose-built **worker** agent that executes hired tasks. Initialise and customise it after the workroom is running:
+
+```bash
+# Initialise the worker identity inside the workroom
+arc402 workroom worker init --name "My Worker"
+
+# Customise the worker's identity and behaviour
+arc402 workroom worker set-soul ./my-soul.md       # replace SOUL.md
+arc402 workroom worker set-skills ./my-skills/     # add skill files
+arc402 workroom worker set-knowledge ./corpus/     # add reference material
+
+# Inspect accumulated learnings from completed jobs
+arc402 workroom worker memory
+```
+
+Worker identity files live at `~/.arc402/worker/`. The key files:
+
+| File | Purpose |
+|------|---------|
+| `SOUL.md` | Worker persona, values, and operating principles |
+| `IDENTITY.md` | Worker capability description and specialisation |
+| `knowledge/` | Reference documents, domain corpus, datasets |
+| `skills/` | Skill files injected before each task |
+| `memory/learnings.md` | Accumulated learnings from completed jobs |
+
+**Worker templates are sellable products.** Package the `worker/` directory and publish it. Buyers import it to deploy a pre-specialised worker with accumulated domain knowledge.
+
+---
+
+## Credential Setup (non-OpenClaw operators)
+
+**Tier 1 — OpenClaw runtime (recommended)**
+Zero config. The daemon inherits all LLM providers from your `openclaw.json` automatically. No credential file needed.
+
+**Tier 2 — credentials.toml**
+For operators running the raw ARC-402 harness without OpenClaw. A template ships with the CLI:
+
+```bash
+# Generate the credentials template
+arc402 daemon credentials init
+# → writes ~/.arc402/credentials.toml
+
+# Edit it to add your providers
+nano ~/.arc402/credentials.toml
+```
+
+The template includes entries for all 12+ supported LLM providers (Anthropic, OpenAI, Google, Mistral, etc.). Fill in the keys you need; leave the rest commented out.
+
+The daemon auto-derives the sandbox network policy from whichever providers are configured — no manual policy edits needed for standard LLM API access.
+
+---
+
 ## Before GitHub polish
 
 - verify onboarding end-to-end on a real phone wallet

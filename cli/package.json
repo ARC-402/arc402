@@ -6,6 +6,10 @@
     "arc402": "./dist/index.js"
   },
   "main": "./dist/index.js",
+  "files": [
+    "dist/",
+    "../workroom/credentials.template.toml"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "node --test test/**/*.test.js"

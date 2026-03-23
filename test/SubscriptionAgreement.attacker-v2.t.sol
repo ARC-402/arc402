@@ -669,9 +669,9 @@ contract SubscriptionAgreementAttackerV2 is Test {
         sa.cancel(subId);
         // remaining = 2P refunded to alice
 
-        // Keeper's renewSubscription now fails (AlreadyCancelled)
+        // Keeper's renewSubscription now fails (NotActive — cancel sets active=false)
         skip(2); // past period end
-        vm.expectRevert(SubscriptionAgreement.AlreadyCancelled.selector);
+        vm.expectRevert(SubscriptionAgreement.NotActive.selector);
         sa.renewSubscription(subId);
 
         // Provider invariant: earned exactly 1 period
@@ -757,72 +757,42 @@ contract SubscriptionAgreementAttackerV2 is Test {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Attack 11: Create offering with extremely large periodSeconds to:
-    //            (a) attempt overflow in currentPeriodEnd at subscribe time, and
-    //            (b) trap a subscriber's multi-period deposit (can never renew).
+    // Attack 11: Create offering with extremely large periodSeconds
     //
-    // Attack (a): periodSeconds = type(uint256).max
-    //   block.timestamp + type(uint256).max overflows → subscribe reverts.
-    //   (Solidity 0.8 checked arithmetic.)
+    // Attack:  Provider publishes an offering with periodSeconds > MAX_PERIOD
+    //          (365 days) — e.g. type(uint256).max — hoping to:
+    //          (a) trap a subscriber's multi-period deposit (can never renew),
+    //          (b) cause overflow in currentPeriodEnd arithmetic.
     //
-    // Attack (b): periodSeconds = type(uint256).max / 2
-    //   subscribe succeeds (periodEnd = type(uint256).max / 2 + timestamp).
-    //   Subscriber deposits for 2 periods but can never renew — the renewal
-    //   advances currentPeriodEnd by another half-max, overflowing → reverts.
-    //   Subscriber's second-period funds are "trapped" until they cancel.
-    //   cancel() rescues the deposit: subscriber gets remaining back.
+    // Why blocked: createOffering() enforces periodSeconds <= MAX_PERIOD.
+    //   Any period > 365 days → InvalidPeriodSeconds at offering creation.
+    //   The attack vector never reaches subscribe().
     //
-    // Why this is safe (not a theft): The subscriber can always cancel to recover
-    //   remaining deposit. No funds are permanently locked.
-    //
-    // Invariant: Overflow in period arithmetic reverts safely. Subscriber can
-    //            always recover remaining deposit via cancel().
+    // Invariant: No offering can have a period exceeding 365 days.
+    //            Overflow in period arithmetic is structurally prevented.
     // ──────────────────────────────────────────────────────────────────────────
-    function test_attack_11_extremePeriodSeconds_overflowSafeAndCancelRecoverable() public {
-        // Part (a): overflow at subscribe time — should revert
+    function test_attack_11_extremePeriodSeconds_blockedAtCreation() public {
+        // Part (a): type(uint256).max period — blocked at createOffering
         vm.prank(provider);
-        uint256 offOverflow = sa.createOffering(PRICE, type(uint256).max, address(0), HASH, 0);
+        vm.expectRevert(SubscriptionAgreement.InvalidPeriodSeconds.selector);
+        sa.createOffering(PRICE, type(uint256).max, address(0), HASH, 0);
 
-        vm.prank(alice);
-        vm.expectRevert(); // arithmetic overflow in block.timestamp + type(uint256).max
-        sa.subscribe{value: 2 * PRICE}(offOverflow, 2);
-
-        // Part (b): very large but non-overflowing period
-        // block.timestamp = 1 in forge default, so type(uint256).max - 2 + 1 = type(uint256).max - 1
-        // periodEnd = 1 + (type(uint256).max - 2) = type(uint256).max - 1 (no overflow)
-        uint256 hugePeriod = type(uint256).max - 2;
-
+        // Part (b): hugePeriod > 365 days — also blocked
+        uint256 hugePeriod = 366 days;
         vm.prank(provider);
-        uint256 offHuge = sa.createOffering(PRICE, hugePeriod, address(0), HASH, 0);
+        vm.expectRevert(SubscriptionAgreement.InvalidPeriodSeconds.selector);
+        sa.createOffering(PRICE, hugePeriod, address(0), HASH, 0);
 
-        // Subscribe for 2 periods — succeeds
+        // Boundary: exactly MAX_PERIOD (365 days) is allowed
+        vm.prank(provider);
+        uint256 offMax = sa.createOffering(PRICE, 365 days, address(0), HASH, 0);
+        assertEq(sa.getOffering(offMax).periodSeconds, 365 days, "max period allowed");
+
+        // Subscribe and verify no overflow — 365 days + block.timestamp fits in uint256
         vm.prank(alice);
-        uint256 subId = sa.subscribe{value: 2 * PRICE}(offHuge, 2);
-        assertEq(sa.getSubscription(subId).deposited, 2 * PRICE, "subscribed with 2 periods");
-
-        // currentPeriodEnd is near type(uint256).max — effectively eternal
-        assertTrue(sa.getSubscription(subId).currentPeriodEnd > 1e30,
-            "period end is astronomically far in the future");
-
-        // hasAccess is true (block.timestamp << currentPeriodEnd)
-        assertTrue(sa.hasAccess(offHuge, alice), "access granted");
-
-        // Renewal would overflow: currentPeriodEnd + hugePeriod > type(uint256).max
-        // We can't realistically warp to the period end, but we can verify the formula
-        // by checking that renewSubscription is NotYetRenewable (cannot wait that long)
-        vm.expectRevert(SubscriptionAgreement.NotYetRenewable.selector);
-        sa.renewSubscription(subId);
-
-        // RESCUE: alice cancels to recover her second period deposit
-        vm.prank(alice);
-        sa.cancel(subId);
-
-        // Refund = deposited - consumed = 2P - P = P
-        assertEq(sa.pendingWithdrawals(alice, address(0)), PRICE,
-            "second period deposit recovered via cancel: no theft");
-
-        vm.prank(alice);
-        sa.withdraw(address(0));
+        uint256 subId = sa.subscribe{value: PRICE}(offMax, 1);
+        assertTrue(sa.getSubscription(subId).currentPeriodEnd > block.timestamp,
+            "period end is in the future");
     }
 
     // ──────────────────────────────────────────────────────────────────────────

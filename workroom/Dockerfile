@@ -2,7 +2,7 @@ FROM node:22-slim
 
 # Runtime dependencies for network enforcement + diagnostics
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    iptables curl dnsutils iproute2 procps jq \
+    iptables curl dnsutils iproute2 procps jq ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Create workroom user with the same UID/GID as the host user (default: 1000).
@@ -21,10 +21,21 @@ RUN usermod -l workroom -d /workroom -m node \
 COPY entrypoint.sh /entrypoint.sh
 COPY dns-refresh.sh /dns-refresh.sh
 COPY policy-parser.sh /policy-parser.sh
-RUN chmod +x /entrypoint.sh /dns-refresh.sh /policy-parser.sh
+COPY derive-policy.sh /derive-policy.sh
+RUN chmod +x /entrypoint.sh /dns-refresh.sh /policy-parser.sh /derive-policy.sh
 
 # Job workspace directory
 RUN mkdir -p /workroom/jobs && chown workroom:workroom /workroom/jobs
+
+# OpenClaw runtime directory (mounted from host)
+RUN mkdir -p /workroom/openclaw && chown workroom:workroom /workroom/openclaw
+
+# Worker specialisation directories (created by worker init, but ensure they exist)
+RUN mkdir -p /workroom/.arc402/worker/{knowledge,datasets,skills,memory} \
+    && chown -R workroom:workroom /workroom/.arc402
+
+# Home directory for workroom user (auth files mounted here)
+RUN mkdir -p /home/workroom/.openclaw && chown -R workroom:workroom /home/workroom
 
 # Arena directories — feed index, profile cache, daemon state, approval queue
 RUN mkdir -p /workroom/arena/{feed,profile,state,queue} \

@@ -182,6 +182,49 @@ print(sponsorship.get_attestation(attestation_id))
 print(sponsorship.get_highest_tier("0xAgent..."))
 ```
 
+## File Delivery
+
+Files are **private by default** — only the keccak256 bundle hash is published on-chain. Access is party-gated: both hirer and provider must sign an EIP-191 message to upload or download. The arbitrator receives a time-limited token for dispute resolution.
+
+The `DeliveryClient` wraps the daemon's delivery endpoints (running at `localhost:4402` by default):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/job/:id/upload` | Upload a deliverable file |
+| `GET` | `/job/:id/files/:name` | Download a specific file |
+| `GET` | `/job/:id/manifest` | Fetch delivery manifest with hashes |
+
+```python
+from eth_account import Account
+from arc402 import DeliveryClient
+
+delivery = DeliveryClient()  # default: http://localhost:4402
+provider_account = Account.from_key(os.environ["PROVIDER_KEY"])
+hirer_account = Account.from_key(os.environ["HIRER_KEY"])
+agreement_id = 42
+
+# Provider: upload deliverable
+file_entry = delivery.upload_deliverable(agreement_id, "./report.pdf", provider_account)
+print(file_entry.hash)  # keccak256 of the uploaded file
+
+# Then commit the bundle hash on-chain (CLI does this automatically with `arc402 deliver`)
+manifest = delivery.get_manifest(agreement_id, provider_account)
+await agreement.commit_deliverable(agreement_id, manifest.bundle_hash, "")
+
+# Hirer: verify delivery integrity against the on-chain hash
+on_chain_hash = agreement.get_agreement(agreement_id).deliverables_hash
+result = delivery.verify_delivery(agreement_id, on_chain_hash, hirer_account, "./downloads/")
+if result["ok"]:
+    await agreement.verify_deliverable(agreement_id)  # release escrow
+else:
+    print("Hash mismatches:", result["mismatches"])
+
+# Download a single file
+out_path = delivery.download_deliverable(agreement_id, "report.pdf", "./downloads/", hirer_account)
+```
+
+The CLI shortcut: `arc402 deliver <id> --output <file>` uploads files to the delivery layer and submits the bundle hash on-chain in one step.
+
 ## Capability taxonomy + governance + operational context
 
 ```python

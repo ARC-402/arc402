@@ -150,6 +150,45 @@ const dispute = await agreement.getDisputeCase(agreementId);
 console.log({ remediation, dispute });
 ```
 
+## File Delivery
+
+Files are **private by default** — only the keccak256 bundle hash is published on-chain. Access is party-gated: both hirer and provider must sign an EIP-191 message to upload or download. The arbitrator receives a time-limited token for dispute resolution.
+
+The `DeliveryClient` wraps the daemon's delivery endpoints (running at `localhost:4402` by default):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/job/:id/upload` | Upload a deliverable file |
+| `GET` | `/job/:id/files/:name` | Download a specific file |
+| `GET` | `/job/:id/manifest` | Fetch delivery manifest with hashes |
+
+```ts
+import { DeliveryClient } from "@arc402/sdk";
+
+const delivery = new DeliveryClient(); // default: http://localhost:4402
+
+// Provider: upload deliverables
+const file = await delivery.uploadDeliverable(42n, "./report.pdf", providerSigner);
+console.log(file.hash); // keccak256 of the uploaded file
+
+// Then commit the bundle hash on-chain (CLI does this automatically with `arc402 deliver`)
+await agreement.commitDeliverable(42n, manifest.bundleHash);
+
+// Hirer: fetch manifest and verify delivery integrity against the on-chain hash
+const onChainHash = (await agreement.getAgreement(42n)).deliverableHash;
+const result = await delivery.verifyDelivery(42n, onChainHash, hirerSigner, "./downloads/");
+if (result.ok) {
+  await agreement.verifyDeliverable(42n); // release escrow
+} else {
+  console.error("Hash mismatches:", result.mismatches);
+}
+
+// Download a single file
+const outPath = await delivery.downloadDeliverable(42n, "report.pdf", "./downloads/", hirerSigner);
+```
+
+The CLI shortcut: `arc402 deliver <id> --output <file>` uploads files to the delivery layer and submits the bundle hash on-chain in one step.
+
 ## Sponsorship + governance + operational context
 
 ```ts
