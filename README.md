@@ -368,6 +368,7 @@ ARC-402 aims to provide a shared addressing and agreement layer for the agent ec
 | IntentAttestation | [`0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460`](https://basescan.org/address/0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460) |
 | SettlementCoordinator | [`0x6653F385F98752575db3180b9306e2d9644f9Eb1`](https://basescan.org/address/0x6653F385F98752575db3180b9306e2d9644f9Eb1) |
 | ARC402RegistryV2 | [`0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622`](https://basescan.org/address/0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622) |
+| ARC402RegistryV3 | [`0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6`](https://basescan.org/address/0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6) |
 | AgentRegistry | [`0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865`](https://basescan.org/address/0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865) |
 | WalletFactoryV5 | [`0xcB52B5d746eEc05e141039E92e3dBefeAe496051`](https://basescan.org/address/0xcB52B5d746eEc05e141039E92e3dBefeAe496051) |
 | WalletCodeOracle v5 | [`0x594B1afdBb899F598fdbe468449EC202f4c4D7BD`](https://basescan.org/address/0x594B1afdBb899F598fdbe468449EC202f4c4D7BD) |

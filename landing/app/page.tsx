@@ -7,6 +7,7 @@ const CONTRACTS = [
   { name: 'PolicyEngine',         addr: '0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847' },
   { name: 'TrustRegistryV3',      addr: '0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1' },
   { name: 'ARC402RegistryV2',     addr: '0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622' },
+  { name: 'ARC402RegistryV3',     addr: '0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6' },
   { name: 'AgentRegistry',        addr: '0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865' },
   { name: 'WalletFactoryV5',      addr: '0xcB52B5d746eEc05e141039E92e3dBefeAe496051' },
   { name: 'ServiceAgreement',     addr: '0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6' },
@@ -342,7 +343,7 @@ export default function Home() {
             </div>
           ))}
         </div>
-        <p className={styles.contractsVerified}>Addresses verified 2026-03-21</p>
+        <p className={styles.contractsVerified}>Addresses verified 2026-03-23</p>
       </section>
 
       {/* ── Footer ── */}

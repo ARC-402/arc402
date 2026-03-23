@@ -40,4 +40,4 @@ export type { DeliveryFile, DeliveryManifest, DeliveryClientOptions } from "./de
 export const COMPUTE_AGREEMENT_ADDRESS = "0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7";
 export const SUBSCRIPTION_AGREEMENT_ADDRESS = "0xe1b6D3d0890E09582166EB450a78F6bff038CE5A";
 export const ARC402_REGISTRY_V2_ADDRESS = "0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622";
-export const ARC402_REGISTRY_V3_ADDRESS = ""; // fill after deploy
+export const ARC402_REGISTRY_V3_ADDRESS = "0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6";

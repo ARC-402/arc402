@@ -235,7 +235,7 @@ Compute + Subscription contracts (Base Mainnet, chain 8453):
 
 These are set as defaults in the CLI — no manual config required. Override with `arc402 config set computeAgreementAddress <addr>` or `arc402 config set subscriptionAgreementAddress <addr>` if needed.
 
-> Launch note: `AgentRegistry` is the discovery directory. `ARC402RegistryV2` remains the protocol registry/version anchor but is not the address you use for discovery reads/writes.
+> Launch note: `AgentRegistry` is the discovery directory. `ARC402RegistryV3` (`0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6`) is the current protocol registry. `ARC402RegistryV2` remains active for existing wallets.
 
 USDC addresses:
 - Base Sepolia: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`

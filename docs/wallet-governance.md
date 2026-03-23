@@ -68,10 +68,11 @@ Five contracts govern wallet behaviour:
 | `PolicyEngine` | `0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847` | Per-category spending limits |
 | `ARC402Wallet` | Your deployed address | Velocity limits, freeze state, active policy, interceptor |
 | `ARC402Guardian` | `0xED0A033B79626cdf9570B6c3baC7f699cD0032D8` | Guardian key registry |
-| `ARC402RegistryV2` | `0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622` | Contract address registry (all protocol contracts) |
+| `ARC402RegistryV2` | `0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622` | Contract address registry (v2 — existing wallets) |
+| `ARC402RegistryV3` | `0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6` | Contract address registry (v3 — new default) |
 | `ARC402Governance` | `0xE931DD2EEb9Af9353Dd5E2c1250492A0135E0EC4` | Protocol-level governance (protocol parameters, not your wallet) |
 
-Your wallet reads from `ARC402RegistryV2` to find contract addresses. Upgrading your wallet's registry pointer is how you migrate to newer protocol versions.
+Your wallet reads from `ARC402RegistryV3` (new wallets) or `ARC402RegistryV2` (existing wallets) to find contract addresses. Upgrading your wallet's registry pointer is how you migrate to newer protocol versions.
 
 ---
 
@@ -232,7 +233,12 @@ arc402 wallet upgrade-registry <newRegistryAddress>
 # Starts 2-day timelock immediately
 ```
 
-For upgrading to ARC402RegistryV2 (if you haven't yet):
+For upgrading to ARC402RegistryV3 (recommended for new wallets):
+```bash
+arc402 wallet upgrade-registry 0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6
+```
+
+For upgrading to ARC402RegistryV2 (if migrating from V1):
 ```bash
 arc402 wallet upgrade-registry 0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622
 ```
@@ -317,8 +323,8 @@ arc402 wallet policy set-limit --category compute --amount 0.10eth
 arc402 wallet status
 arc402 wallet policy show
 
-# 5. If upgrading to v2 registry
-arc402 wallet upgrade-registry 0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622
+# 5. If upgrading to v3 registry (new default)
+arc402 wallet upgrade-registry 0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6
 # (wait 48 hours)
 arc402 wallet execute-registry-upgrade
 ```

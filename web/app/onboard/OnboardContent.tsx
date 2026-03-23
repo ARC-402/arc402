@@ -16,7 +16,7 @@ const ALL_WALLET_FACTORIES = [
 ]
 const ENTRY_POINT     = '0x0000000071727De22E5E9d8BAf0edAc6f37da032'
 const ARC402_REGISTRY_V2 = '0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622' // Protocol registry (v2) — fallback for existing wallets
-const ARC402_REGISTRY_V3 = ''  // Protocol registry (v3) — fill after deploy
+const ARC402_REGISTRY_V3 = '0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6'  // Protocol registry (v3) — new default
 const ARC402_REGISTRY    = ARC402_REGISTRY_V3 || ARC402_REGISTRY_V2 // new wallets use V3, falls back to V2
 const AGENT_REGISTRY  = '0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865' // AgentRegistry — where agents register
 const POLICY_ENGINE   = '0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847'
