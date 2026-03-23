@@ -23,6 +23,16 @@ const POLICY_ENGINE   = '0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847'
 const HANDSHAKE       = '0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3' // Handshake contract (Arena v1)
 const GIGABRAIN_WALLET = '0xa9e0612a6f82bf4056D7e48A406E36C990aB83bE' // GigaBrain agent wallet
 
+// ─── Priority order ───────────────────────────────────────────────────────────
+
+const PRIORITY_RDNS = [
+  'io.metamask',
+  'com.coinbase.wallet',
+  'io.rabby',
+  'me.rainbow',
+  'com.okex.wallet',
+]
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function isMobile(): boolean {
@@ -37,11 +47,22 @@ function detectInjectedWallets(): InjectedWallet[] {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const eth = (window as any).ethereum
   const wallets: InjectedWallet[] = []
-  if (eth.isMetaMask)       wallets.push({ name: 'MetaMask',       emoji: '🦊', color: '#f6851b', provider: eth })
-  if (eth.isRabby)          wallets.push({ name: 'Rabby',          emoji: '🐰', color: '#7c3aed', provider: eth })
-  if (eth.isCoinbaseWallet) wallets.push({ name: 'Coinbase',       emoji: '🔷', color: '#0052ff', provider: eth })
-  if (wallets.length === 0) wallets.push({ name: 'Browser Wallet', emoji: '🔗', color: '#888',    provider: eth })
+  if (eth.isMetaMask)       wallets.push({ name: 'MetaMask',       emoji: '🦊', color: '#f6851b', rdns: 'io.metamask',         provider: eth })
+  if (eth.isRabby)          wallets.push({ name: 'Rabby',          emoji: '🐰', color: '#7c3aed', rdns: 'io.rabby',            provider: eth })
+  if (eth.isCoinbaseWallet) wallets.push({ name: 'Coinbase',       emoji: '🔷', color: '#0052ff', rdns: 'com.coinbase.wallet', provider: eth })
+  if (wallets.length === 0) wallets.push({ name: 'Browser Wallet', emoji: '🔗', color: '#888',                                 provider: eth })
   return wallets
+}
+
+function sortWalletsByPriority(wallets: InjectedWallet[]): InjectedWallet[] {
+  return [...wallets].sort((a, b) => {
+    const ai = PRIORITY_RDNS.indexOf(a.rdns ?? '')
+    const bi = PRIORITY_RDNS.indexOf(b.rdns ?? '')
+    if (ai === -1 && bi === -1) return 0
+    if (ai === -1) return 1
+    if (bi === -1) return -1
+    return ai - bi
+  })
 }
 
 function short(addr: string) {
@@ -111,6 +132,8 @@ interface InjectedWallet {
   name: string
   emoji: string
   color: string
+  icon?: string   // EIP-6963 info.icon — base64 data URI
+  rdns?: string   // EIP-6963 info.rdns — unique per wallet
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   provider: any
 }
@@ -208,17 +231,41 @@ export default function OnboardContent() {
       setIsDesktop(true)
       const eip6963: InjectedWallet[] = []
       const onAnnounce = (event: Event) => {
-        const { info, provider } = (event as CustomEvent).detail as { info: { name: string; rdns: string }; provider: unknown }
-        const emojis: Record<string, string> = { 'io.metamask': '🦊', 'io.rabby': '🐰', 'com.coinbase.wallet': '🔷' }
-        const colors: Record<string, string> = { 'io.metamask': '#f6851b', 'io.rabby': '#7c3aed', 'com.coinbase.wallet': '#0052ff' }
-        eip6963.push({ name: info.name, emoji: emojis[info.rdns] ?? '🔗', color: colors[info.rdns] ?? '#888', provider })
-        setInjectedWallets([...eip6963])
+        const { info, provider } = (event as CustomEvent).detail as {
+          info: { name: string; rdns: string; icon?: string }
+          provider: unknown
+        }
+        // Deduplicate by rdns — same wallet announces once per chain
+        if (eip6963.some(w => w.rdns === info.rdns)) return
+        const colors: Record<string, string> = {
+          'io.metamask': '#f6851b',
+          'io.rabby': '#7c3aed',
+          'com.coinbase.wallet': '#0052ff',
+          'me.rainbow': '#ff6b6b',
+          'com.okex.wallet': '#333',
+        }
+        const emojis: Record<string, string> = {
+          'io.metamask': '🦊',
+          'io.rabby': '🐰',
+          'com.coinbase.wallet': '🔷',
+          'me.rainbow': '🌈',
+          'com.okex.wallet': '⬛',
+        }
+        eip6963.push({
+          name: info.name,
+          emoji: emojis[info.rdns] ?? '🔗',
+          color: colors[info.rdns] ?? '#555',
+          icon: info.icon,        // use EIP-6963 self-reported logo (data URI)
+          rdns: info.rdns,
+          provider,
+        })
+        setInjectedWallets(sortWalletsByPriority(eip6963))
       }
       window.addEventListener('eip6963:announceProvider', onAnnounce as EventListener)
       window.dispatchEvent(new Event('eip6963:requestProvider'))
       // Fallback: if no EIP-6963 providers announce, check window.ethereum directly
       setTimeout(() => {
-        if (eip6963.length === 0) setInjectedWallets(detectInjectedWallets())
+        if (eip6963.length === 0) setInjectedWallets(sortWalletsByPriority(detectInjectedWallets()))
       }, 100)
       return () => window.removeEventListener('eip6963:announceProvider', onAnnounce as EventListener)
     }
@@ -848,10 +895,10 @@ export default function OnboardContent() {
                   {injectedWallets.length > 0 && (
                     <div style={{ marginBottom: 16 }}>
                       <p style={{ color: '#555', fontSize: '0.73rem', marginBottom: 8 }}>Detected extensions:</p>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
                         {injectedWallets.map(w => (
                           <button
-                            key={w.name}
+                            key={w.rdns ?? w.name}
                             onClick={() => doDeployWithExtension(w.provider)}
                             style={{
                               display: 'flex', alignItems: 'center', gap: 12, width: '100%',
@@ -860,7 +907,10 @@ export default function OnboardContent() {
                               textAlign: 'left',
                             }}
                           >
-                            <span style={{ fontSize: 20, flexShrink: 0 }}>{w.emoji}</span>
+                            {w.icon
+                              ? <img src={w.icon} alt="" style={{ width: 20, height: 20, borderRadius: 4, flexShrink: 0 }} />
+                              : <span style={{ fontSize: 20, flexShrink: 0 }}>{w.emoji}</span>
+                            }
                             <span style={{ color: '#d0d0d0', fontSize: '0.9rem', fontWeight: 500 }}>{w.name}</span>
                             <span style={{ marginLeft: 'auto', color: w.color, fontSize: '0.75rem', fontWeight: 600 }}>Connect →</span>
                           </button>
