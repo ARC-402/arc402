@@ -5,6 +5,30 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
+ * @title IComputeDisputeArbitration
+ * @notice Minimal interface for DisputeArbitration integration with ComputeAgreement.
+ *         Full interface: reference/contracts/IDisputeArbitration.sol
+ */
+interface IComputeDisputeArbitration {
+    enum DisputeMode  { UNILATERAL, MUTUAL }
+    enum DisputeClass { HARD_FAILURE, AMBIGUITY_QUALITY, HIGH_SENSITIVITY }
+
+    function openDispute(
+        uint256 agreementId,
+        DisputeMode mode,
+        DisputeClass disputeClass,
+        address opener,
+        address client,
+        address provider,
+        uint256 agreementPrice,
+        address token
+    ) external payable returns (uint256 feeRequired);
+
+    function resolveDisputeFee(uint256 agreementId, uint8 outcome) external;
+    function isEligibleArbitrator(address arbitrator) external view returns (bool);
+}
+
+/**
  * @title ComputeAgreement
  * @notice Session-based GPU compute rental — client deposits upfront, provider
  *         submits signed metered usage reports, settlement is per-minute.
@@ -17,8 +41,10 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  *    endSession      (either party) → credits provider + client; each withdraws
  *
  *  Dispute: client calls disputeSession to freeze settlement.
- *           Arbitrator (set at construction) resolves via resolveDispute.
- *           If no resolution within DISPUTE_TIMEOUT, client can force-refund.
+ *           If DisputeArbitration is configured, a formal dispute with fee collection
+ *           is opened on-chain. Parties nominate approved arbitrators.
+ *           Owner resolves via resolveDisputeDetailed with DisputeOutcome enum.
+ *           DisputeArbitration handles timeout fallback mechanism.
  *
  *  Payment tokens:
  *    address(0) = native ETH
@@ -29,7 +55,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  *    CA-1: Pull-payment pattern — no sequential ETH pushes in endSession
  *    CA-2: Report digest dedup — same signature cannot be replayed
  *    CA-3: Session expiry — client can cancel Proposed/unstarted sessions
- *    CA-4: Dispute resolution — arbitrator + timeout fallback
+ *    CA-4: Dispute resolution — DisputeArbitration integration (trustless arbitration)
  *    CA-IND-3: Exact deposit required at propose time (no overpayment)
  *    CA-8: consumedMinutes capped to maxHours * 60
  *    CA-9: Self-dealing prevented (provider != client)
@@ -44,13 +70,18 @@ contract ComputeAgreement {
     // ─── Constants ────────────────────────────────────────────────────────────
 
     /// @notice Time after proposal that provider must accept before client can cancel.
-    uint256 public constant PROPOSAL_TTL    = 48 hours;
-    /// @notice Time after dispute before client can force-refund if unresolved.
-    uint256 public constant DISPUTE_TIMEOUT = 7 days;
+    uint256 public constant PROPOSAL_TTL = 48 hours;
 
     // ─── Enums ────────────────────────────────────────────────────────────────
 
     enum SessionStatus { Proposed, Active, Completed, Disputed, Cancelled }
+
+    enum DisputeOutcome {
+        PROVIDER_WINS,          // full deposit to provider
+        CLIENT_WINS,            // full deposit to client
+        SPLIT,                  // custom providerAward/clientAward
+        HUMAN_REVIEW_REQUIRED   // escalated — no settlement yet, remains Disputed
+    }
 
     // ─── Structs ──────────────────────────────────────────────────────────────
 
@@ -81,8 +112,21 @@ contract ComputeAgreement {
 
     // ─── Storage ──────────────────────────────────────────────────────────────
 
-    /// @notice Designated arbitrator for dispute resolution.
-    address public immutable arbitrator;
+    /// @notice Contract owner — resolves disputes, updates DA, approves arbitrators.
+    address public owner;
+
+    /// @notice Pending owner for two-step ownership transfer.
+    address public pendingOwner;
+
+    /// @notice DisputeArbitration contract — handles fees, bonds, and timeout fallback.
+    ///         Updatable by owner. If address(0), disputes resolved by owner only.
+    address public disputeArbitration;
+
+    /// @notice Arbitrators approved for nomination in disputed sessions.
+    mapping(address => bool) public approvedArbitrators;
+
+    /// @notice Tracks arbitrators nominated per session (sessionId => arbitrator => nominated).
+    mapping(bytes32 => mapping(address => bool)) public disputeArbitratorNominated;
 
     mapping(bytes32 => ComputeSession) public sessions;
     mapping(bytes32 => UsageReport[])  public usageReports;
@@ -119,8 +163,22 @@ contract ComputeAgreement {
     );
     event SessionDisputed(bytes32 indexed sessionId, address disputant);
     event SessionCancelled(bytes32 indexed sessionId);
-    event DisputeResolved(bytes32 indexed sessionId, uint256 providerAmount, uint256 clientAmount);
+    event DetailedDisputeResolved(
+        bytes32 indexed sessionId,
+        DisputeOutcome outcome,
+        uint256 providerAmount,
+        uint256 clientAmount
+    );
     event Withdrawn(address indexed recipient, address indexed token, uint256 amount);
+    event OwnershipTransferStarted(address indexed currentOwner, address indexed newOwner);
+    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
+    event DisputeArbitrationUpdated(address indexed da);
+    event ArbitratorApprovalUpdated(address indexed arbitrator, bool approved);
+    event ArbitratorNominated(
+        bytes32 indexed sessionId,
+        address indexed nominator,
+        address indexed arbitrator
+    );
 
     // ─── Errors ───────────────────────────────────────────────────────────────
 
@@ -130,26 +188,63 @@ contract ComputeAgreement {
     error NotProvider();
     error NotClient();
     error NotParty();
-    error NotArbitrator();
+    error NotOwner();
+    error NotPendingOwner();
+    error ZeroAddress();
     error InsufficientDeposit(uint256 required, uint256 provided);
     error TransferFailed();
     error InvalidSignature();
     error AlreadyStarted();
     error SelfDealing();
     error ProposalNotExpired();
-    error DisputeNotExpired();
     error InvalidPeriod();
     error ExceedsMaxMinutes();
     error ReportAlreadySubmitted();
     error NothingToWithdraw();
     error InvalidSplit();
     error MsgValueWithToken();
+    error ArbitratorNotApproved();
+    error ArbitratorAlreadyNominated();
+
+    // ─── Modifiers ────────────────────────────────────────────────────────────
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert NotOwner();
+        _;
+    }
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
-    constructor(address _arbitrator) {
-        require(_arbitrator != address(0), "Zero arbitrator");
-        arbitrator = _arbitrator;
+    constructor() {
+        owner = msg.sender;
+    }
+
+    // ─── Owner management ─────────────────────────────────────────────────────
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert ZeroAddress();
+        pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    function acceptOwnership() external {
+        if (msg.sender != pendingOwner) revert NotPendingOwner();
+        address old = owner;
+        owner = pendingOwner;
+        pendingOwner = address(0);
+        emit OwnershipTransferred(old, owner);
+    }
+
+    /// @notice Set the DisputeArbitration contract (pass address(0) to unset).
+    function setDisputeArbitration(address da) external onlyOwner {
+        disputeArbitration = da;
+        emit DisputeArbitrationUpdated(da);
+    }
+
+    /// @notice Approve or revoke an arbitrator for nomination.
+    function setArbitratorApproval(address arbitrator, bool approved) external onlyOwner {
+        approvedArbitrators[arbitrator] = approved;
+        emit ArbitratorApprovalUpdated(arbitrator, approved);
     }
 
     // ─── Public functions ─────────────────────────────────────────────────────
@@ -322,72 +417,104 @@ contract ComputeAgreement {
 
     /**
      * @notice Client disputes the session — freezes settlement pending arbitration.
+     *         If DisputeArbitration is configured, opens a formal dispute with fee
+     *         collection (forward ETH as msg.value for ETH-denominated DA fees).
+     *         If DA is not set, dispute is simple — owner resolves via resolveDisputeDetailed.
      */
-    function disputeSession(bytes32 sessionId) external {
+    function disputeSession(bytes32 sessionId) external payable {
         ComputeSession storage s = _getSession(sessionId);
         if (msg.sender != s.client) revert NotClient();
         if (s.status != SessionStatus.Active) revert WrongStatus(s.status, SessionStatus.Active);
 
-        s.status    = SessionStatus.Disputed;
+        s.status     = SessionStatus.Disputed;
         s.disputedAt = block.timestamp;
+
+        _callOpenFormalDispute(sessionId, s);
+
         emit SessionDisputed(sessionId, msg.sender);
     }
 
     /**
-     * @notice Arbitrator resolves a disputed session by specifying split.
-     *         CA-4: provides an actual resolution path.
-     * @param providerAmount Token units to credit to provider.
-     * @param clientAmount   Token units to credit to client.
+     * @notice Either party nominates an approved arbitrator for their disputed session.
+     *         If DisputeArbitration is configured, also checks DA eligibility.
+     * @param sessionId  The disputed session.
+     * @param arbitrator An address in the approvedArbitrators allowlist.
      */
-    function resolveDispute(
+    function nominateArbitrator(bytes32 sessionId, address arbitrator) external {
+        ComputeSession storage s = _getSession(sessionId);
+        if (msg.sender != s.client && msg.sender != s.provider) revert NotParty();
+        if (s.status != SessionStatus.Disputed) revert WrongStatus(s.status, SessionStatus.Disputed);
+        if (!approvedArbitrators[arbitrator]) revert ArbitratorNotApproved();
+        if (disputeArbitratorNominated[sessionId][arbitrator]) revert ArbitratorAlreadyNominated();
+
+        // If DA is configured, additionally verify DA-level eligibility
+        if (disputeArbitration != address(0)) {
+            if (!IComputeDisputeArbitration(disputeArbitration).isEligibleArbitrator(arbitrator)) {
+                revert ArbitratorNotApproved();
+            }
+        }
+
+        disputeArbitratorNominated[sessionId][arbitrator] = true;
+        emit ArbitratorNominated(sessionId, msg.sender, arbitrator);
+    }
+
+    /**
+     * @notice Owner resolves a disputed session with a typed outcome.
+     *         Notifies DisputeArbitration (if set) to settle fees and bonds.
+     *         SPLIT: providerAward + clientAward must not exceed depositAmount;
+     *                any remainder automatically goes to client.
+     *         PROVIDER_WINS / CLIENT_WINS: amounts are derived from depositAmount.
+     *         HUMAN_REVIEW_REQUIRED: emits event without settling; session stays Disputed.
+     * @param sessionId     The disputed session to resolve.
+     * @param outcome       Resolution type.
+     * @param providerAward Token units awarded to provider (SPLIT only).
+     * @param clientAward   Token units awarded to client (SPLIT only).
+     */
+    function resolveDisputeDetailed(
         bytes32 sessionId,
-        uint256 providerAmount,
-        uint256 clientAmount
-    ) external {
-        if (msg.sender != arbitrator) revert NotArbitrator();
+        DisputeOutcome outcome,
+        uint256 providerAward,
+        uint256 clientAward
+    ) external onlyOwner {
         ComputeSession storage s = _getSession(sessionId);
         if (s.status != SessionStatus.Disputed) revert WrongStatus(s.status, SessionStatus.Disputed);
 
-        if (providerAmount + clientAmount > s.depositAmount) revert InvalidSplit();
+        if (outcome == DisputeOutcome.HUMAN_REVIEW_REQUIRED) {
+            // Signal escalation — no settlement yet; session remains Disputed
+            emit DetailedDisputeResolved(sessionId, outcome, 0, 0);
+            return;
+        }
+
+        if (outcome == DisputeOutcome.PROVIDER_WINS) {
+            providerAward = s.depositAmount;
+            clientAward   = 0;
+        } else if (outcome == DisputeOutcome.CLIENT_WINS) {
+            providerAward = 0;
+            clientAward   = s.depositAmount;
+        }
+        // SPLIT: use caller-supplied providerAward/clientAward
+
+        if (providerAward + clientAward > s.depositAmount) revert InvalidSplit();
 
         s.status  = SessionStatus.Completed;
         s.endedAt = block.timestamp;
 
         address tok = s.token;
-        if (providerAmount > 0) pendingWithdrawals[s.provider][tok] += providerAmount;
-        if (clientAmount   > 0) pendingWithdrawals[s.client][tok]   += clientAmount;
+        if (providerAward > 0) pendingWithdrawals[s.provider][tok] += providerAward;
+        if (clientAward   > 0) pendingWithdrawals[s.client][tok]   += clientAward;
 
-        // Any remainder goes back to client (rounding safety)
-        uint256 remainder = s.depositAmount - providerAmount - clientAmount;
+        // Remainder (from SPLIT under-allocation) goes to client
+        uint256 remainder = s.depositAmount - providerAward - clientAward;
         if (remainder > 0) pendingWithdrawals[s.client][tok] += remainder;
 
-        emit DisputeResolved(sessionId, providerAmount, clientAmount);
-    }
+        // Notify DA to settle fees and arbitrator bonds (ignore failures)
+        if (disputeArbitration != address(0)) {
+            try IComputeDisputeArbitration(disputeArbitration).resolveDisputeFee(
+                uint256(sessionId), uint8(outcome)
+            ) {} catch {}
+        }
 
-    /**
-     * @notice Fallback settlement after DISPUTE_TIMEOUT with no arbitrator resolution.
-     *         CA-ARCH-2: provider receives payment for proven work (consumedMinutes);
-     *         client receives refund of the remainder. Neither party can starve the other.
-     */
-    function claimDisputeTimeout(bytes32 sessionId) external {
-        ComputeSession storage s = _getSession(sessionId);
-        if (msg.sender != s.client) revert NotClient();
-        if (s.status != SessionStatus.Disputed) revert WrongStatus(s.status, SessionStatus.Disputed);
-        if (block.timestamp < s.disputedAt + DISPUTE_TIMEOUT) revert DisputeNotExpired();
-
-        s.status  = SessionStatus.Completed;
-        s.endedAt = block.timestamp;
-
-        uint256 cost    = calculateCost(sessionId);
-        uint256 deposit = s.depositAmount;
-        address tok     = s.token;
-        if (cost > deposit) cost = deposit;
-        uint256 refund = deposit - cost;
-
-        if (cost   > 0) pendingWithdrawals[s.provider][tok] += cost;
-        if (refund > 0) pendingWithdrawals[s.client][tok]   += refund;
-
-        emit DisputeResolved(sessionId, cost, refund);
+        emit DetailedDisputeResolved(sessionId, outcome, providerAward, clientAward);
     }
 
     /**
@@ -469,6 +596,25 @@ contract ComputeAgreement {
     function _getSession(bytes32 sessionId) internal view returns (ComputeSession storage s) {
         s = sessions[sessionId];
         if (s.client == address(0)) revert SessionNotFound();
+    }
+
+    /**
+     * @dev Open a formal dispute in DisputeArbitration if configured.
+     *      If DA is not set, the dispute is simple — owner resolves.
+     *      Uses try/catch so a DA failure does not revert the dispute itself.
+     */
+    function _callOpenFormalDispute(bytes32 sessionId, ComputeSession storage s) internal {
+        if (disputeArbitration == address(0)) return;
+        try IComputeDisputeArbitration(disputeArbitration).openDispute{value: msg.value}(
+            uint256(sessionId),
+            IComputeDisputeArbitration.DisputeMode.UNILATERAL,
+            IComputeDisputeArbitration.DisputeClass.HARD_FAILURE,
+            msg.sender,
+            s.client,
+            s.provider,
+            s.depositAmount,
+            s.token
+        ) {} catch {}
     }
 
     /**

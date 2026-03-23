@@ -41,26 +41,23 @@ contract ReentrantProvider {
 }
 
 /**
- * @title MaliciousArbitrator
- * @notice Arbitrator that tries to redirect all funds to itself via resolveDispute.
- *         Expected: resolveDispute only credits provider/client — can't pay itself.
+ * @title MaliciousResolver
+ * @notice Non-owner that tries to steal funds via resolveDisputeDetailed.
+ *         Expected: NotOwner revert — only the owner can resolve disputes.
  */
-contract MaliciousArbitrator {
+contract MaliciousResolver {
     ComputeAgreement internal ca;
 
     constructor(ComputeAgreement _ca) { ca = _ca; }
 
-    // Attempt to steal by calling resolve with provider=self, client=self
-    function tryStealViaResolve(bytes32 sid, uint256 deposit) external {
-        // arbitrator cannot set provider/client to themselves —
-        // resolveDispute credits the session's stored provider and client,
-        // not arbitrary addresses. This call should succeed but credit session parties.
-        ca.resolveDispute(sid, deposit, 0);
+    // Attempt to call resolveDisputeDetailed as non-owner
+    function tryStealViaResolve(bytes32 sid, uint256 /* deposit */) external {
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.PROVIDER_WINS, 0, 0);
     }
 
-    // Attempt overpayment split (providerAmount + clientAmount > depositAmount)
+    // Attempt overpayment split
     function tryOverpay(bytes32 sid, uint256 deposit) external {
-        ca.resolveDispute(sid, deposit, 1);
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.SPLIT, deposit, 1);
     }
 }
 
@@ -132,9 +129,6 @@ contract ComputeAgreementAttackerTest is Test {
     uint256 internal providerKey = 0xBEEF;
     address internal provider;
 
-    // Arbitrator
-    address internal arbitrator = address(0xAB);
-
     uint256 internal constant RATE  = 1 ether;
     uint256 internal constant HOURS = 4;
     uint256 internal constant DEPOSIT = RATE * HOURS;
@@ -144,7 +138,7 @@ contract ComputeAgreementAttackerTest is Test {
 
     function setUp() public {
         provider = vm.addr(providerKey);
-        ca = new ComputeAgreement(arbitrator);
+        ca = new ComputeAgreement();
 
         vm.deal(client,   100 ether);
         vm.deal(attacker, 100 ether);
@@ -310,11 +304,14 @@ contract ComputeAgreementAttackerTest is Test {
         ca.endSession(sid3);
 
         // Simulate provider earning something by manually crediting via vm.store.
-        // pendingWithdrawals is slot 3 (nested: mapping(address => mapping(address => uint256))).
+        // pendingWithdrawals is slot 8 (nested: mapping(address => mapping(address => uint256))).
+        // Storage layout: owner(0), pendingOwner(1), disputeArbitration(2),
+        //   approvedArbitrators(3), disputeArbitratorNominated(4),
+        //   sessions(5), usageReports(6), reportDigestUsed(7), pendingWithdrawals(8).
         // Slot for pendingWithdrawals[rpAddr][address(0)]:
-        //   innerSlot = keccak256(abi.encode(rpAddr, 3))
+        //   innerSlot = keccak256(abi.encode(rpAddr, 8))
         //   finalSlot = keccak256(abi.encode(address(0), innerSlot))
-        bytes32 innerSlot = keccak256(abi.encode(rpAddr, uint256(3)));
+        bytes32 innerSlot = keccak256(abi.encode(rpAddr, uint256(8)));
         bytes32 slot = keccak256(abi.encode(address(0), innerSlot));
         vm.store(address(ca), slot, bytes32(uint256(0.5 ether)));
 
@@ -522,16 +519,15 @@ contract ComputeAgreementAttackerTest is Test {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // ATTACK 7: Dispute abuse — dispute to delay payment, claim timeout refund
-    // Attack:   Client receives full GPU work, then disputes to avoid paying.
-    //           Tries to claim timeout refund before 7-day window expires.
-    // Why fail: claimDisputeTimeout requires block.timestamp >= disputedAt +
-    //           DISPUTE_TIMEOUT. Premature call reverts with DisputeNotExpired.
-    //           Arbitrator can intervene and award provider their earned amount.
-    // Invariant: Provider's earned payment is protected via arbitration path;
-    //            client cannot escape before DISPUTE_TIMEOUT.
+    // ATTACK 7: Dispute abuse — client disputes to avoid paying provider
+    // Attack:   Client receives full GPU work, disputes to avoid paying.
+    //           Tries to call resolveDisputeDetailed themselves to force refund.
+    // Why fail: resolveDisputeDetailed is onlyOwner. Client gets NotOwner.
+    //           Owner can correctly award provider for the work done.
+    // Invariant: Provider's earned payment is protected via owner-resolution;
+    //            client cannot unilaterally escape the dispute.
     // ─────────────────────────────────────────────────────────────────────────
-    function test_attack07_disputeAbuse_cannotClaimEarly() public {
+    function test_attack07_disputeAbuse_clientCannotSelfResolve() public {
         _start();
         _submitReport(120, 90); // 2 hours of GPU work done
 
@@ -539,92 +535,76 @@ contract ComputeAgreementAttackerTest is Test {
         vm.prank(client);
         ca.disputeSession(sid);
 
-        // Attempt premature timeout claim
+        // Client attempts to self-resolve in their favor — must fail
         vm.prank(client);
-        vm.expectRevert(ComputeAgreement.DisputeNotExpired.selector);
-        ca.claimDisputeTimeout(sid);
+        vm.expectRevert(ComputeAgreement.NotOwner.selector);
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.CLIENT_WINS, 0, 0);
 
-        // Arbitrator correctly awards provider for work done: 2 ETH
-        // (120 min * 1 ETH/hr / 60 = 2 ETH)
-        vm.prank(arbitrator);
-        ca.resolveDispute(sid, 2 ether, 2 ether);
+        // Owner correctly awards provider for work done: 2 ETH (120 min * 1 ETH/hr / 60)
+        // Client gets 2 ETH refund (DEPOSIT - 2 ETH)
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.SPLIT, 2 ether, 2 ether);
 
         assertEq(ca.pendingWithdrawals(provider, address(0)), 2 ether);
         assertEq(ca.pendingWithdrawals(client, address(0)),   2 ether);
     }
 
-    function test_attack07b_disputeAbuse_timeoutWorksAfterDelay() public {
+    function test_attack07b_disputeAbuse_providerCannotSelfResolve() public {
         _start();
 
-        // Client disputes with zero usage (provider did no work)
+        // Client disputes
         vm.prank(client);
         ca.disputeSession(sid);
 
-        // Wait exactly one second short of timeout — still locked
-        vm.warp(block.timestamp + ca.DISPUTE_TIMEOUT() - 1);
-        vm.prank(client);
-        vm.expectRevert(ComputeAgreement.DisputeNotExpired.selector);
-        ca.claimDisputeTimeout(sid);
+        // Provider attempts to self-resolve in their own favor — must fail
+        vm.prank(provider);
+        vm.expectRevert(ComputeAgreement.NotOwner.selector);
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.PROVIDER_WINS, 0, 0);
 
-        // After timeout expires, client can recover (provider never started work anyway)
-        vm.warp(block.timestamp + 2); // now past timeout
-        vm.prank(client);
-        ca.claimDisputeTimeout(sid);
+        // Owner resolves CLIENT_WINS (provider did no work)
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.CLIENT_WINS, 0, 0);
 
         assertEq(ca.pendingWithdrawals(client, address(0)), DEPOSIT);
+        assertEq(ca.pendingWithdrawals(provider, address(0)), 0);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // ATTACK 8: Arbitrator collusion
-    // Attack 8a: Malicious arbitrator tries to award funds to themselves.
-    // Attack 8b: Arbitrator tries to award more than depositAmount.
-    // Why fail: resolveDispute credits only the session's provider and client
-    //           addresses — the arbitrator cannot insert their own address.
-    //           InvalidSplit fires if providerAmount + clientAmount > depositAmount.
-    // Invariant: Arbitrator can redistribute funds only between session parties;
-    //            total paid out ≤ depositAmount; arbitrator gets nothing.
+    // ATTACK 8: Non-owner tries to steal via resolveDisputeDetailed
+    // Attack 8a: Malicious third-party deploys a contract and calls resolve.
+    //            Expected: NotOwner revert — not the owner of the CA contract.
+    // Attack 8b: Owner tries to award more than depositAmount (overpayment).
+    //            Expected: InvalidSplit — providerAward + clientAward > deposit.
+    // Invariant: Only owner can resolve; total paid out ≤ depositAmount.
     // ─────────────────────────────────────────────────────────────────────────
-    function test_attack08a_arbitratorCannotStealFunds() public {
+    function test_attack08a_nonOwnerCannotStealFunds() public {
         _start();
-        _submitReport(60, 80); // 1 ETH earned by provider
+        _submitReport(60, 80);
 
         vm.prank(client);
         ca.disputeSession(sid);
 
-        // Malicious arbitrator deploys helper that calls resolveDispute
-        MaliciousArbitrator mal = new MaliciousArbitrator(ca);
-
-        // The arbitrator address in the contract is fixed at construction = arbitrator (0xAB)
-        // MaliciousArbitrator is a different address → NotArbitrator
-        vm.expectRevert(ComputeAgreement.NotArbitrator.selector);
+        // Non-owner deployer contract attempts resolve — must fail with NotOwner
+        MaliciousResolver mal = new MaliciousResolver(ca);
+        vm.expectRevert(ComputeAgreement.NotOwner.selector);
         mal.tryStealViaResolve(sid, DEPOSIT);
 
-        // Even the real arbitrator cannot send funds to themselves — they can only
-        // credit the stored provider and client addresses.
-        // Resolve awarding all to provider (legitimate outcome)
-        vm.prank(arbitrator);
-        ca.resolveDispute(sid, DEPOSIT, 0);
-
-        // Arbitrator's own balance is unchanged
-        assertEq(ca.pendingWithdrawals(arbitrator, address(0)), 0);
-        // Funds went to provider, not arbitrator
-        assertEq(ca.pendingWithdrawals(provider, address(0)), DEPOSIT);
+        // Funds remain locked in dispute; contract has no pending balances yet
+        assertEq(ca.pendingWithdrawals(address(mal), address(0)), 0);
+        assertEq(ca.pendingWithdrawals(provider, address(0)), 0);
+        assertEq(ca.pendingWithdrawals(client, address(0)), 0);
     }
 
-    function test_attack08b_arbitratorCannotOverpay() public {
+    function test_attack08b_ownerCannotOverpay() public {
         _start();
 
         vm.prank(client);
         ca.disputeSession(sid);
 
-        // Arbitrator tries to award more than deposit (collusion to double-pay provider)
-        vm.prank(arbitrator);
+        // Owner tries to award more than deposit → InvalidSplit
         vm.expectRevert(ComputeAgreement.InvalidSplit.selector);
-        ca.resolveDispute(sid, DEPOSIT, 1); // DEPOSIT + 1 > DEPOSIT
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.SPLIT, DEPOSIT, 1);
 
-        // Remainder logic: any under-allocation goes to client automatically
-        vm.prank(arbitrator);
-        ca.resolveDispute(sid, 1 ether, 0); // only 1 ETH to provider
+        // Legitimate under-allocation: remainder automatically goes to client
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.SPLIT, 1 ether, 0);
 
         // Client gets remainder: 4 - 1 = 3 ETH
         assertEq(ca.pendingWithdrawals(provider, address(0)), 1 ether);

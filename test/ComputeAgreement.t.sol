@@ -129,7 +129,6 @@ contract ComputeAgreementTest is Test {
     // Test accounts
     address internal client   = address(0xC1);
     address internal provider;
-    address internal arbitrator = address(0xAB);
 
     // Standard session params
     uint256 internal constant RATE_PER_HOUR = 1 ether;   // 1 ETH/GPU-hour
@@ -147,7 +146,7 @@ contract ComputeAgreementTest is Test {
     bytes32 internal sid;
 
     function setUp() public {
-        ca    = new ComputeAgreement(arbitrator);
+        ca    = new ComputeAgreement();
         token = new MockERC20();
 
         // Use provider derived from key
@@ -470,11 +469,10 @@ contract ComputeAgreementTest is Test {
         vm.prank(client);
         ca.disputeSession(eSid);
 
-        // Arbitrator splits: 8 USDC to provider, 32 USDC to client
+        // Owner (test contract) resolves with SPLIT: 8 USDC to provider, 32 USDC to client
         uint256 pAmt = 8e6;
         uint256 cAmt = 32e6;
-        vm.prank(arbitrator);
-        ca.resolveDispute(eSid, pAmt, cAmt);
+        ca.resolveDisputeDetailed(eSid, ComputeAgreement.DisputeOutcome.SPLIT, pAmt, cAmt);
 
         assertEq(ca.pendingWithdrawals(provider, address(token)), pAmt);
         assertEq(ca.pendingWithdrawals(client,   address(token)), cAmt);
@@ -827,18 +825,18 @@ contract ComputeAgreementTest is Test {
     // ─── CA-4: Dispute resolution ─────────────────────────────────────────────
 
     /**
-     * @notice CA-4: arbitrator resolves dispute with a split.
+     * @notice CA-4: owner resolves dispute with a SPLIT outcome.
+     *         Owner = test contract (deployer of ca).
      */
-    function test_disputeResolution_byArbitrator() public {
+    function test_disputeResolution_byOwner() public {
         _start();
         _submitReport(60, 80);
 
         vm.prank(client);
         ca.disputeSession(sid);
 
-        // Arbitrator resolves: 0.8 ETH to provider, 3.2 ETH to client
-        vm.prank(arbitrator);
-        ca.resolveDispute(sid, 0.8 ether, 3.2 ether);
+        // Owner (test contract) resolves with SPLIT: 0.8 ETH to provider, 3.2 ETH to client
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.SPLIT, 0.8 ether, 3.2 ether);
 
         assertEq(ca.pendingWithdrawals(provider, address(0)), 0.8 ether);
         assertEq(ca.pendingWithdrawals(client,   address(0)), 3.2 ether);
@@ -848,37 +846,33 @@ contract ComputeAgreementTest is Test {
     }
 
     /**
-     * @notice CA-4: dispute resolution blocked for non-arbitrator.
+     * @notice CA-4: resolveDisputeDetailed blocked for non-owner.
      */
-    function test_disputeResolution_notArbitrator_reverts() public {
+    function test_disputeResolution_notOwner_reverts() public {
         _start();
 
         vm.prank(client);
         ca.disputeSession(sid);
 
         vm.prank(client);
-        vm.expectRevert(ComputeAgreement.NotArbitrator.selector);
-        ca.resolveDispute(sid, 1 ether, 3 ether);
+        vm.expectRevert(ComputeAgreement.NotOwner.selector);
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.SPLIT, 1 ether, 3 ether);
     }
 
     /**
-     * @notice CA-ARCH-2: after DISPUTE_TIMEOUT, settlement uses proven usage —
-     *         provider earns payment for consumedMinutes, client gets remainder.
+     * @notice CA-4: owner can resolve in provider's favor (PROVIDER_WINS) for work done.
+     *         This replaces the old timeout-based auto-refund path.
      */
-    function test_disputeTimeout_paysProviderForUsage() public {
+    function test_disputeResolution_ownerAwardsProviderForWork() public {
         _start();
         _submitReport(60, 80); // 60 min = 1 ETH at 1 ETH/hr
 
         vm.prank(client);
         ca.disputeSession(sid);
 
-        // Advance past timeout
-        vm.warp(block.timestamp + ca.DISPUTE_TIMEOUT() + 1);
+        // Owner resolves SPLIT: 1 ETH to provider for proven work, 3 ETH back to client
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.SPLIT, 1 ether, 3 ether);
 
-        vm.prank(client);
-        ca.claimDisputeTimeout(sid);
-
-        // Provider gets 1 ETH for proven work; client gets 3 ETH remainder
         assertEq(ca.pendingWithdrawals(provider, address(0)), 1 ether);
         assertEq(ca.pendingWithdrawals(client,   address(0)), 3 ether);
         assertEq(
@@ -888,17 +882,92 @@ contract ComputeAgreementTest is Test {
     }
 
     /**
-     * @notice CA-4: dispute timeout cannot be claimed before timeout expires.
+     * @notice CA-4: PROVIDER_WINS outcome awards full deposit to provider.
      */
-    function test_disputeTimeout_beforeExpiry_reverts() public {
+    function test_disputeResolution_providerWins() public {
+        _start();
+        _submitReport(240, 100); // full usage
+
+        vm.prank(client);
+        ca.disputeSession(sid);
+
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.PROVIDER_WINS, 0, 0);
+
+        assertEq(ca.pendingWithdrawals(provider, address(0)), DEPOSIT);
+        assertEq(ca.pendingWithdrawals(client,   address(0)), 0);
+
+        ComputeAgreement.ComputeSession memory s = ca.getSession(sid);
+        assertEq(uint256(s.status), uint256(ComputeAgreement.SessionStatus.Completed));
+    }
+
+    /**
+     * @notice CA-4: CLIENT_WINS outcome returns full deposit to client.
+     */
+    function test_disputeResolution_clientWins() public {
         _start();
 
         vm.prank(client);
         ca.disputeSession(sid);
 
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.CLIENT_WINS, 0, 0);
+
+        assertEq(ca.pendingWithdrawals(provider, address(0)), 0);
+        assertEq(ca.pendingWithdrawals(client,   address(0)), DEPOSIT);
+    }
+
+    /**
+     * @notice CA-4: HUMAN_REVIEW_REQUIRED emits event without settling.
+     *         Session remains Disputed.
+     */
+    function test_disputeResolution_humanReview_noSettlement() public {
+        _start();
+
         vm.prank(client);
-        vm.expectRevert(ComputeAgreement.DisputeNotExpired.selector);
-        ca.claimDisputeTimeout(sid);
+        ca.disputeSession(sid);
+
+        ca.resolveDisputeDetailed(sid, ComputeAgreement.DisputeOutcome.HUMAN_REVIEW_REQUIRED, 0, 0);
+
+        // Session must remain Disputed — not finalized
+        ComputeAgreement.ComputeSession memory s = ca.getSession(sid);
+        assertEq(uint256(s.status), uint256(ComputeAgreement.SessionStatus.Disputed));
+        assertEq(ca.pendingWithdrawals(provider, address(0)), 0);
+        assertEq(ca.pendingWithdrawals(client,   address(0)), 0);
+    }
+
+    /**
+     * @notice CA-4: nominateArbitrator requires caller to be a party and
+     *         arbitrator to be approved.
+     */
+    function test_nominateArbitrator_approvedArbitrator() public {
+        _start();
+
+        vm.prank(client);
+        ca.disputeSession(sid);
+
+        // Owner approves an arbitrator
+        address arb = address(0xAABB);
+        ca.setArbitratorApproval(arb, true);
+
+        // Client nominates
+        vm.prank(client);
+        ca.nominateArbitrator(sid, arb);
+
+        assertEq(ca.disputeArbitratorNominated(sid, arb), true);
+    }
+
+    /**
+     * @notice CA-4: nominateArbitrator rejects unapproved arbitrators.
+     */
+    function test_nominateArbitrator_notApproved_reverts() public {
+        _start();
+
+        vm.prank(client);
+        ca.disputeSession(sid);
+
+        address unapprovedArb = address(0xDEAD);
+        vm.prank(client);
+        vm.expectRevert(ComputeAgreement.ArbitratorNotApproved.selector);
+        ca.nominateArbitrator(sid, unapprovedArb);
     }
 
     /**
@@ -1173,14 +1242,38 @@ contract ComputeAgreementTest is Test {
         return abi.encodePacked(r, malleableS, v);
     }
 
-    // ─── SL-2: Constructor zero-address check ─────────────────────────────────
+    // ─── Owner setup ──────────────────────────────────────────────────────────
 
     /**
-     * @notice Deploying with address(0) arbitrator must revert.
+     * @notice Deployer is set as owner at construction.
      */
-    function test_constructorRejectsZeroArbitrator() public {
-        vm.expectRevert("Zero arbitrator");
-        new ComputeAgreement(address(0));
+    function test_ownerSetOnDeployment() public view {
+        // In setUp(), ca is deployed by the test contract — so owner = address(this)
+        assertEq(ca.owner(), address(this));
+    }
+
+    /**
+     * @notice transferOwnership + acceptOwnership two-step pattern.
+     */
+    function test_transferOwnership() public {
+        address newOwner = address(0xBEEF);
+        ca.transferOwnership(newOwner);
+        assertEq(ca.pendingOwner(), newOwner);
+
+        vm.prank(newOwner);
+        ca.acceptOwnership();
+
+        assertEq(ca.owner(), newOwner);
+        assertEq(ca.pendingOwner(), address(0));
+    }
+
+    /**
+     * @notice Non-owner cannot call transferOwnership.
+     */
+    function test_transferOwnership_notOwner_reverts() public {
+        vm.prank(client);
+        vm.expectRevert(ComputeAgreement.NotOwner.selector);
+        ca.transferOwnership(client);
     }
 
     // ─── CA-IND-3: Exact deposit ──────────────────────────────────────────────

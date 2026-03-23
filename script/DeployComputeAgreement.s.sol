@@ -9,7 +9,7 @@ import "../contracts/src/ComputeAgreement.sol";
  * @notice Forge deployment script for ComputeAgreement.
  *
  *  Target: Base Sepolia (chain ID 84532)
- *  Deployer is used as the arbitrator for testnet — replace with a multi-sig on mainnet.
+ *  Deployer becomes the owner — transfer ownership to a multi-sig post-deploy.
  *
  *  Usage:
  *    forge script script/DeployComputeAgreement.s.sol \
@@ -20,27 +20,38 @@ import "../contracts/src/ComputeAgreement.sol";
  *      --etherscan-api-key $BASESCAN_API_KEY
  *
  *  Environment variables:
- *    BASE_SEPOLIA_RPC    — RPC endpoint (e.g. Alchemy/Infura Base Sepolia)
- *    PRIVATE_KEY         — Deployer private key (hex, 0x-prefixed)
- *    ARBITRATOR_ADDRESS  — Arbitrator address; defaults to deployer if unset
- *    BASESCAN_API_KEY    — For contract verification on Basescan
+ *    BASE_SEPOLIA_RPC        — RPC endpoint (e.g. Alchemy/Infura Base Sepolia)
+ *    PRIVATE_KEY             — Deployer private key (hex, 0x-prefixed)
+ *    DISPUTE_ARBITRATION     — Optional: DisputeArbitration contract address
+ *    BASESCAN_API_KEY        — For contract verification on Basescan
+ *
+ *  Post-deploy:
+ *    1. Call setDisputeArbitration(DISPUTE_ARBITRATION) if DA is available.
+ *    2. Call setArbitratorApproval(arbitrator, true) for each trusted arbitrator.
+ *    3. Transfer ownership to a multi-sig via transferOwnership + acceptOwnership.
  *
  *  USDC on Base mainnet: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (6 decimals)
  *  USDC on Base Sepolia: use a mock or the official testnet faucet token.
  */
 contract DeployComputeAgreement is Script {
     function run() external {
-        // Resolve arbitrator — default to deployer for testnet convenience.
-        address arbitrator = vm.envOr("ARBITRATOR_ADDRESS", msg.sender);
-
         vm.startBroadcast();
 
-        ComputeAgreement ca = new ComputeAgreement(arbitrator);
+        ComputeAgreement ca = new ComputeAgreement();
+
+        // Optionally wire DisputeArbitration if address is provided
+        address da = vm.envOr("DISPUTE_ARBITRATION", address(0));
+        if (da != address(0)) {
+            ca.setDisputeArbitration(da);
+        }
 
         vm.stopBroadcast();
 
         console2.log("ComputeAgreement deployed at:", address(ca));
-        console2.log("Arbitrator:", arbitrator);
+        console2.log("Owner (deployer):", ca.owner());
+        if (da != address(0)) {
+            console2.log("DisputeArbitration:", da);
+        }
         console2.log("Chain ID:", block.chainid);
     }
 }
