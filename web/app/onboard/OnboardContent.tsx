@@ -15,7 +15,9 @@ const ALL_WALLET_FACTORIES = [
   '0x3f4d4b19a69344B04fd9653E1bB12883e97300fE', // v5 frozen (unoptimized)
 ]
 const ENTRY_POINT     = '0x0000000071727De22E5E9d8BAf0edAc6f37da032'
-const ARC402_REGISTRY = '0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622' // Protocol registry (v2)
+const ARC402_REGISTRY_V2 = '0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622' // Protocol registry (v2) — fallback for existing wallets
+const ARC402_REGISTRY_V3 = ''  // Protocol registry (v3) — fill after deploy
+const ARC402_REGISTRY    = ARC402_REGISTRY_V3 || ARC402_REGISTRY_V2 // new wallets use V3, falls back to V2
 const AGENT_REGISTRY  = '0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865' // AgentRegistry — where agents register
 const POLICY_ENGINE   = '0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847'
 const HANDSHAKE       = '0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3' // Handshake contract (Arena v1)

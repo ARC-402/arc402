@@ -39,3 +39,5 @@ export type { DeliveryFile, DeliveryManifest, DeliveryClientOptions } from "./de
 // Base Mainnet contract addresses
 export const COMPUTE_AGREEMENT_ADDRESS = "0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7";
 export const SUBSCRIPTION_AGREEMENT_ADDRESS = "0xe1b6D3d0890E09582166EB450a78F6bff038CE5A";
+export const ARC402_REGISTRY_V2_ADDRESS = "0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622";
+export const ARC402_REGISTRY_V3_ADDRESS = ""; // fill after deploy
