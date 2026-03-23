@@ -222,7 +222,7 @@ contract ComputeAgreementTest is Test {
 
         // Sign with wrong key
         bytes memory badSig = _signReportWithKey(
-            0xDEAD, sid, periodStart, periodEnd, computeMinutes, avgUtil, metricsHash
+            0xDEAD, address(ca), sid, periodStart, periodEnd, computeMinutes, avgUtil, metricsHash
         );
 
         vm.prank(provider);
@@ -562,28 +562,20 @@ contract ComputeAgreementTest is Test {
         assertEq(ca.getSession(sid).consumedMinutes, 240);
     }
 
-    // ─── CA-6: Overpayment refund ─────────────────────────────────────────────
+    // ─── CA-IND-3: Exact deposit required ────────────────────────────────────
 
     /**
-     * @notice CA-6: excess ETH beyond required deposit is refunded at propose time.
+     * @notice CA-IND-3: overpayment is rejected — msg.value must equal required exactly.
      */
-    function test_overpayment_refunded() public {
+    function test_exactDepositRequired_overpaymentReverts() public {
         uint256 excess = 0.5 ether;
         uint256 sent   = DEPOSIT + excess;
 
-        uint256 clientBefore = client.balance;
-
         vm.prank(client);
+        vm.expectRevert(
+            abi.encodeWithSelector(ComputeAgreement.InsufficientDeposit.selector, DEPOSIT, sent)
+        );
         ca.proposeSession{value: sent}(sid, provider, RATE_PER_HOUR, MAX_HOURS, GPU_SPEC_HASH);
-
-        // depositAmount should be exactly required
-        ComputeAgreement.ComputeSession memory s = ca.getSession(sid);
-        assertEq(s.depositAmount, DEPOSIT);
-
-        // Client should have received refund
-        // client spent DEPOSIT + excess, got back excess → net spend = DEPOSIT
-        assertEq(clientBefore - client.balance, DEPOSIT);
-        assertEq(address(ca).balance, DEPOSIT);
     }
 
     // ─── CA-3: Session expiry / cancellation ─────────────────────────────────
@@ -681,11 +673,12 @@ contract ComputeAgreementTest is Test {
     }
 
     /**
-     * @notice CA-4: client can force-refund after DISPUTE_TIMEOUT with no resolution.
+     * @notice CA-ARCH-2: after DISPUTE_TIMEOUT, settlement uses proven usage —
+     *         provider earns payment for consumedMinutes, client gets remainder.
      */
-    function test_disputeTimeout_clientForceRefund() public {
+    function test_disputeTimeout_paysProviderForUsage() public {
         _start();
-        _submitReport(60, 80);
+        _submitReport(60, 80); // 60 min = 1 ETH at 1 ETH/hr
 
         vm.prank(client);
         ca.disputeSession(sid);
@@ -693,16 +686,13 @@ contract ComputeAgreementTest is Test {
         // Advance past timeout
         vm.warp(block.timestamp + ca.DISPUTE_TIMEOUT() + 1);
 
-        uint256 clientBefore = client.balance;
-
         vm.prank(client);
         ca.claimDisputeTimeout(sid);
 
-        // Full deposit goes to client
-        assertEq(ca.pendingWithdrawals(client), DEPOSIT);
-        vm.prank(client);
-        ca.withdraw();
-        assertEq(client.balance - clientBefore, DEPOSIT);
+        // Provider gets 1 ETH for proven work; client gets 3 ETH remainder
+        assertEq(ca.pendingWithdrawals(provider), 1 ether);
+        assertEq(ca.pendingWithdrawals(client),   3 ether);
+        assertEq(ca.pendingWithdrawals(provider) + ca.pendingWithdrawals(client), DEPOSIT);
     }
 
     /**
@@ -906,6 +896,113 @@ contract ComputeAgreementTest is Test {
         ca.withdraw();
     }
 
+    // ─── CA-IND-1: Cross-chain / cross-contract replay prevention ────────────
+
+    /**
+     * @notice A signature produced for a different chainId must be rejected.
+     */
+    function test_crossChainReplay_rejected() public {
+        _start();
+
+        uint256 ps = block.timestamp;
+        uint256 pe = ps + 15 minutes;
+        vm.warp(pe);
+        bytes32 mh = keccak256("xchain-metrics");
+
+        // Sign with wrong chainId
+        uint256 wrongChainId = block.chainid + 1;
+        bytes32 structHash = keccak256(abi.encode(
+            wrongChainId, address(ca), sid, ps, pe, uint256(15), uint256(80), mh
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(providerKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        vm.prank(provider);
+        vm.expectRevert(ComputeAgreement.InvalidSignature.selector);
+        ca.submitUsageReport(sid, ps, pe, 15, 80, sig, mh);
+    }
+
+    /**
+     * @notice A signature produced for a different contract address must be rejected.
+     */
+    function test_crossContractReplay_rejected() public {
+        _start();
+
+        uint256 ps = block.timestamp;
+        uint256 pe = ps + 15 minutes;
+        vm.warp(pe);
+        bytes32 mh = keccak256("xcontract-metrics");
+
+        // Sign with wrong contract address
+        address wrongContract = address(0xDEAD);
+        bytes32 structHash = keccak256(abi.encode(
+            block.chainid, wrongContract, sid, ps, pe, uint256(15), uint256(80), mh
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(providerKey, digest);
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        vm.prank(provider);
+        vm.expectRevert(ComputeAgreement.InvalidSignature.selector);
+        ca.submitUsageReport(sid, ps, pe, 15, 80, sig, mh);
+    }
+
+    // ─── CA-IND-2: s-value malleability ──────────────────────────────────────
+
+    /**
+     * @notice A signature with s > secp256k1n/2 (malleable form) must be rejected.
+     */
+    function test_malleableS_rejected() public {
+        _start();
+        uint256 ps = block.timestamp;
+        uint256 pe = ps + 15 minutes;
+        vm.warp(pe);
+        bytes32 mh = keccak256("malleable-metrics");
+        bytes memory malleableSig = _buildMalleableSig(sid, ps, pe, mh);
+        vm.prank(provider);
+        vm.expectRevert("Invalid s");
+        ca.submitUsageReport(sid, ps, pe, 15, 80, malleableSig, mh);
+    }
+
+    function _buildMalleableSig(
+        bytes32 _sid,
+        uint256 ps,
+        uint256 pe,
+        bytes32 mh
+    ) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(
+            block.chainid, address(ca), _sid, ps, pe, uint256(15), uint256(80), mh
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(providerKey, digest);
+        uint256 secp256k1n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+        bytes32 malleableS = bytes32(secp256k1n - uint256(s));
+        return abi.encodePacked(r, malleableS, v);
+    }
+
+    // ─── SL-2: Constructor zero-address check ─────────────────────────────────
+
+    /**
+     * @notice Deploying with address(0) arbitrator must revert.
+     */
+    function test_constructorRejectsZeroArbitrator() public {
+        vm.expectRevert("Zero arbitrator");
+        new ComputeAgreement(address(0));
+    }
+
+    // ─── CA-IND-3: Exact deposit ──────────────────────────────────────────────
+
+    /**
+     * @notice Exact deposit amount succeeds; underpayment still reverts.
+     */
+    function test_exactDeposit_succeeds() public {
+        vm.prank(client);
+        ca.proposeSession{value: DEPOSIT}(sid, provider, RATE_PER_HOUR, MAX_HOURS, GPU_SPEC_HASH);
+        assertEq(ca.getSession(sid).depositAmount, DEPOSIT);
+        assertEq(address(ca).balance, DEPOSIT);
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     function _propose() internal {
@@ -944,19 +1041,22 @@ contract ComputeAgreementTest is Test {
         uint256 avgUtil,
         bytes32 metricsHash
     ) internal view returns (bytes memory) {
-        return _signReportWithKey(providerKey, _sid, periodStart, periodEnd, computeMinutes, avgUtil, metricsHash);
+        return _signReportWithKey(providerKey, address(ca), _sid, periodStart, periodEnd, computeMinutes, avgUtil, metricsHash);
     }
 
     function _signReportWithKey(
         uint256 key,
+        address contractAddr,
         bytes32 _sid,
         uint256 periodStart,
         uint256 periodEnd,
         uint256 computeMinutes,
         uint256 avgUtil,
         bytes32 metricsHash
-    ) internal pure returns (bytes memory) {
-        bytes32 structHash = keccak256(abi.encodePacked(
+    ) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(
+            block.chainid,
+            contractAddr,
             _sid, periodStart, periodEnd, computeMinutes, avgUtil, metricsHash
         ));
         bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", structHash));

@@ -181,20 +181,23 @@ contract ComputeAgreementAttackerTest is Test {
         bytes32 metricsHash
     ) internal view returns (bytes memory) {
         return _signReportWithKey(
-            providerKey, _sid, periodStart, periodEnd, computeMinutes, avgUtil, metricsHash
+            providerKey, address(ca), _sid, periodStart, periodEnd, computeMinutes, avgUtil, metricsHash
         );
     }
 
     function _signReportWithKey(
         uint256 key,
+        address contractAddr,
         bytes32 _sid,
         uint256 periodStart,
         uint256 periodEnd,
         uint256 computeMinutes,
         uint256 avgUtil,
         bytes32 metricsHash
-    ) internal pure returns (bytes memory) {
-        bytes32 structHash = keccak256(abi.encodePacked(
+    ) internal view returns (bytes memory) {
+        bytes32 structHash = keccak256(abi.encode(
+            block.chainid,
+            contractAddr,
             _sid, periodStart, periodEnd, computeMinutes, avgUtil, metricsHash
         ));
         bytes32 digest = keccak256(abi.encodePacked(

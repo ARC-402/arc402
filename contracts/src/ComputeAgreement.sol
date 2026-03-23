@@ -22,7 +22,7 @@ pragma solidity 0.8.28;
  *    CA-2: Report digest dedup — same signature cannot be replayed
  *    CA-3: Session expiry — client can cancel Proposed/unstarted sessions
  *    CA-4: Dispute resolution — arbitrator + timeout fallback
- *    CA-6: Overpayment refund at propose time
+ *    CA-IND-3: Exact deposit required at propose time (no overpayment)
  *    CA-8: consumedMinutes capped to maxHours * 60
  *    CA-9: Self-dealing prevented (provider != client)
  *    CA-10: ecrecover(0) explicitly rejected
@@ -134,6 +134,7 @@ contract ComputeAgreement {
     // ─── Constructor ──────────────────────────────────────────────────────────
 
     constructor(address _arbitrator) {
+        require(_arbitrator != address(0), "Zero arbitrator");
         arbitrator = _arbitrator;
     }
 
@@ -141,8 +142,8 @@ contract ComputeAgreement {
 
     /**
      * @notice Client proposes a compute session and deposits exactly the maximum cost.
-     *         Any excess msg.value beyond ratePerHour * maxHours is refunded immediately.
-     *         CA-6: overpayment refund; CA-9: self-dealing prevention.
+     *         CA-IND-3: exact msg.value required — no overpayment accepted.
+     *         CA-9: self-dealing prevention.
      * @param sessionId   Unique identifier (keccak256 of client + nonce).
      * @param provider    GPU provider's address.
      * @param ratePerHour Wei per GPU-hour.
@@ -161,14 +162,14 @@ contract ComputeAgreement {
         if (sessions[sessionId].client != address(0)) revert SessionAlreadyExists();
 
         uint256 required = ratePerHour * maxHours;
-        if (msg.value < required) revert InsufficientDeposit(required, msg.value);
+        if (msg.value != required) revert InsufficientDeposit(required, msg.value);
 
         sessions[sessionId] = ComputeSession({
             client:          msg.sender,
             provider:        provider,
             ratePerHour:     ratePerHour,
             maxHours:        maxHours,
-            depositAmount:   required,   // CA-6: store exactly required, not msg.value
+            depositAmount:   required,
             startedAt:       0,
             endedAt:         0,
             consumedMinutes: 0,
@@ -179,13 +180,6 @@ contract ComputeAgreement {
         });
 
         emit SessionProposed(sessionId, msg.sender, provider, ratePerHour, maxHours);
-
-        // CA-6: refund any overpayment immediately
-        uint256 excess = msg.value - required;
-        if (excess > 0) {
-            (bool ok,) = msg.sender.call{value: excess}("");
-            if (!ok) revert TransferFailed();
-        }
     }
 
     /**
@@ -344,8 +338,9 @@ contract ComputeAgreement {
     }
 
     /**
-     * @notice Client force-refunds after DISPUTE_TIMEOUT with no arbitrator resolution.
-     *         CA-4: timeout fallback so funds never lock permanently.
+     * @notice Fallback settlement after DISPUTE_TIMEOUT with no arbitrator resolution.
+     *         CA-ARCH-2: provider receives payment for proven work (consumedMinutes);
+     *         client receives refund of the remainder. Neither party can starve the other.
      */
     function claimDisputeTimeout(bytes32 sessionId) external {
         ComputeSession storage s = _getSession(sessionId);
@@ -356,9 +351,15 @@ contract ComputeAgreement {
         s.status  = SessionStatus.Completed;
         s.endedAt = block.timestamp;
 
-        pendingWithdrawals[s.client] += s.depositAmount;
+        uint256 cost    = calculateCost(sessionId);
+        uint256 deposit = s.depositAmount;
+        if (cost > deposit) cost = deposit;
+        uint256 refund = deposit - cost;
 
-        emit DisputeResolved(sessionId, 0, s.depositAmount);
+        if (cost   > 0) pendingWithdrawals[s.provider] += cost;
+        if (refund > 0) pendingWithdrawals[s.client]   += refund;
+
+        emit DisputeResolved(sessionId, cost, refund);
     }
 
     /**
@@ -440,6 +441,9 @@ contract ComputeAgreement {
 
     /**
      * @dev EIP-191 personal_sign digest for a usage report.
+     *      CA-IND-1: includes block.chainid and address(this) to prevent cross-chain
+     *      and cross-contract signature replay.
+     *      CA-IND-7: uses abi.encode (no hash-collision risk from dynamic packing).
      *      Matches the TypeScript signing in compute-metering.ts.
      */
     function _reportDigest(
@@ -449,8 +453,10 @@ contract ComputeAgreement {
         uint256 computeMinutes,
         uint256 avgUtilization,
         bytes32 metricsHash
-    ) internal pure returns (bytes32) {
-        bytes32 structHash = keccak256(abi.encodePacked(
+    ) internal view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(
+            block.chainid,
+            address(this),
             sessionId,
             periodStart,
             periodEnd,
@@ -465,6 +471,7 @@ contract ComputeAgreement {
     /**
      * @dev Recover signer from an EIP-191 signature.
      *      CA-10: caller must check recovered != address(0).
+     *      CA-IND-2: rejects malleable s-values (s > secp256k1n/2) and invalid v.
      */
     function _recoverSigner(bytes32 digest, bytes memory sig) internal pure returns (address) {
         require(sig.length == 65, "Invalid sig length");
@@ -476,7 +483,8 @@ contract ComputeAgreement {
             sv := mload(add(sig, 64))
             v  := byte(0, mload(add(sig, 96)))
         }
-        if (v < 27) v += 27;
+        require(uint256(sv) <= 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0, "Invalid s");
+        require(v == 27 || v == 28, "Invalid v");
         return ecrecover(digest, v, r, sv);
     }
 }
