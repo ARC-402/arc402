@@ -1,6 +1,6 @@
 {
   "name": "@arc402/openclaw-plugin",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "ARC-402 protocol as a native OpenClaw plugin — hire, deliver, compute, subscribe",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,7 +17,9 @@
   },
   "dependencies": {
     "ethers": "^6.13.0",
-    "@sinclair/typebox": "^0.34.0"
+    "@sinclair/typebox": "^0.34.0",
+    "@walletconnect/sign-client": "^2.17.0",
+    "@walletconnect/keyvaluestorage": "^1.1.1"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

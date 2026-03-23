@@ -1,10 +1,12 @@
 /**
- * Wallet tools — arc402_wallet_status, arc402_wallet_deploy
+ * Wallet tools — arc402_wallet_status, arc402_wallet_deploy,
+ *                arc402_whitelist_contract, arc402_upgrade_registry
  */
 import { Type } from "@sinclair/typebox";
 import { ethers } from "ethers";
 import type { PluginApi, ToolResult } from "./hire.js";
 import type { ResolvedConfig } from "../config.js";
+import { runWithWalletApproval, approvalOk, approvalErr } from "./wallet-approval.js";
 
 const WALLET_FACTORY_ABI = [
   "function deploy(address owner, bytes32 salt) external returns (address wallet)",
@@ -19,8 +21,19 @@ const REGISTRY_V3_ABI = [
   "function getAgent(address wallet) external view returns (tuple(address wallet, string name, string endpoint, bool active, uint256 registeredAt, uint256 trustScore, string[] capabilities))",
 ];
 
+const POLICY_ENGINE_ABI = [
+  "function whitelistContract(address wallet, address target) external",
+  "function isContractWhitelisted(address wallet, address target) external view returns (bool)",
+];
+
+const WALLET_REGISTRY_ABI = [
+  "function proposeRegistryUpdate(address newRegistry) external",
+  "function registry() external view returns (address)",
+];
+
 const WALLET_FACTORY_ADDRESS = "0xcB52B5d746eEc05e141039E92e3dBefeAe496051";
 const TRUST_REGISTRY_ADDRESS = "0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1";
+const POLICY_ENGINE_ADDRESS = "0x44102e70c2A366632d98Fe40d892a2501fC7fFF2";
 
 export function registerWalletTools(api: PluginApi, getConfig: () => ResolvedConfig) {
   api.registerTool({
@@ -101,43 +114,155 @@ export function registerWalletTools(api: PluginApi, getConfig: () => ResolvedCon
   api.registerTool({
     name: "arc402_wallet_deploy",
     description:
-      "Deploy a new ARC-402 smart wallet on Base mainnet. Returns the wallet contract address.",
+      "Deploy a new ARC-402 smart wallet on Base — your phone wallet approves via WalletConnect and becomes the owner. Returns the predicted wallet address.",
     parameters: Type.Object({
       salt: Type.Optional(Type.String({ description: "Deployment salt (hex, default: random)" })),
     }),
     async execute(_id, params) {
       const cfg = getConfig();
-      if (!cfg.resolvedPrivateKey) return err("machineKey or privateKey required to deploy wallet");
-
-      const rpcProvider = new ethers.JsonRpcProvider(cfg.rpcUrl);
-      const signer = new ethers.Wallet(cfg.resolvedPrivateKey, rpcProvider);
-      const factory = new ethers.Contract(WALLET_FACTORY_ADDRESS, WALLET_FACTORY_ABI, signer);
 
       const salt = params.salt
         ? (params.salt as `0x${string}`)
         : ethers.hexlify(ethers.randomBytes(32)) as `0x${string}`;
 
-      // Predict address first
-      const predicted = await factory.predictAddress(signer.address, salt);
+      const rpcProvider = new ethers.JsonRpcProvider(cfg.rpcUrl);
+      const factory = new ethers.Contract(WALLET_FACTORY_ADDRESS, WALLET_FACTORY_ABI, rpcProvider);
+      const factoryIface = new ethers.Interface(WALLET_FACTORY_ABI);
 
-      const tx = await factory.deploy(signer.address, salt);
-      const receipt = await tx.wait();
+      let predictedAddress = "";
 
-      return ok({
-        walletAddress: predicted,
-        txHash: receipt.hash,
-        owner: signer.address,
-        network: cfg.network,
-        message: `Wallet deployed at ${predicted}. Add to plugin config as walletContractAddress.`,
-      });
+      try {
+        const { txHash, account, deepLinksText } = await runWithWalletApproval(
+          cfg.chainId,
+          async (ownerAddress) => {
+            predictedAddress = await factory.predictAddress(ownerAddress, salt) as string;
+            return {
+              to: WALLET_FACTORY_ADDRESS,
+              data: factoryIface.encodeFunctionData("deploy", [ownerAddress, salt]),
+              value: "0x0",
+            };
+          },
+          "Deploy ARC-402 smart wallet",
+        );
+
+        return approvalOk(deepLinksText, {
+          walletAddress: predictedAddress,
+          txHash,
+          owner: account,
+          network: cfg.network,
+          message: `Wallet deployed at ${predictedAddress}. Add to plugin config as walletContractAddress.`,
+        });
+      } catch (e: unknown) {
+        return approvalErr(e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "arc402_whitelist_contract",
+    description:
+      "Whitelist a contract address on PolicyEngine so this wallet can call it via executeContractCall. Your phone wallet approves via WalletConnect.",
+    parameters: Type.Object({
+      target: Type.String({ description: "Contract address to whitelist (0x...)" }),
+    }),
+    async execute(_id, params) {
+      const cfg = getConfig();
+      if (!cfg.walletContractAddress) {
+        return approvalErr("walletContractAddress not configured. Run arc402_wallet_deploy first.");
+      }
+
+      let checksumTarget: string;
+      try {
+        checksumTarget = ethers.getAddress(params.target);
+      } catch {
+        return approvalErr(`Invalid address: ${params.target}`);
+      }
+
+      const rpcProvider = new ethers.JsonRpcProvider(cfg.rpcUrl);
+      const pe = new ethers.Contract(POLICY_ENGINE_ADDRESS, POLICY_ENGINE_ABI, rpcProvider);
+      const peIface = new ethers.Interface(POLICY_ENGINE_ABI);
+
+      // Check if already whitelisted
+      try {
+        const already = await pe.isContractWhitelisted(cfg.walletContractAddress, checksumTarget) as boolean;
+        if (already) {
+          return ok({ alreadyWhitelisted: true, target: checksumTarget, wallet: cfg.walletContractAddress });
+        }
+      } catch { /* ignore — proceed with whitelisting */ }
+
+      try {
+        const { txHash, deepLinksText } = await runWithWalletApproval(
+          cfg.chainId,
+          () => ({
+            to: POLICY_ENGINE_ADDRESS,
+            data: peIface.encodeFunctionData("whitelistContract", [cfg.walletContractAddress, checksumTarget]),
+            value: "0x0",
+          }),
+          `Approve: whitelist ${checksumTarget} on PolicyEngine`,
+        );
+
+        await rpcProvider.waitForTransaction(txHash);
+
+        return approvalOk(deepLinksText, {
+          ok: true,
+          txHash,
+          wallet: cfg.walletContractAddress,
+          target: checksumTarget,
+        });
+      } catch (e: unknown) {
+        return approvalErr(e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "arc402_upgrade_registry",
+    description:
+      "Propose a registry upgrade on the ARC402Wallet (2-day timelock). Your phone wallet approves via WalletConnect.",
+    parameters: Type.Object({
+      newRegistryAddress: Type.String({ description: "New ARC402RegistryV3 address (0x...)" }),
+    }),
+    async execute(_id, params) {
+      const cfg = getConfig();
+      if (!cfg.walletContractAddress) {
+        return approvalErr("walletContractAddress not configured. Run arc402_wallet_deploy first.");
+      }
+
+      let checksumAddress: string;
+      try {
+        checksumAddress = ethers.getAddress(params.newRegistryAddress);
+      } catch {
+        return approvalErr(`Invalid address: ${params.newRegistryAddress}`);
+      }
+
+      const rpcProvider = new ethers.JsonRpcProvider(cfg.rpcUrl);
+      const walletIface = new ethers.Interface(WALLET_REGISTRY_ABI);
+
+      try {
+        const { txHash, deepLinksText } = await runWithWalletApproval(
+          cfg.chainId,
+          () => ({
+            to: cfg.walletContractAddress!,
+            data: walletIface.encodeFunctionData("proposeRegistryUpdate", [checksumAddress]),
+            value: "0x0",
+          }),
+          "Approve: propose registry upgrade on ARC402Wallet",
+        );
+
+        return approvalOk(deepLinksText, {
+          ok: true,
+          txHash,
+          wallet: cfg.walletContractAddress,
+          newRegistry: checksumAddress,
+          note: "Registry update proposed with 2-day timelock. Run arc402_upgrade_registry_execute after the timelock to apply.",
+        });
+      } catch (e: unknown) {
+        return approvalErr(e instanceof Error ? e.message : String(e));
+      }
     },
   });
 }
 
 function ok(data: unknown): ToolResult {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
-}
-
-function err(message: string): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify({ error: message }) }] };
 }
