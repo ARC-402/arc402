@@ -9,6 +9,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import * as net from "net";
 import * as http from "http";
 import { ethers } from "ethers";
@@ -36,6 +37,7 @@ import { generateReceipt, extractLearnings, createJobDirectory, cleanJobDirector
 import { FileDeliveryManager } from "./file-delivery";
 import { DeliveryClient } from "./delivery-client";
 import { COMPUTE_AGREEMENT_ABI } from "../abis";
+import { HandshakeWatcher } from "./handshake-watcher.js";
 
 // ─── State DB ─────────────────────────────────────────────────────────────────
 
@@ -645,6 +647,19 @@ export async function runDaemon(foreground = false): Promise<void> {
       }
     } catch { /* non-fatal */ }
   }, 5 * 60 * 1000);
+
+  // ── Handshake watcher ────────────────────────────────────────────────────
+  const handshakeWatcher = new HandshakeWatcher(
+    provider,
+    '0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3',
+    config.wallet.contract_address,
+    async (event) => {
+      log({ event: "handshake_received", ...event, amount: event.amount.toString() });
+    },
+    path.join(os.homedir(), '.arc402', 'processed-handshakes.json')
+  );
+  await handshakeWatcher.start();
+  log({ event: "handshake_watcher_started", address: config.wallet.contract_address });
 
   // ── Step 11: Write PID file (if not foreground) ──────────────────────────
   if (!foreground) {
@@ -1483,6 +1498,9 @@ export async function runDaemon(foreground = false): Promise<void> {
   // ── Graceful shutdown ────────────────────────────────────────────────────
   const shutdown = async (signal: string) => {
     log({ event: "daemon_stopping", signal });
+
+    // Stop on-chain watchers
+    await handshakeWatcher.stop();
 
     // Stop accepting new hire requests
     if (relayInterval) clearInterval(relayInterval);
