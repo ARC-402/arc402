@@ -231,6 +231,61 @@ export function registerArenaHandshakeCommands(program: Command): void {
       console.log(`  Network total:   ${total}`);
     });
 
+  // ── ping ──────────────────────────────────────────────────────────────────
+  // Send HTTP-only endpoint notification (no on-chain tx, no rate limit).
+  // Useful for: testing endpoint reachability, resending a missed notification
+  // after the on-chain handshake already went through.
+  hs.command("ping <agentAddress>")
+    .description("Send an HTTP endpoint notification only — no on-chain tx, no rate limit. Tests reachability.")
+    .option("--note <note>", "Message to include in the ping", "ping")
+    .action(async (agentAddress: string, opts: { note: string }) => {
+      const config = loadConfig();
+      const { signer, provider } = await requireSigner(config);
+      const registryAddress = config.agentRegistryV2Address
+        ?? config.agentRegistryAddress
+        ?? "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865";
+
+      const registry = new ethers.Contract(registryAddress, AGENT_REGISTRY_ABI, provider);
+      const agentData = await registry.getAgent(agentAddress);
+      const endpoint = agentData.endpoint as string;
+
+      if (!endpoint) {
+        console.error(`Agent ${agentAddress} has no endpoint registered.`);
+        process.exit(1);
+      }
+
+      const from = await signer.getAddress();
+      const timestamp = Date.now();
+      const message = `arc402-ping:${agentAddress}:${timestamp}`;
+      const signature = await signer.signMessage(message);
+
+      const url = `${endpoint}/handshake`;
+      console.log(`Pinging ${url}…`);
+
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "ping",
+            from,
+            note: opts.note,
+            timestamp,
+            signature,
+          }),
+        });
+        const body = await res.text();
+        if (res.ok) {
+          console.log(`✓ Endpoint responded ${res.status}: ${body}`);
+        } else {
+          console.log(`⚠ Endpoint returned ${res.status}: ${body}`);
+        }
+      } catch (err) {
+        console.error(`✗ Endpoint unreachable: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    });
+
   // ── check ─────────────────────────────────────────────────────────────────
   hs.command("check <agentAddress>")
     .description("Check if a connection or mutual handshake exists with an agent.")
