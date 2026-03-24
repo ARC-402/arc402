@@ -7,6 +7,7 @@ import { requireSigner } from "../client";
 import { formatDate, getTrustTier } from "../utils/format";
 import { AGENT_REGISTRY_ABI } from "../abis";
 import { executeContractWriteViaWallet } from "../wallet-router";
+import { connectPhoneWallet, sendTransactionWithSession } from "../walletconnect";
 import { getClient } from "../client";
 import prompts from "prompts";
 import chalk from "chalk";
@@ -158,18 +159,49 @@ export function registerAgentCommands(program: Command): void {
         : [];
 
       if (config.walletContractAddress) {
-        const { signer } = await requireSigner(config);
-        const tx = await executeContractWriteViaWallet(
-          config.walletContractAddress,
-          signer,
-          registryAddress,
-          AGENT_REGISTRY_ABI,
-          "update",
-          [opts.name, capabilities, opts.serviceType, opts.endpoint ?? "", opts.metadataUri ?? ""],
+        // AgentRegistry.update() is a governance operation — requires owner wallet via WalletConnect.
+        // Machine key cannot call this. Route through connectPhoneWallet + sendTransactionWithSession.
+        const iface = new ethers.Interface(AGENT_REGISTRY_ABI);
+        const innerData = iface.encodeFunctionData("update", [
+          opts.name, capabilities, opts.serviceType, opts.endpoint ?? "", opts.metadataUri ?? "",
+        ]);
+        const execIface = new ethers.Interface([
+          "function executeContractCall((address target, bytes data, uint256 value, uint256 minReturnValue, uint256 maxApprovalAmount, address approvalToken) params) external",
+        ]);
+        const outerData = execIface.encodeFunctionData("executeContractCall", [{
+          target: registryAddress,
+          data: innerData,
+          value: 0n,
+          minReturnValue: 0n,
+          maxApprovalAmount: 0n,
+          approvalToken: ethers.ZeroAddress,
+        }]);
+
+        const chainId = config.network === "base-sepolia" ? 84532 : 8453;
+        const telegramOpts = config.telegramBotToken && config.telegramChatId
+          ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
+          : undefined;
+
+        const spinner = startSpinner("Connecting owner wallet (WalletConnect)…");
+        const { client: wcClient, session, account } = await connectPhoneWallet(
+          config.walletConnectProjectId ?? "",
+          chainId,
+          config,
+          { telegramOpts, prompt: `Update agent capabilities: ${capabilities.join(", ")}`, hardware: false },
         );
-        const receipt = await tx.wait();
-        console.log(chalk.green(`✓ Agent updated`));
-        console.log(`  Tx: ${receipt?.hash}`);
+        spinner.succeed(`Connected: ${account.slice(0, 6)}...${account.slice(-4)}`);
+
+        const sendSpinner = startSpinner("Sending transaction…");
+        const txHash = await sendTransactionWithSession(wcClient, session, account, chainId, {
+          to: config.walletContractAddress,
+          data: outerData,
+          value: "0x0",
+        });
+
+        const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+        await provider.waitForTransaction(txHash);
+        sendSpinner.succeed(`Agent updated`);
+        console.log(`  Tx: ${txHash}`);
       } else {
         const { signer } = await requireSigner(config);
         const client = new AgentRegistryClient(registryAddress, signer);
