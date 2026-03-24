@@ -32,18 +32,18 @@ import "../contracts/WalletFactoryV6.sol";
  */
 contract DeployWalletFactoryV6 is Script {
     /// @dev Wallets start on V2; owners migrate to V3 via proposeRegistryUpdate.
-    address constant REGISTRY_V2  = 0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622;
+    address constant REGISTRY_V3  = 0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6; // V6 wallets use V3 registry (14-field struct)
     /// @dev ERC-4337 EntryPoint v0.7 — canonical on Base mainnet.
     address constant ENTRY_POINT  = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
 
     function run() external {
         console2.log("=== DeployWalletFactoryV6 ===");
         console2.log("Chain ID:         ", block.chainid);
-        console2.log("ARC402RegistryV2: ", REGISTRY_V2);
+        console2.log("ARC402RegistryV2: ", REGISTRY_V3);
         console2.log("EntryPoint v0.7:  ", ENTRY_POINT);
 
         vm.startBroadcast();
-        WalletFactoryV6 factory = new WalletFactoryV6(REGISTRY_V2, ENTRY_POINT);
+        WalletFactoryV6 factory = new WalletFactoryV6(REGISTRY_V3, ENTRY_POINT);
         vm.stopBroadcast();
 
         console2.log("");

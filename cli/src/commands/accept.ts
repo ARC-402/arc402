@@ -10,7 +10,9 @@ import { c } from "../ui/colors";
 import { startSpinner } from "../ui/spinner";
 
 export function registerAcceptCommand(program: Command): void {
-  program.command("accept <id>").description("Provider accepts a proposed agreement").action(async (id) => {
+  program.command("accept <id>").description("Provider accepts a proposed agreement")
+    .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
+    .action(async (id, opts) => {
     const config = loadConfig();
     if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
     const { signer, address: signerAddress } = await requireSigner(config);
@@ -31,7 +33,7 @@ export function registerAcceptCommand(program: Command): void {
 
     const spinner = startSpinner("Submitting transaction...");
     try {
-      if (config.walletContractAddress) {
+      if (config.walletContractAddress && !opts.useEoa) {
         await executeContractWriteViaWallet(
           config.walletContractAddress, signer, config.serviceAgreementAddress,
           SERVICE_AGREEMENT_ABI, "accept", [BigInt(id)],

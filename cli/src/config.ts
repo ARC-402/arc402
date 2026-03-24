@@ -163,15 +163,15 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     paymasterUrl: "https://api.developer.coinbase.com/rpc/v1/base/dca85088-a2ac-4ec3-8647-5154b150e7a9",
     // Base Mainnet deployments — v2 deployed 2026-03-15
-    policyEngineAddress:           "0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847",
+    policyEngineAddress:           "0x9449B15268bE7042C0b473F3f711a41A29220866",
     trustRegistryAddress:          "0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1",   // TrustRegistryV3 — v2
     trustRegistryV2Address:        "0xdA1D377991B2E580991B0DD381CdD635dd71aC39",   // old v2, kept for reference
-    intentAttestationAddress:      "0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460",
+    intentAttestationAddress:      "0x66585C2F96cAe05EA360F6dBF76bA092A7B87669",
     settlementCoordinatorAddress: "0xd52d8Be9728976E0D70C89db9F8ACeb5B5e97cA2",  // SettlementCoordinatorV2
     agentRegistryAddress:          "0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622",   // ARC402RegistryV2 — kept for backward compat
     arc402RegistryV3Address:       "0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6",   // ARC402RegistryV3 — new default
     agentRegistryV2Address:        "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865",   // AgentRegistry
-    walletFactoryAddress:          "0xcB52B5d746eEc05e141039E92e3dBefeAe496051",   // WalletFactoryV5 — redeployed 2026-03-19 (optimized bytecode, FOUNDRY_PROFILE=deploy)
+    walletFactoryAddress:          "0x801f0553585f511D9953419A9668edA078196997",   // WalletFactoryV6 — redeployed 2026-03-24 (stack-too-deep fix)
     sponsorshipAttestationAddress: "0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22",
     serviceAgreementAddress:       "0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6",
     sessionChannelsAddress:        "0x578f8d1bd82E8D6268E329d664d663B4d985BE61",
@@ -186,7 +186,7 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     governedTokenWhitelistAddress: "0xeB58896337244Bb408362Fea727054f9e7157451",
     watchtowerRegistryAddress:     "0xbC811d1e3c5C5b67CA57df1DFb08847b1c8c458A",
     vouchingRegistryAddress:       "0x94519194Bf17865770faD59eF581feC512Ae99c9",
-    migrationRegistryAddress:      "0xb60B62357b90F254f555f03B162a30E22890e3B5",
+    migrationRegistryAddress:      "0x4821D8A590eD4DbEf114fCA3C2d9311e81D576DF",
     handshakeAddress:              "0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3",
     computeAgreementAddress:       "0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7",
     subscriptionAgreementAddress:  "0xe1b6D3d0890E09582166EB450a78F6bff038CE5A",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "./ARC402Wallet.v6-draft.sol";
+import "./ARC402Wallet.sol";
 
 /**
  * @title WalletFactoryV6

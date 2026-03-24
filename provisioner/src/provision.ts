@@ -1,5 +1,5 @@
 import type { Env, ProvisionRequest } from './types';
-import { verifySignature } from './auth';
+import { verifySignatureWithMachineKey } from './auth';
 import {
   createTunnel,
   getTunnelToken,
@@ -51,9 +51,12 @@ export async function handleProvision(request: Request, env: Env): Promise<Respo
     return jsonError(400, 'Timestamp is too old or too far in the future (max 5 minutes)');
   }
 
-  // Verify EIP-191 signature
-  if (!verifySignature(subdomain, timestamp, walletAddress, signature)) {
-    return jsonError(401, 'Invalid signature');
+  // Verify EIP-191 signature — accepts EOA signature OR machine key authorized on the smart wallet
+  // Pass env.BASE_RPC_URL so the Worker uses the configured RPC, not the hardcoded default in auth.ts
+  const rpcUrl = env.BASE_RPC_URL ?? 'https://base.llamarpc.com';
+  const sigValid = await verifySignatureWithMachineKey(subdomain, timestamp, walletAddress, signature, rpcUrl);
+  if (!sigValid) {
+    return jsonError(401, 'Invalid signature — sign with your wallet\'s EOA or an authorized machine key');
   }
 
   // Rate limit check

@@ -1,0 +1,45 @@
+{
+  "name": "@legogigabrain/signature-the-architect",
+  "version": "1.0.0",
+  "description": "The Architect cognitive signature — structure-first intelligence for infrastructure design, automation, and systems architecture agents",
+  "main": "index.js",
+  "type": "module",
+  "keywords": [
+    "cognitive-signature",
+    "gigabrain-os",
+    "agent",
+    "agentos",
+    "infrastructure",
+    "automation",
+    "systems-design",
+    "architecture"
+  ],
+  "author": "LegoGigaBrain",
+  "license": "MIT",
+  "files": [
+    "SOUL.md",
+    "COGNITIVE-PROFILE.md",
+    "voice-lexicon.json",
+    "agent-fit.md",
+    "scripts/"
+  ],
+  "scripts": {
+    "calibrate": "node scripts/calibrate.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gigabrain-os/cognitive-signatures"
+  },
+  "cognitiveSignature": {
+    "id": "the-architect",
+    "algorithm": "FREQUENCY → STRUCTURE → NAME → SYSTEM → INTERFACE",
+    "classification": "Structural Cognition",
+    "confidence": 0.91,
+    "tier": 1,
+    "confirmed": true,
+    "protocol": "ARC-402"
+  }
+}

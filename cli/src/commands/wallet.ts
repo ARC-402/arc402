@@ -54,11 +54,13 @@ function parseAmount(raw: string): bigint {
 }
 
 // Standard onboarding categories required for a newly deployed wallet.
+// These cover the full ARC-402 flow: spending, hiring, compute, research, protocol ops.
 const ONBOARDING_CATEGORIES = [
   { name: "general",  amountEth: "0.001" },
-  { name: "compute",  amountEth: "0.05" },
-  { name: "research", amountEth: "0.05" },
-  { name: "protocol", amountEth: "0.1" },
+  { name: "hire",     amountEth: "0.1"   }, // max per-hire price
+  { name: "compute",  amountEth: "0.05"  },
+  { name: "research", amountEth: "0.05"  },
+  { name: "protocol", amountEth: "0.1"   },
 ] as const;
 
 /**
@@ -356,15 +358,7 @@ async function runCompleteOnboardingCeremony(
     saveConfig(config);
   }
 
-  // 4d) enableContractInteraction(wallet, Handshake)
-  const contractInteractionIface = new ethers.Interface([
-    "function enableContractInteraction(address wallet, address target) external",
-  ]);
-  await sendTx(
-    { to: policyAddress, data: contractInteractionIface.encodeFunctionData("enableContractInteraction", [walletAddress, handshakeAddress]), value: "0x0" },
-    "enableContractInteraction: Handshake",
-  );
-  saveConfig(config);
+  // 4d) Handshake whitelisting is handled in Step 5 protocol contract whitelist loop
 
   console.log(" " + c.success + " Policy configured");
   // Save progress after policy step
@@ -428,16 +422,30 @@ async function runCompleteOnboardingCeremony(
         console.log(" " + c.success + c.dim(" enableDefiAccess — already done"));
       }
 
-      // 5b) whitelistContract for AgentRegistry (check first)
-      const whitelisted = await peContract.isContractWhitelisted(walletAddress, agentRegistryAddress).catch(() => false) as boolean;
-      if (!whitelisted) {
-        await sendTx(
-          { to: policyAddress, data: peExtIface.encodeFunctionData("whitelistContract", [walletAddress, agentRegistryAddress]), value: "0x0" },
-          "whitelistContract: AgentRegistry on PolicyEngine",
-        );
-        saveConfig(config);
-      } else {
-        console.log(" " + c.success + c.dim(" whitelistContract(AgentRegistry) — already done"));
+      // 5b) whitelistContract for all protocol contracts the agent needs to interact with
+      // V6: protocol contracts are auto-allowed via isProtocolContract in executeContractCall,
+      // but DeFi whitelist is still needed for the PE DeFi access tier check.
+      // Whitelist all contracts an agent will need for the full ARC-402 flow.
+      const protocolContracts: { address: string; name: string }[] = [
+        { address: agentRegistryAddress ?? "", name: "AgentRegistry" },
+        { address: config.serviceAgreementAddress ?? NETWORK_DEFAULTS[config.network]?.serviceAgreementAddress ?? "0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6", name: "ServiceAgreement" },
+        { address: config.computeAgreementAddress ?? NETWORK_DEFAULTS[config.network]?.computeAgreementAddress ?? "0xf898A8A2cF9900A588B174d9f96349BBA95e57F3", name: "ComputeAgreement" },
+        { address: config.subscriptionAgreementAddress ?? NETWORK_DEFAULTS[config.network]?.subscriptionAgreementAddress ?? "0x809c1D997Eab3531Eb2d01FCD5120Ac786D850D6", name: "SubscriptionAgreement" },
+        { address: config.handshakeAddress ?? NETWORK_DEFAULTS[config.network]?.handshakeAddress ?? "0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3", name: "Handshake" },
+        { address: config.sessionChannelsAddress ?? NETWORK_DEFAULTS[config.network]?.sessionChannelsAddress ?? "0x578f8d1bd82E8D6268E329d664d663B4d985BE61", name: "SessionChannels" },
+      ].filter(c => c.address && c.address !== "");
+
+      for (const contract of protocolContracts) {
+        const isWhitelisted = await peContract.isContractWhitelisted(walletAddress, contract.address).catch(() => false) as boolean;
+        if (!isWhitelisted) {
+          await sendTx(
+            { to: policyAddress, data: peExtIface.encodeFunctionData("whitelistContract", [walletAddress, contract.address]), value: "0x0" },
+            `whitelistContract: ${contract.name}`,
+          );
+          saveConfig(config);
+        } else {
+          console.log(" " + c.success + c.dim(` whitelistContract(${contract.name}) — already done`));
+        }
       }
 
       // 5c+d) executeContractCall → register
@@ -3223,6 +3231,84 @@ export function registerWalletCommands(program: Command): void {
           { label: "Sent", value: `${ethers.formatEther(drainAmount)} ETH → ${checksumRecipient}` },
           { label: "Remaining", value: `${ethers.formatEther(newBalance)} ETH`, last: true },
         ]);
+      }
+    });
+
+  // ─── migrate ────────────────────────────────────────────────────────────────
+  //
+  // Register a wallet migration via MigrationRegistry.
+  // Links old wallet identity to new wallet — trust score carries over (minus 10% decay).
+  // Requires: both wallets have same owner, both registered in AgentRegistry,
+  //           new wallet approved by protocol deployer (approveImplementation).
+  // Owner signs via WalletConnect.
+
+  wallet.command("migrate")
+    .description("Register wallet migration: link old wallet identity to new wallet (owner WalletConnect signs)")
+    .requiredOption("--from <address>", "Old wallet address to migrate from")
+    .requiredOption("--to <address>", "New wallet address to migrate to")
+    .option("--json")
+    .action(async (opts) => {
+      const config = loadConfig();
+      if (!config.walletConnectProjectId) {
+        console.error("walletConnectProjectId not set. Run `arc402 config set walletConnectProjectId <id>`.");
+        process.exit(1);
+      }
+      const migrationRegistryAddress = config.migrationRegistryAddress ?? "0x4821D8A590eD4DbEf114fCA3C2d9311e81D576DF";
+
+      let oldWallet: string;
+      let newWallet: string;
+      try {
+        oldWallet = ethers.getAddress(opts.from);
+        newWallet = ethers.getAddress(opts.to);
+      } catch {
+        console.error("Invalid wallet address.");
+        process.exit(1);
+      }
+
+      console.log(`\nMigrating wallet identity:`);
+      console.log(`  From: ${oldWallet}`);
+      console.log(`  To:   ${newWallet}`);
+      console.log(`  Registry: ${migrationRegistryAddress}`);
+      console.log(`\nRequirements:`);
+      console.log(`  ✓ Both wallets must have the same owner`);
+      console.log(`  ✓ Both wallets must be registered in AgentRegistry`);
+      console.log(`  ✓ New wallet must be approved by protocol deployer`);
+      console.log(`  ✓ Trust score carries over with 10% migration decay\n`);
+
+      const chainId = config.network === "base-mainnet" ? 8453 : 84532;
+      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+
+      const mrIface = new ethers.Interface([
+        "function registerMigration(address oldWallet, address newWallet) external"
+      ]);
+      const callData = mrIface.encodeFunctionData("registerMigration", [oldWallet, newWallet]);
+
+      const telegramOpts = config.telegramBotToken && config.telegramChatId
+        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
+        : undefined;
+
+      const { txHash } = await requestPhoneWalletSignature(
+        config.walletConnectProjectId,
+        chainId,
+        () => ({ to: migrationRegistryAddress, data: callData, value: "0x0" }),
+        `Approve: migrate wallet identity ${oldWallet.slice(0, 10)}... → ${newWallet.slice(0, 10)}...`,
+        telegramOpts,
+        config
+      );
+
+      await provider.waitForTransaction(txHash);
+
+      if (opts.json) {
+        console.log(JSON.stringify({ ok: true, txHash, from: oldWallet, to: newWallet }));
+      } else {
+        console.log("\n " + c.success + c.white(" Migration registered"));
+        renderTree([
+          { label: "From", value: oldWallet },
+          { label: "To", value: newWallet },
+          { label: "Tx", value: txHash, last: true },
+        ]);
+        console.log(c.dim("\nNext: update config with new wallet address:"));
+        console.log(c.white(`  arc402 config set walletContractAddress ${newWallet}`));
       }
     });
 

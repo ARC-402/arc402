@@ -25,6 +25,8 @@ export function registerVerifyCommand(program: Command): void {
     .command("verify <id>")
     .description("Client verifies delivered work and releases escrow")
     .option("--auto", "Call autoRelease instead (for when verify window has elapsed and client is silent)")
+    .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
+    .option("--skip-status-check", "Skip the PENDING_VERIFICATION pre-flight check")
     .option("--json")
     .action(async (id, opts) => {
       const config = loadConfig();
@@ -34,7 +36,7 @@ export function registerVerifyCommand(program: Command): void {
       const spinner = startSpinner('Submitting…');
 
       // Pre-flight: check agreement is in PENDING_VERIFICATION status (J2-04)
-      if (!opts.auto) {
+      if (!opts.auto && !opts.skipStatusCheck) {
         const PENDING_VERIFICATION_STATUS = 3;
         const { provider: verifyProvider } = await getClient(config);
         const saCheck = new ethers.Contract(
@@ -59,7 +61,7 @@ export function registerVerifyCommand(program: Command): void {
       }
 
       if (opts.auto) {
-        if (config.walletContractAddress) {
+        if (config.walletContractAddress && !opts.useEoa) {
           const tx = await executeContractWriteViaWallet(
             config.walletContractAddress, signer, config.serviceAgreementAddress,
             SERVICE_AGREEMENT_ABI, "autoRelease", [BigInt(id)],
@@ -73,7 +75,7 @@ export function registerVerifyCommand(program: Command): void {
           spinner.succeed('Auto-released — agreement #' + id + ' — tx ' + tx.hash.slice(0, 10) + '...');
         }
       } else {
-        if (config.walletContractAddress) {
+        if (config.walletContractAddress && !opts.useEoa) {
           const tx = await executeContractWriteViaWallet(
             config.walletContractAddress, signer, config.serviceAgreementAddress,
             SERVICE_AGREEMENT_ABI, "verifyDeliverable", [BigInt(id)],

@@ -1,5 +1,5 @@
 import type { Env, DeprovisionRequest } from './types';
-import { verifySignature } from './auth';
+import { verifySignatureWithMachineKey } from './auth';
 import {
   getDnsRecord,
   deleteDnsRecord,
@@ -32,7 +32,9 @@ export async function handleDeprovision(request: Request, env: Env): Promise<Res
     return jsonError(400, 'Timestamp is too old or too far in the future (max 5 minutes)');
   }
 
-  if (!verifySignature(subdomain, timestamp, walletAddress, signature)) {
+  const rpcUrl = env.BASE_RPC_URL ?? 'https://base.llamarpc.com';
+  const sigValid = await verifySignatureWithMachineKey(subdomain, timestamp, walletAddress, signature, rpcUrl);
+  if (!sigValid) {
     return jsonError(401, 'Invalid signature');
   }
 

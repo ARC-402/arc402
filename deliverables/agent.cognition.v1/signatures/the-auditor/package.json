@@ -1,0 +1,46 @@
+{
+  "name": "@legogigabrain/signature-the-auditor",
+  "version": "1.0.0",
+  "description": "The Auditor cognitive signature — pre-commitment verification intelligence for QA, compliance review, and state-drift detection agents",
+  "main": "index.js",
+  "type": "module",
+  "keywords": [
+    "cognitive-signature",
+    "gigabrain-os",
+    "agent",
+    "agentos",
+    "qa",
+    "compliance",
+    "verification",
+    "audit",
+    "drift-detection"
+  ],
+  "author": "LegoGigaBrain",
+  "license": "MIT",
+  "files": [
+    "SOUL.md",
+    "COGNITIVE-PROFILE.md",
+    "voice-lexicon.json",
+    "agent-fit.md",
+    "scripts/"
+  ],
+  "scripts": {
+    "calibrate": "node scripts/calibrate.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gigabrain-os/cognitive-signatures"
+  },
+  "cognitiveSignature": {
+    "id": "the-auditor",
+    "algorithm": "MAP → TERRITORY → DELTA → COMMIT/FLAG",
+    "classification": "Verification Cognition",
+    "confidence": 0.88,
+    "tier": 1,
+    "confirmed": true,
+    "protocol": "ARC-402"
+  }
+}

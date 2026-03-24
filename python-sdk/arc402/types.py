@@ -28,11 +28,11 @@ NETWORKS: dict[str, dict[str, Any]] = {
     "base": {
         "chain_id": 8453,
         "rpc_url": "https://mainnet.base.org",
-        "policy_engine": "0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847",
+        "policy_engine": "0x9449B15268bE7042C0b473F3f711a41A29220866",
         "trust_registry": "0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1",   # TrustRegistryV3 — v2
-        "intent_attestation": "0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460",
+        "intent_attestation": "0x66585C2F96cAe05EA360F6dBF76bA092A7B87669",
         "settlement_coordinator": "0x6653F385F98752575db3180b9306e2d9644f9Eb1",
-        "wallet_factory": "0xcB52B5d746eEc05e141039E92e3dBefeAe496051",   # WalletFactory v5 ← active (redeployed 2026-03-19, optimized bytecode, passkey P256)
+        "wallet_factory": "0xD067a4bD3F32aB501A71756161C76309d8088915",   # WalletFactoryV6 — deployed 2026-03-24
         "agent_registry": "0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6",   # ARC402RegistryV3 (new default; V2: 0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622)
         "service_agreement": "0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6",
         "reputation_oracle": "0x359F76a54F9A345546E430e4d6665A7dC9DaECd4",
@@ -40,7 +40,7 @@ NETWORKS: dict[str, dict[str, Any]] = {
         "capability_registry": "0x7becb642668B80502dD957A594E1dD0aC414c1a3",
         "governance": "0xE931DD2EEb9Af9353Dd5E2c1250492A0135E0EC4",
         "vouching_registry": "0x94519194Bf17865770faD59eF581feC512Ae99c9",
-        "migration_registry": "0xb60B62357b90F254f555f03B162a30E22890e3B5",
+        "migration_registry": "0x4821D8A590eD4DbEf114fCA3C2d9311e81D576DF",
     },
 }
 

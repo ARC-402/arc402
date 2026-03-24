@@ -21,6 +21,7 @@ export function registerDeliverCommand(program: Command): void {
     .option("--message <text>")
     .option("--fulfill", "Use legacy trusted-only fulfill() instead of commitDeliverable()", false)
     .option("--encrypt", "Encrypt the deliverable before uploading to IPFS (prompts for recipient public key)", false)
+    .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
     .action(async (id, opts) => {
       const config = loadConfig();
       if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
@@ -94,7 +95,7 @@ export function registerDeliverCommand(program: Command): void {
         console.log(' ' + c.dim('Encrypted upload:') + ' ' + c.white(uri));
 
         const encSpinner = startSpinner('Committing deliverable…');
-        if (config.walletContractAddress) {
+        if (config.walletContractAddress && !opts.useEoa) {
           await executeContractWriteViaWallet(
             config.walletContractAddress, signer, config.serviceAgreementAddress,
             SERVICE_AGREEMENT_ABI, "commitDeliverable", [BigInt(id), hash],
@@ -114,7 +115,7 @@ export function registerDeliverCommand(program: Command): void {
 
       const hash = opts.output ? hashFile(opts.output) : hashString(opts.message ?? `agreement:${id}`);
       const deliverSpinner = startSpinner(`${opts.fulfill ? 'Fulfilling' : 'Committing deliverable for'} agreement #${id}…`);
-      if (config.walletContractAddress) {
+      if (config.walletContractAddress && !opts.useEoa) {
         const fn = opts.fulfill ? "fulfill" : "commitDeliverable";
         await executeContractWriteViaWallet(
           config.walletContractAddress, signer, config.serviceAgreementAddress,

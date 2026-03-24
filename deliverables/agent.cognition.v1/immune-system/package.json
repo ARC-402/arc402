@@ -1,0 +1,13 @@
+{
+  "name": "@legogigabrain/immune-system",
+  "version": "1.0.0",
+  "description": "Protection layer for AI agents. Preflight gates, destructive op blocking, context-before-creation enforcement.",
+  "type": "module",
+  "bin": { "immunectl": "./scripts/immunectl.js" },
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "check": "node scripts/immunectl.js check"
+  },
+  "keywords": ["openclaw", "agent-os", "immune-system", "preflight", "safety"],
+  "engines": { "node": ">=22.0.0" }
+}

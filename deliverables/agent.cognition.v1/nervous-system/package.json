@@ -1,0 +1,14 @@
+{
+  "name": "@legogigabrain/nervous-system",
+  "version": "1.0.0",
+  "description": "Self-improving agent system. Daily evolution tick, correction pipeline, neurogenesis, synaptic pruning.",
+  "type": "module",
+  "bin": { "nervousctl": "./scripts/nervousctl.js" },
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "tick": "node scripts/nervousctl.js tick",
+    "status": "node scripts/nervousctl.js status"
+  },
+  "keywords": ["openclaw", "agent-os", "self-improvement", "nervous-system"],
+  "engines": { "node": ">=22.0.0" }
+}

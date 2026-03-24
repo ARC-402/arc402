@@ -87,3 +87,67 @@ export function verifySignature(
     return false;
   }
 }
+
+/**
+ * Extended signature verification for smart wallet users.
+ * Accepts the signature if:
+ *  1. The recovered signer IS the walletAddress (EOA wallet), OR
+ *  2. The recovered signer is an authorized machine key on walletAddress (smart wallet).
+ *
+ * This lets machine keys sign tunnel provisioning requests on behalf of their wallet.
+ */
+export async function verifySignatureWithMachineKey(
+  subdomain: string,
+  timestamp: number,
+  walletAddress: string,
+  signature: string,
+  rpcUrl: string = 'https://mainnet.base.org'
+): Promise<boolean> {
+  const message = `arc402-provision:${subdomain}:${timestamp}`;
+  let recovered: string;
+  try {
+    recovered = recoverAddress(message, signature);
+  } catch {
+    return false;
+  }
+
+  // Case 1: direct EOA match
+  if (recovered.toLowerCase() === walletAddress.toLowerCase()) {
+    return true;
+  }
+
+  // Case 2: recovered address is an authorized machine key on the smart wallet
+  // Call authorizedMachineKeys(recoveredAddress) on walletAddress
+  try {
+    // selector for authorizedMachineKeys(address): keccak256("authorizedMachineKeys(address)")[0:4] = 0x41d5b23a
+    const paddedAddr = recovered.slice(2).toLowerCase().padStart(64, '0');
+    const callData = '0x41d5b23a' + paddedAddr;
+
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_call',
+        params: [{ to: walletAddress, data: callData }, 'latest'],
+        id: 1,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`[auth] RPC call failed: HTTP ${response.status} from ${rpcUrl}`);
+      return false;
+    }
+    const result = await response.json() as { result?: string; error?: { message: string } };
+    if (result.error) {
+      console.error(`[auth] RPC error: ${result.error.message}`);
+      return false;
+    }
+    const hex = result.result ?? '0x';
+    // Returns bool — non-zero = true
+    return hex !== '0x' && BigInt(hex) !== 0n;
+  } catch (err) {
+    console.error(`[auth] Machine key check threw: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}

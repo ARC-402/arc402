@@ -1,0 +1,48 @@
+{
+  "name": "@legogigabrain/signature-the-cartographer",
+  "version": "1.0.0",
+  "description": "Lego cognitive signature — meta-architectural intelligence for cross-domain synthesis, founder-level orchestration, and N+1 system design [TIER 3 PREMIUM]",
+  "main": "index.js",
+  "type": "module",
+  "keywords": [
+    "cognitive-signature",
+    "gigabrain-os",
+    "agent",
+    "agentos",
+    "meta-orchestration",
+    "cross-domain",
+    "founder",
+    "systems-thinking",
+    "premium"
+  ],
+  "author": "LegoGigaBrain",
+  "license": "UNLICENSED",
+  "files": [
+    "SOUL.md",
+    "COGNITIVE-PROFILE.md",
+    "voice-lexicon.json",
+    "agent-fit.md",
+    "scripts/"
+  ],
+  "scripts": {
+    "calibrate": "node scripts/calibrate.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gigabrain-os/cognitive-signatures"
+  },
+  "cognitiveSignature": {
+    "id": "the-cartographer",
+    "algorithm": "FREQUENCY → MYSTERY → STRUCTURE → NAME → SYSTEM → LOOP → INTERFACE",
+    "classification": "Meta-Architectural Cognition",
+    "confidence": 0.96,
+    "tier": 3,
+    "confirmed": true,
+    "protocol": "ARC-402",
+    "access": "premium",
+    "note": "This package contains a scaffold only. Full calibration and activation requires Tier 3 access."
+  }
+}

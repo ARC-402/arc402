@@ -67,12 +67,16 @@ contract DeployARC402RegistryV3 is Script {
 
     address constant DEFAULT_COMPUTE_AGREEMENT      = 0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7;
     address constant DEFAULT_SUBSCRIPTION_AGREEMENT = 0xe1b6D3d0890E09582166EB450a78F6bff038CE5A;
+    address constant DEFAULT_DISPUTE_ARBITRATION    = 0xF61b75E4903fbC81169FeF8b7787C13cB7750601;
+    address constant DEFAULT_DISPUTE_MODULE         = 0x5ebd301cEF0C908AB17Fd183aD9c274E4B34e9d6;
+    address constant DEFAULT_POLICY_ENGINE_OVERRIDE = 0x0743ab6a7280b416D3b75c7e5457390906312139; // new PE with closeContext
+    address constant HANDSHAKE_CONTRACT             = 0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3;
 
     function run() external {
         IV2Registry v2 = IV2Registry(V2_REGISTRY);
 
         // Read all V2 fields from the live registry
-        address policyEngine          = v2.policyEngine();
+        address policyEngine          = vm.envOr("POLICY_ENGINE_OVERRIDE", DEFAULT_POLICY_ENGINE_OVERRIDE);
         address trustRegistry         = v2.trustRegistry();
         address intentAttestation     = v2.intentAttestation();
         address settlementCoordinator = v2.settlementCoordinator();
@@ -86,8 +90,8 @@ contract DeployARC402RegistryV3 is Script {
         // V3 new fields — use env overrides or fall back to known mainnet addresses
         address computeAgreement      = vm.envOr("COMPUTE_AGREEMENT",      DEFAULT_COMPUTE_AGREEMENT);
         address subscriptionAgreement = vm.envOr("SUBSCRIPTION_AGREEMENT", DEFAULT_SUBSCRIPTION_AGREEMENT);
-        address disputeArbitration    = vm.envOr("DISPUTE_ARBITRATION",    address(0));
-        address disputeModule         = vm.envOr("DISPUTE_MODULE",         address(0));
+        address disputeArbitration    = vm.envOr("DISPUTE_ARBITRATION",    DEFAULT_DISPUTE_ARBITRATION);
+        address disputeModule         = vm.envOr("DISPUTE_MODULE",         DEFAULT_DISPUTE_MODULE);
         string  memory ver            = vm.envOr("REGISTRY_VERSION",       string("v3.0.0"));
 
         console2.log("=== ARC402RegistryV3 Deployment ===");
@@ -129,6 +133,10 @@ contract DeployARC402RegistryV3 is Script {
             disputeModule,
             ver
         );
+
+        // Set handshake extension
+        bytes32 handshakeKey = keccak256("handshake");
+        v3.setExtension(handshakeKey, HANDSHAKE_CONTRACT);
 
         vm.stopBroadcast();
 

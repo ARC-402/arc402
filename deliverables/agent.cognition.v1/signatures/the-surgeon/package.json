@@ -1,0 +1,45 @@
+{
+  "name": "@legogigabrain/signature-the-surgeon",
+  "version": "1.0.0",
+  "description": "The Surgeon cognitive signature — diagnostic precision intelligence for engineering, debugging, and system repair agents",
+  "main": "index.js",
+  "type": "module",
+  "keywords": [
+    "cognitive-signature",
+    "gigabrain-os",
+    "agent",
+    "agentos",
+    "engineering",
+    "debugging",
+    "diagnosis",
+    "code-review"
+  ],
+  "author": "LegoGigaBrain",
+  "license": "MIT",
+  "files": [
+    "SOUL.md",
+    "COGNITIVE-PROFILE.md",
+    "voice-lexicon.json",
+    "agent-fit.md",
+    "scripts/"
+  ],
+  "scripts": {
+    "calibrate": "node scripts/calibrate.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gigabrain-os/cognitive-signatures"
+  },
+  "cognitiveSignature": {
+    "id": "the-surgeon",
+    "algorithm": "DIAGNOSE → ISOLATE → CUT → MEASURE → CLOSE",
+    "classification": "Elimination Cognition",
+    "confidence": 0.91,
+    "tier": 1,
+    "confirmed": true,
+    "protocol": "ARC-402"
+  }
+}

@@ -651,7 +651,7 @@ async function claimSubdomain(subdomain: string, walletAddress: string, tunnelTa
   console.log(`  Wallet:  ${walletAddress}`);
   console.log(`  Target:  ${tunnelTarget}`);
 
-  const res = await fetch("https://api.arc402.xyz/register-subdomain", {
+  const res = await fetch("https://api.arc402.xyz/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ subdomain: normalized, walletAddress, tunnelTarget }),

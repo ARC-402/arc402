@@ -28,6 +28,7 @@ export function registerHireCommand(program: Command): void {
     .option("--token <token>", "eth or usdc", "eth")
     .option("--deliverable-spec <filepath>")
     .option("--session <sessionId>", "Load agreed price and deadline from a completed negotiation session")
+    .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
     .option("--json")
     .action(async (opts) => {
       const config = loadConfig();
@@ -138,7 +139,7 @@ export function registerHireCommand(program: Command): void {
 
       const hireSpinner = startSpinner('Submitting agreement...');
 
-      if (config.walletContractAddress) {
+      if (config.walletContractAddress && !opts.useEoa) {
         // Smart wallet path — wallet handles per-tx USDC approval via maxApprovalAmount
         const tx = await executeContractWriteViaWallet(
           config.walletContractAddress,

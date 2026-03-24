@@ -9,19 +9,35 @@ import { QRCodeSVG } from 'qrcode.react'
 const WC_PROJECT_ID   = process.env.NEXT_PUBLIC_WC_PROJECT_ID ?? '455e9425343b9156fce1428250c9a54a'
 const CHAIN_ID        = 8453
 const BASE_RPC        = 'https://base-mainnet.g.alchemy.com/v2/YIA2uRCsFI-j5pqH-aRzflrACSlV1Qrs'
-const WALLET_FACTORY  = '0xcB52B5d746eEc05e141039E92e3dBefeAe496051' // v5 (optimized bytecode, passkey P256) — active factory
+const WALLET_FACTORY  = '0xeB72b50a8526971Cb1BD789a99bC8A78075e3957' // v6 — active factory (machine key autonomous ops)
 const ALL_WALLET_FACTORIES = [
-  '0xcB52B5d746eEc05e141039E92e3dBefeAe496051', // v5 active (optimized, redeployed 2026-03-19)
-  '0x3f4d4b19a69344B04fd9653E1bB12883e97300fE', // v5 frozen (unoptimized)
+  '0xeB72b50a8526971Cb1BD789a99bC8A78075e3957', // v6 active — machine key autonomous ops
+  // V5 factories frozen — uncomment to detect legacy wallets for migration
+  // '0xcB52B5d746eEc05e141039E92e3dBefeAe496051', // v5 frozen
+  // '0x3f4d4b19a69344B04fd9653E1bB12883e97300fE', // v5 frozen
 ]
 const ENTRY_POINT     = '0x0000000071727De22E5E9d8BAf0edAc6f37da032'
 const ARC402_REGISTRY_V2 = '0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622' // Protocol registry (v2) — fallback for existing wallets
 const ARC402_REGISTRY_V3 = '0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6'  // Protocol registry (v3) — new default
 const ARC402_REGISTRY    = ARC402_REGISTRY_V3 || ARC402_REGISTRY_V2 // new wallets use V3, falls back to V2
-const AGENT_REGISTRY  = '0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865' // AgentRegistry — where agents register
-const POLICY_ENGINE   = '0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847'
-const HANDSHAKE       = '0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3' // Handshake contract (Arena v1)
-const GIGABRAIN_WALLET = '0xa9e0612a6f82bf4056D7e48A406E36C990aB83bE' // GigaBrain agent wallet
+const AGENT_REGISTRY          = '0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865'
+const POLICY_ENGINE           = '0x9449B15268bE7042C0b473F3f711a41A29220866' // V2
+const HANDSHAKE               = '0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3'
+const SERVICE_AGREEMENT       = '0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6'
+const COMPUTE_AGREEMENT       = '0xf898A8A2cF9900A588B174d9f96349BBA95e57F3'
+const SUBSCRIPTION_AGREEMENT  = '0x809c1D997Eab3531Eb2d01FCD5120Ac786D850D6'
+const SESSION_CHANNELS        = '0x578f8d1bd82E8D6268E329d664d663B4d985BE61'
+const GIGABRAIN_WALLET = '0xa9e0612a6f82bf4056D7e48A406E36C990aB83bE'
+
+// All protocol contracts to whitelist during onboarding — agent needs these for full ARC-402 flow
+const PROTOCOL_CONTRACTS_TO_WHITELIST = [
+  { address: AGENT_REGISTRY, name: 'AgentRegistry' },
+  { address: SERVICE_AGREEMENT, name: 'ServiceAgreement' },
+  { address: COMPUTE_AGREEMENT, name: 'ComputeAgreement' },
+  { address: SUBSCRIPTION_AGREEMENT, name: 'SubscriptionAgreement' },
+  { address: HANDSHAKE, name: 'Handshake' },
+  { address: SESSION_CHANNELS, name: 'SessionChannels' },
+]
 
 // ─── Priority order ───────────────────────────────────────────────────────────
 
@@ -202,8 +218,11 @@ export default function OnboardContent() {
             const peCheck = new ethers.Contract(POLICY_ENGINE, [
               'function isContractWhitelisted(address,address) view returns (bool)',
             ], rpc)
-            const hsWhitelisted = await peCheck.isContractWhitelisted(walletAddr, HANDSHAKE).catch(() => false)
-            setPolicyDone(hsWhitelisted)
+            // Check if ALL protocol contracts are whitelisted (not just Handshake)
+            const allWhitelisted = await Promise.all(
+              PROTOCOL_CONTRACTS_TO_WHITELIST.map(pc => peCheck.isContractWhitelisted(walletAddr, pc.address).catch(() => false))
+            )
+            setPolicyDone(allWhitelisted.every(Boolean))
           } catch { setPolicyDone(false) }
         }
 
@@ -633,8 +652,14 @@ export default function OnboardContent() {
           setStatusMsg('Setting max hire price...')
           await signer.sendTransaction({ to: POLICY_ENGINE, data: policyIface.encodeFunctionData('setCategoryLimitFor', [arc402Wallet, 'hire', hirePriceWei]), value: 0n })
         }
-        setStatusMsg('Whitelisting Handshake contract...')
-        await signer.sendTransaction({ to: POLICY_ENGINE, data: peIface.encodeFunctionData('whitelistContract', [arc402Wallet, HANDSHAKE]), value: 0n })
+        // Whitelist all protocol contracts
+        for (const pc of PROTOCOL_CONTRACTS_TO_WHITELIST) {
+          const alreadyWhitelisted = await new ethers.Contract(POLICY_ENGINE, ['function isContractWhitelisted(address,address) view returns (bool)'], new ethers.JsonRpcProvider(BASE_RPC)).isContractWhitelisted(arc402Wallet, pc.address).catch(() => false)
+          if (!alreadyWhitelisted) {
+            setStatusMsg(`Whitelisting ${pc.name}...`)
+            await signer.sendTransaction({ to: POLICY_ENGINE, data: peIface.encodeFunctionData('whitelistContract', [arc402Wallet, pc.address]), value: 0n })
+          }
+        }
       } else {
         const wc = await connectWC(['eth_sendTransaction'])
         if (currentVelocity === 0n) {
@@ -649,8 +674,14 @@ export default function OnboardContent() {
           setStatusMsg('Setting max hire price...')
           await sendWCTx(wc, POLICY_ENGINE, policyIface.encodeFunctionData('setCategoryLimitFor', [arc402Wallet, 'hire', hirePriceWei]))
         }
-        setStatusMsg('Whitelisting Handshake contract...')
-        await sendWCTx(wc, POLICY_ENGINE, peIface.encodeFunctionData('whitelistContract', [arc402Wallet, HANDSHAKE]))
+        // Whitelist all protocol contracts
+        for (const pc of PROTOCOL_CONTRACTS_TO_WHITELIST) {
+          const alreadyWhitelisted = await new ethers.Contract(POLICY_ENGINE, ['function isContractWhitelisted(address,address) view returns (bool)'], new ethers.JsonRpcProvider(BASE_RPC)).isContractWhitelisted(arc402Wallet, pc.address).catch(() => false)
+          if (!alreadyWhitelisted) {
+            setStatusMsg(`Whitelisting ${pc.name}...`)
+            await sendWCTx(wc, POLICY_ENGINE, peIface.encodeFunctionData('whitelistContract', [arc402Wallet, pc.address]))
+          }
+        }
         await disconnectWC(wc)
       }
 
@@ -695,7 +726,7 @@ export default function OnboardContent() {
         'function defiAccessEnabled(address) external view returns (bool)',
         'function isContractWhitelisted(address wallet, address target) external view returns (bool)',
       ])
-      const PE = '0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847'
+      const PE = POLICY_ENGINE
 
       // Check and enable DeFi access
       const rpcProvider = new ethers.JsonRpcProvider(BASE_RPC)
