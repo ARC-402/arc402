@@ -286,55 +286,57 @@ export class WorkerExecutor {
   }
 
   /**
-   * Execute a job via the host OpenClaw gateway HTTP API.
-   * The gateway is reachable at OPENCLAW_GATEWAY_URL (default: http://172.17.0.1:18789).
-   * Posts the task to /agent and writes the response to deliverable.md in the job dir.
-   *
-   * This is the correct execution path for agent_type = "openclaw" because:
-   * - The gateway runs on the host with full auth (Max subscription OAuth)
-   * - The gateway can spawn any ACP (Claude, Codex, Gemini, etc.)
-   * - No binary needed inside the container
-   * - The host gateway IP must be in the workroom network policy
+   * Execute a job via the host OpenClaw gateway OpenAI-compatible HTTP API.
+   * Uses POST /v1/chat/completions (not /agent).
    */
   private async runViaGateway(rec: ExecutionRecord, logStream: fs.WriteStream): Promise<void> {
     const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || "http://172.17.0.1:18789";
+    const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN || "";
+    const workerAgentId = process.env.OPENCLAW_WORKER_AGENT_ID || "arc";
     const taskText = this.buildTask(rec.capability, rec.specHash, rec.agreementId);
 
-    logStream.write(`[worker-executor] Routing to OpenClaw gateway: ${gatewayUrl}\n`);
+    logStream.write(`[worker-executor] Routing to OpenClaw gateway: ${gatewayUrl}/v1/chat/completions\n`);
+    logStream.write(`[worker-executor] Agent: ${workerAgentId}\n`);
     logStream.write(`[worker-executor] Agreement: ${rec.agreementId}\n`);
     logStream.write(`[worker-executor] Capability: ${rec.capability}\n\n`);
 
     const payload = JSON.stringify({
-      message: taskText,
-      workdir: rec.jobDir,
-      jobId: rec.agreementId,
-      capability: rec.capability,
+      model: `openclaw:${workerAgentId}`,
+      messages: [{ role: "user", content: taskText }],
+      stream: false,
+      metadata: {
+        arc402_job_id: rec.agreementId,
+        arc402_capability: rec.capability,
+        arc402_job_dir: rec.jobDir,
+      },
     });
 
     const response = await new Promise<string>((resolve, reject) => {
-      const url = new URL("/agent", gatewayUrl);
+      const url = new URL("/v1/chat/completions", gatewayUrl);
       const isHttps = url.protocol === "https:";
       const mod = isHttps ? https : http;
+
+      const headers: Record<string, string | number> = {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(payload),
+        "X-ARC402-Job-Id": rec.agreementId,
+        "X-ARC402-Capability": rec.capability,
+      };
+      if (gatewayToken) headers["Authorization"] = `Bearer ${gatewayToken}`;
 
       const req = mod.request({
         hostname: url.hostname,
         port: url.port || (isHttps ? 443 : 80),
         path: url.pathname,
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(payload),
-          // Pass job context so the gateway agent has scope awareness
-          "X-ARC402-Job-Id": rec.agreementId,
-          "X-ARC402-Capability": rec.capability,
-        },
+        headers,
         timeout: this.jobTimeoutMs,
       }, (res) => {
         let body = "";
         res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
         res.on("end", () => {
           if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(`Gateway returned ${res.statusCode}: ${body.slice(0, 200)}`));
+            reject(new Error(`Gateway returned ${res.statusCode}: ${body.slice(0, 400)}`));
           } else {
             resolve(body);
           }
@@ -350,19 +352,27 @@ export class WorkerExecutor {
       req.end();
     });
 
-    // Parse gateway response — may be JSON {reply, output} or raw text
+    // Parse OpenAI chat completion response
     let deliverable = response;
     try {
-      const parsed = JSON.parse(response) as { reply?: string; output?: string; message?: string };
-      deliverable = parsed.reply ?? parsed.output ?? parsed.message ?? response;
-    } catch { /* use raw response */ }
+      const parsed = JSON.parse(response) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const content = parsed.choices?.[0]?.message?.content;
+      if (content && content.trim()) deliverable = content;
+    } catch {
+      // keep raw response
+    }
 
     logStream.write(`[worker-executor] Gateway response received (${deliverable.length} chars)\n`);
     logStream.write(`\n--- Gateway Output ---\n${deliverable}\n`);
 
-    // Write deliverable.md
     const deliverablePath = path.join(rec.jobDir, "deliverable.md");
-    fs.writeFileSync(deliverablePath, `# Deliverable\n\nAgreement: ${rec.agreementId}\nCapability: ${rec.capability}\n\n---\n\n${deliverable}`, "utf-8");
+    fs.writeFileSync(
+      deliverablePath,
+      `# Deliverable\n\nAgreement: ${rec.agreementId}\nCapability: ${rec.capability}\n\n---\n\n${deliverable}`,
+      "utf-8"
+    );
     logStream.write(`[worker-executor] Deliverable written to ${deliverablePath}\n`);
   }
 

@@ -450,6 +450,8 @@ network_policies:
         // Pass host gateway URL so WorkerExecutor can route openclaw jobs to the host
         "-e", `OPENCLAW_GATEWAY_URL=http://172.17.0.1:${process.env.OPENCLAW_GATEWAY_PORT || "18789"}`,
         "-e", `OPENCLAW_GATEWAY_PORT=${process.env.OPENCLAW_GATEWAY_PORT || "18789"}`,
+        "-e", `OPENCLAW_WORKER_AGENT_ID=${process.env.OPENCLAW_WORKER_AGENT_ID || "arc"}`,
+        ...(process.env.OPENCLAW_GATEWAY_TOKEN ? ["-e", `OPENCLAW_GATEWAY_TOKEN=${process.env.OPENCLAW_GATEWAY_TOKEN}`] : []),
         // Inject enabled provider API keys (never written to container disk)
         ...providerEnvFlags,
         // Expose relay port
