@@ -96,6 +96,12 @@ export interface DaemonConfig {
     auto_download: boolean;
     serve_files: boolean;
   };
+  worker: {
+    agent_type: string;           // openclaw | claude-code | codex | shell
+    max_concurrent_jobs: number;
+    job_timeout_seconds: number;
+    auto_execute: boolean;        // if false: accept on-chain but don't spawn agent (manual exec)
+  };
 }
 
 function resolveEnvValue(value: string, field: string): string {
@@ -141,6 +147,7 @@ function withDefaults(raw: Record<string, unknown>): DaemonConfig {
   const work     = (raw.work     as Record<string, unknown>) ?? {};
   const compute  = (raw.compute  as Record<string, unknown>) ?? {};
   const delivery = (raw.delivery as Record<string, unknown>) ?? {};
+  const worker   = (raw.worker   as Record<string, unknown>) ?? {};
 
   return {
     wallet: {
@@ -231,6 +238,12 @@ function withDefaults(raw: Record<string, unknown>): DaemonConfig {
       max_job_size_mb:  num(delivery.max_job_size_mb, 500),
       auto_download:    bool(delivery.auto_download, true),
       serve_files:      bool(delivery.serve_files, true),
+    },
+    worker: {
+      agent_type:            str(worker.agent_type, "claude-code"),
+      max_concurrent_jobs:   num(worker.max_concurrent_jobs, 2),
+      job_timeout_seconds:   num(worker.job_timeout_seconds, 3600),
+      auto_execute:          bool(worker.auto_execute, true),
     },
   };
 }
@@ -395,4 +408,10 @@ max_file_size_mb = 100           # Maximum size for a single uploaded file (MB)
 max_job_size_mb = 500            # Maximum total size for all files in a job (MB)
 auto_download = true             # Auto-download and verify files on delivery notification
 serve_files = true               # Serve file endpoints (/job/:id/files, /job/:id/manifest)
+
+[worker]
+agent_type = "claude-code"       # Runtime to execute hired work: openclaw | claude-code | codex | shell
+max_concurrent_jobs = 2          # Maximum jobs running simultaneously
+job_timeout_seconds = 3600       # Kill job after this many seconds (default: 1h)
+auto_execute = true              # true: spawn agent automatically after accept. false: accept on-chain, await manual trigger.
 `;

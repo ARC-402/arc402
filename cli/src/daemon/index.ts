@@ -32,12 +32,13 @@ import { ComputeSessionManager } from "./compute-session";
 import { verifyWallet, getWalletBalance } from "./wallet-monitor";
 import { buildNotifier } from "./notify";
 import { HireListener } from "./hire-listener";
-import { UserOpsManager, buildAcceptCalldata } from "./userops";
+import { UserOpsManager, buildAcceptCalldata, buildFulfillCalldata } from "./userops";
 import { generateReceipt, extractLearnings, createJobDirectory, cleanJobDirectory } from "./job-lifecycle";
 import { FileDeliveryManager } from "./file-delivery";
 import { DeliveryClient } from "./delivery-client";
 import { COMPUTE_AGREEMENT_ABI } from "../abis";
 import { HandshakeWatcher } from "./handshake-watcher.js";
+import { WorkerExecutor } from "./worker-executor.js";
 
 // ─── State DB ─────────────────────────────────────────────────────────────────
 
@@ -236,6 +237,7 @@ interface IpcContext {
   machineKeyAddress: string;
   hireListener: HireListener | null;
   userOps: UserOpsManager | null;
+  workerExecutor: WorkerExecutor | null;
   activeAgreements: number;
   bundlerMode: string;
   bundlerEndpoint: string;
@@ -427,6 +429,18 @@ function handleIpcCommand(
       };
     }
 
+    case "worker-status": {
+      if (!ctx.workerExecutor) return { ok: true, data: { jobs: [], executor: "disabled" } };
+      return { ok: true, data: { jobs: ctx.workerExecutor.listAll() } };
+    }
+
+    case "worker-logs": {
+      if (!cmd.id) return { ok: false, error: "id required" };
+      if (!ctx.workerExecutor) return { ok: false, error: "worker executor not running" };
+      const tail = typeof (cmd as { tail?: number }).tail === "number" ? (cmd as { tail?: number }).tail : 100;
+      return { ok: true, data: { log: ctx.workerExecutor.readLog(cmd.id, tail) } };
+    }
+
     default:
       return { ok: false, error: `unknown command: ${cmd.command}` };
   }
@@ -570,6 +584,87 @@ export async function runDaemon(foreground = false): Promise<void> {
     log({ event: "compute_enabled", gpu_spec: config.compute.gpu_spec, rate_wei: config.compute.rate_per_hour_wei });
   }
 
+  // ── Worker executor ──────────────────────────────────────────────────────
+  const workerExecutor = new WorkerExecutor({
+    maxConcurrentJobs: config.worker?.max_concurrent_jobs ?? 2,
+    jobTimeoutSeconds: config.worker?.job_timeout_seconds ?? 3600,
+    agentType: (config.worker?.agent_type as import("./worker-executor").AgentType | undefined) ?? "claude-code",
+    autoExecute: config.worker?.auto_execute ?? true,
+    delivery: fileDelivery,
+  });
+  workerExecutor.log = log;
+
+  // onJobCompleted: worker finished — submit fulfill UserOp on-chain, update DB, notify
+  workerExecutor.onJobCompleted = (agreementId, rootHash) => {
+    log({ event: "worker_job_completed", agreement_id: agreementId, root_hash: rootHash });
+    const hire = db.getHireRequestByAgreementId(agreementId);
+    if (!hire) {
+      log({ event: "worker_complete_no_hire", agreement_id: agreementId });
+      return;
+    }
+
+    // Mark delivered in DB
+    db.updateHireRequestStatus(hire.id, "delivered");
+
+    // Submit fulfill UserOp
+    if (config.serviceAgreementAddress) {
+      const callData = buildFulfillCalldata(
+        config.serviceAgreementAddress,
+        agreementId,
+        rootHash,
+        config.wallet.contract_address
+      );
+      userOps.submit(callData, config.wallet.contract_address)
+        .then((hash) => {
+          log({ event: "fulfill_userop_submitted", agreement_id: agreementId, userop_hash: hash, root_hash: rootHash });
+          // Generate receipt + extract learnings
+          const now = new Date().toISOString();
+          const startedAt = new Date(hire.created_at).toISOString();
+          const receipt = generateReceipt({
+            agreementId,
+            deliverableHash: rootHash,
+            walletAddress: config.wallet.contract_address,
+            startedAt,
+            completedAt: now,
+          });
+          extractLearnings({
+            agreementId,
+            taskDescription: hire.capability ?? "unknown",
+            deliverableHash: rootHash,
+            priceEth: hire.price_eth ?? "0",
+            capability: hire.capability ?? "general",
+            wallClockSeconds: receipt.metrics.wall_clock_seconds,
+            success: true,
+          });
+          db.updateHireRequestStatus(hire.id, "complete");
+          log({ event: "job_lifecycle_complete", agreement_id: agreementId, receipt_hash: receipt.receipt_hash });
+          if (config.notifications.notify_on_delivery) {
+            void notifier.notifyDelivery(agreementId, rootHash, "");
+          }
+        })
+        .catch((err: unknown) => {
+          log({ event: "fulfill_userop_error", agreement_id: agreementId, error: String(err) });
+        });
+    }
+  };
+
+  // onJobFailed: worker failed — log, update DB, notify operator
+  workerExecutor.onJobFailed = (agreementId, error) => {
+    log({ event: "worker_job_failed", agreement_id: agreementId, error });
+    const hire = db.getHireRequestByAgreementId(agreementId);
+    if (hire) {
+      db.updateHireRequestStatus(hire.id, "rejected", `worker_failed: ${error}`);
+    }
+    void notifier.send("hire_rejected", "Job Execution Failed", [
+      `Agreement: ${agreementId}`,
+      `Error: ${error}`,
+      ``,
+      `Manual deliver: arc402 deliver ${agreementId} --hash <hash>`,
+    ].join("\n")).catch(() => {});
+  };
+
+  log({ event: "worker_executor_ready", agent_type: workerExecutor["agentType"], max_concurrent: workerExecutor["maxConcurrentJobs"] });
+
   // ── Step 10: Start relay listener ───────────────────────────────────────
   const hireListener = new HireListener(config, db, notifier, config.wallet.contract_address);
 
@@ -581,12 +676,13 @@ export async function runDaemon(foreground = false): Promise<void> {
     machineKeyAddress,
     hireListener,
     userOps,
+    workerExecutor,
     activeAgreements: 0,
     bundlerMode: config.bundler.mode,
     bundlerEndpoint,
   };
 
-  // Wire approve callback — submits UserOp when hire is auto-accepted
+  // Wire approve callback — submits UserOp when hire is auto-accepted, then enqueues execution
   hireListener.setApproveCallback(async (hireId) => {
     const hire = db.getHireRequest(hireId);
     if (!hire || !hire.agreement_id || !config.serviceAgreementAddress) return;
@@ -601,6 +697,14 @@ export async function runDaemon(foreground = false): Promise<void> {
       if (config.notifications.notify_on_hire_accepted) {
         await notifier.notifyHireAccepted(hireId, hire.agreement_id);
       }
+
+      // Enqueue task execution — worker runs the job, then delivers on completion
+      workerExecutor.enqueue({
+        agreementId: hire.agreement_id,
+        capability: hire.capability ?? "general",
+        specHash: hire.spec_hash ?? "0x0",
+      });
+      log({ event: "job_enqueued", id: hireId, agreement_id: hire.agreement_id, capability: hire.capability });
     } catch (err) {
       log({ event: "accept_userop_error", id: hireId, error: String(err) });
     }
