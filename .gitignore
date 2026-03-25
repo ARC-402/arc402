@@ -17,6 +17,12 @@ reference/typechain-types/
 *.zip
 .vercel
 
+# Root runtime/generated outputs (must never be tracked)
+broadcast/
+cache/
+deliverables/
+.wake/
+
 # Python local artifacts
 .python-version
 .venv/

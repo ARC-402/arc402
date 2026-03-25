@@ -1,8 +1,0 @@
-{
-  "id": "membrain",
-  "name": "GigaBrain Lossless Memory",
-  "version": "1.0.0",
-  "description": "Lossless context engine. Stores all conversation chunks to SQLite instead of summarizing. Retrieves relevant history on assembly.",
-  "kind": "context-engine",
-  "configSchema": {}
-}
