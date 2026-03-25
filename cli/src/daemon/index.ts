@@ -828,6 +828,22 @@ export async function runDaemon(foreground = false): Promise<void> {
 
   const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status"]);
 
+  // Protocol POST endpoints — open to external agents (no daemon token required).
+  // These are inbound P2P messages: hire proposals, handshakes, delivery notifications, etc.
+  // EIP-191 signature in the request body is the trust mechanism, not the daemon bearer token.
+  // The bearer token is for operator/admin actions only (approve, reject, status).
+  const PUBLIC_POST_PATHS = new Set([
+    "/hire",
+    "/hire/accepted",
+    "/handshake",
+    "/message",
+    "/delivery",
+    "/delivery/accepted",
+    "/dispute",
+    "/dispute/resolved",
+    "/workroom/status",
+  ]);
+
   // CORS whitelist — localhost for local tooling, arc402.xyz for the web app
   const CORS_WHITELIST = new Set(["localhost", "127.0.0.1", "arc402.xyz", "app.arc402.xyz"]);
 
@@ -858,9 +874,12 @@ export async function runDaemon(foreground = false): Promise<void> {
       return;
     }
 
-    // Auth required on all POST endpoints (GET public paths are open).
-    // /job/* GET routes use party auth (verifyPartyAccess) instead of daemon bearer token.
-    if (req.method === "POST" || (req.method === "GET" && !PUBLIC_GET_PATHS.has(pathname) && !pathname.startsWith("/job/"))) {
+    // Auth: protocol POST endpoints are open (P2P — external agents have no daemon token).
+    //       Operator GET paths and all non-protocol POSTs require the daemon bearer token.
+    //       /job/* GET routes use party-based EIP-191 auth (verifyPartyAccess), not bearer token.
+    const isPublicPost = req.method === "POST" && PUBLIC_POST_PATHS.has(pathname);
+    const isPublicGet = req.method === "GET" && (PUBLIC_GET_PATHS.has(pathname) || pathname.startsWith("/job/"));
+    if (!isPublicPost && !isPublicGet) {
       const authHeader = req.headers["authorization"] ?? "";
       const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
       if (token !== apiToken) {
