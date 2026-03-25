@@ -40,6 +40,17 @@ subgraph/
 tools/
 CLI-SPEC.md
 E2E-TEST-SPEC.md
+CHANGELOG.md
+COMPUTE-AUDIT-SPEC.md
+COMPUTE-LAUNCH-CHECKLIST.md
+WORKER-HARNESS-SPEC.md
+PLUGIN-REVIEW-2026-03-23.md
+AUDIT-*.md
+docs/AUDIT-*.md
+report.md
+python-sdk/CHANGELOG.md
+E2E-TESTNET-RESULTS-*.md
+E2E-TESTNET-SUBSCRIPTION-*.md
 .vercelignore
 python-sdk/examples/
 docs/audit-briefs/
