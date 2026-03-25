@@ -145,12 +145,21 @@ iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
 
 log "Default policy: DROP all outbound (except loopback, established, DNS)"
 
+# Allow host gateway (OpenClaw) — hardcoded Docker bridge IP + configurable port.
+# The gateway runs on the host and is reachable via the Docker bridge network.
+# This allows the worker executor to route agent tasks to the host gateway
+# without a binary inside the container.
+HOST_GATEWAY_IP="${DOCKER_HOST_IP:-172.17.0.1}"
+HOST_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
+iptables -A OUTPUT -p tcp -d "$HOST_GATEWAY_IP" --dport "$HOST_GATEWAY_PORT" -j ACCEPT
+log "Host gateway allowed: $HOST_GATEWAY_IP:$HOST_GATEWAY_PORT (OpenClaw)"
+
 # Apply resolved IP rules
 for i in "${!RESOLVED_IPS[@]}"; do
   iptables -A OUTPUT -p tcp -d "${RESOLVED_IPS[$i]}" --dport "${RESOLVED_PORTS[$i]}" -j ACCEPT
 done
 
-log "$RESOLVE_COUNT iptables rules applied"
+log "$((RESOLVE_COUNT + 1)) iptables rules applied (incl. host gateway)"
 
 # ─── Phase 3: Log applied rules ───────────────────────────────────────────
 

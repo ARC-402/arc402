@@ -433,16 +433,13 @@ network_policies:
         "-v", `${path.join(ARC402_DIR, "worker")}:/workroom/worker:rw`,
         // Mount Arena data directory (feed index, profile cache, state, queue)
         "-v", `${ARENA_DATA_DIR}:/workroom/arena:rw`,
-        // Mount Claude auth file if present (only needed when agent_type = "claude-code").
-        // Default agent_type is "openclaw" which handles auth internally.
-        // Kept as a convenience mount so claude-code fallback works without manual steps.
+        // Mount Claude auth file — workroom user HOME is /workroom, so ~/.claude.json = /workroom/.claude.json
         ...(fs.existsSync(path.join(os.homedir(), ".claude.json"))
-          ? ["-v", `${path.join(os.homedir(), ".claude.json")}:/home/workroom/.claude.json:ro`]
+          ? ["-v", `${path.join(os.homedir(), ".claude.json")}:/workroom/.claude.json:ro`]
           : []),
-        // Mount OpenClaw config + data so the openclaw runtime inside the workroom
-        // has access to its auth, models, and gateway config.
+        // Mount OpenClaw config — workroom user HOME is /workroom
         ...(fs.existsSync(path.join(os.homedir(), ".openclaw"))
-          ? ["-v", `${path.join(os.homedir(), ".openclaw")}:/home/workroom/.openclaw:ro`]
+          ? ["-v", `${path.join(os.homedir(), ".openclaw")}:/workroom/.openclaw:ro`]
           : []),
         // Inject secrets as env vars
         "-e", `ARC402_MACHINE_KEY=${machineKey}`,
@@ -450,6 +447,9 @@ network_policies:
         "-e", `TELEGRAM_CHAT_ID=${telegramChat}`,
         "-e", `ARC402_DAEMON_PROCESS=1`,
         "-e", `ARC402_DAEMON_FOREGROUND=1`,
+        // Pass host gateway URL so WorkerExecutor can route openclaw jobs to the host
+        "-e", `OPENCLAW_GATEWAY_URL=http://172.17.0.1:${process.env.OPENCLAW_GATEWAY_PORT || "18789"}`,
+        "-e", `OPENCLAW_GATEWAY_PORT=${process.env.OPENCLAW_GATEWAY_PORT || "18789"}`,
         // Inject enabled provider API keys (never written to container disk)
         ...providerEnvFlags,
         // Expose relay port

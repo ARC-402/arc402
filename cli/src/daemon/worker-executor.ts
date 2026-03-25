@@ -21,6 +21,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as http from "http";
+import * as https from "https";
 import { spawn, type ChildProcess } from "child_process";
 import { FileDeliveryManager, type DeliveryManifest } from "./file-delivery.js";
 import { createJobDirectory } from "./job-lifecycle.js";
@@ -236,11 +238,15 @@ export class WorkerExecutor {
     this.log({ event: "worker_started", agreement_id: rec.agreementId, agent: rec.agentType });
 
     try {
-      const exitCode = await this.spawnAgent(rec, logStream);
-      rec.exitCode = exitCode;
-
-      if (exitCode !== 0) {
-        throw new Error(`agent exited with code ${exitCode}`);
+      // openclaw routes through the host gateway HTTP API — no subprocess spawn
+      if (rec.agentType === "openclaw") {
+        await this.runViaGateway(rec, logStream);
+      } else {
+        const exitCode = await this.spawnAgent(rec, logStream);
+        rec.exitCode = exitCode;
+        if (exitCode !== 0) {
+          throw new Error(`agent exited with code ${exitCode}`);
+        }
       }
 
       // Collect output files and upload
@@ -277,6 +283,87 @@ export class WorkerExecutor {
       this.runningCount--;
       this.drainQueue();
     }
+  }
+
+  /**
+   * Execute a job via the host OpenClaw gateway HTTP API.
+   * The gateway is reachable at OPENCLAW_GATEWAY_URL (default: http://172.17.0.1:18789).
+   * Posts the task to /agent and writes the response to deliverable.md in the job dir.
+   *
+   * This is the correct execution path for agent_type = "openclaw" because:
+   * - The gateway runs on the host with full auth (Max subscription OAuth)
+   * - The gateway can spawn any ACP (Claude, Codex, Gemini, etc.)
+   * - No binary needed inside the container
+   * - The host gateway IP must be in the workroom network policy
+   */
+  private async runViaGateway(rec: ExecutionRecord, logStream: fs.WriteStream): Promise<void> {
+    const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL || "http://172.17.0.1:18789";
+    const taskText = this.buildTask(rec.capability, rec.specHash, rec.agreementId);
+
+    logStream.write(`[worker-executor] Routing to OpenClaw gateway: ${gatewayUrl}\n`);
+    logStream.write(`[worker-executor] Agreement: ${rec.agreementId}\n`);
+    logStream.write(`[worker-executor] Capability: ${rec.capability}\n\n`);
+
+    const payload = JSON.stringify({
+      message: taskText,
+      workdir: rec.jobDir,
+      jobId: rec.agreementId,
+      capability: rec.capability,
+    });
+
+    const response = await new Promise<string>((resolve, reject) => {
+      const url = new URL("/agent", gatewayUrl);
+      const isHttps = url.protocol === "https:";
+      const mod = isHttps ? https : http;
+
+      const req = mod.request({
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
+          // Pass job context so the gateway agent has scope awareness
+          "X-ARC402-Job-Id": rec.agreementId,
+          "X-ARC402-Capability": rec.capability,
+        },
+        timeout: this.jobTimeoutMs,
+      }, (res) => {
+        let body = "";
+        res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+        res.on("end", () => {
+          if (res.statusCode && res.statusCode >= 400) {
+            reject(new Error(`Gateway returned ${res.statusCode}: ${body.slice(0, 200)}`));
+          } else {
+            resolve(body);
+          }
+        });
+      });
+
+      req.on("error", (err) => reject(new Error(`Gateway connection failed: ${err.message}`)));
+      req.on("timeout", () => {
+        req.destroy();
+        reject(new Error("gateway_timeout"));
+      });
+      req.write(payload);
+      req.end();
+    });
+
+    // Parse gateway response — may be JSON {reply, output} or raw text
+    let deliverable = response;
+    try {
+      const parsed = JSON.parse(response) as { reply?: string; output?: string; message?: string };
+      deliverable = parsed.reply ?? parsed.output ?? parsed.message ?? response;
+    } catch { /* use raw response */ }
+
+    logStream.write(`[worker-executor] Gateway response received (${deliverable.length} chars)\n`);
+    logStream.write(`\n--- Gateway Output ---\n${deliverable}\n`);
+
+    // Write deliverable.md
+    const deliverablePath = path.join(rec.jobDir, "deliverable.md");
+    fs.writeFileSync(deliverablePath, `# Deliverable\n\nAgreement: ${rec.agreementId}\nCapability: ${rec.capability}\n\n---\n\n${deliverable}`, "utf-8");
+    logStream.write(`[worker-executor] Deliverable written to ${deliverablePath}\n`);
   }
 
   private spawnAgent(rec: ExecutionRecord, logStream: fs.WriteStream): Promise<number> {
