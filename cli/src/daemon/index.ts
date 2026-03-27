@@ -457,12 +457,7 @@ function formatUptime(seconds: number): string {
 
 // ─── Daemon main ──────────────────────────────────────────────────────────────
 
-// Extend config with serviceAgreementAddress (loaded from CLI config if available)
-declare module "./config" {
-  interface DaemonConfig {
-    serviceAgreementAddress?: string;
-  }
-}
+// serviceAgreementAddress is now part of DaemonConfig directly (see config.ts)
 
 export async function runDaemon(foreground = false): Promise<void> {
   fs.mkdirSync(DAEMON_DIR, { recursive: true, mode: 0o700 });

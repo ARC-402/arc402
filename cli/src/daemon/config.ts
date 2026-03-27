@@ -102,6 +102,8 @@ export interface DaemonConfig {
     job_timeout_seconds: number;
     auto_execute: boolean;        // if false: accept on-chain but don't spawn agent (manual exec)
   };
+  // Contract addresses — read from daemon.toml [contracts] section or CLI config.json fallback
+  serviceAgreementAddress: string | null;
 }
 
 function resolveEnvValue(value: string, field: string): string {
@@ -245,6 +247,22 @@ function withDefaults(raw: Record<string, unknown>): DaemonConfig {
       job_timeout_seconds:   num(worker.job_timeout_seconds, 3600),
       auto_execute:          bool(worker.auto_execute, true),
     },
+    // Read serviceAgreementAddress from [contracts] section in daemon.toml,
+    // or fall back to ~/.arc402/config.json (CLI config) if not set.
+    serviceAgreementAddress: (() => {
+      const contracts = (raw.contracts as Record<string, unknown>) ?? {};
+      const fromToml = str(contracts.service_agreement_address);
+      if (fromToml) return fromToml;
+      try {
+        const cliCfgPath = path.join(os.homedir(), ".arc402", "config.json");
+        if (fs.existsSync(cliCfgPath)) {
+          const cliCfg = JSON.parse(fs.readFileSync(cliCfgPath, "utf-8")) as Record<string, unknown>;
+          const addr = cliCfg.serviceAgreementAddress as string | undefined;
+          if (addr) return addr;
+        }
+      } catch { /* ignore */ }
+      return null;
+    })(),
   };
 }
 
