@@ -35,6 +35,7 @@ import { registerWatchCommand } from "./commands/watch";
 import { registerBackupCommand } from "./commands/backup";
 import { registerComputeCommands } from "./commands/compute";
 import { registerTunnelCommands } from "./commands/tunnel";
+import { registerJobCommands } from "./commands/job";
 import reputation from "./commands/reputation.js";
 import policy from "./commands/policy.js";
 
@@ -84,6 +85,7 @@ export function createProgram(): Command {
   registerBackupCommand(program);
   registerComputeCommands(program);
   registerTunnelCommands(program);
+  registerJobCommands(program);
   program.addCommand(reputation);
   program.addCommand(policy);
 
