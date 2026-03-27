@@ -335,6 +335,31 @@ network_policies:
         console.log(c.dim("   No providers enabled in credentials.toml — edit to enable providers."));
       }
 
+      // ── Auto-register worker agent in openclaw.json ──────────────────────
+      {
+        const workerAgentId = process.env.OPENCLAW_WORKER_AGENT_ID || "arc";
+        const openClawConfigPath = process.env.OPENCLAW_CONFIG || path.join(os.homedir(), ".openclaw", "openclaw.json");
+        try {
+          const ocRaw = fs.readFileSync(openClawConfigPath, "utf-8");
+          const ocConfig = JSON.parse(ocRaw);
+          const agentList: Array<{ id: string }> = ocConfig?.agents?.list ?? [];
+          if (!agentList.some((a) => a.id === workerAgentId)) {
+            if (!ocConfig.agents) ocConfig.agents = {};
+            if (!ocConfig.agents.list) ocConfig.agents.list = [];
+            ocConfig.agents.list.push({
+              id: workerAgentId,
+              model: { primary: "anthropic/claude-sonnet-4-6", fallbacks: ["openai-codex/gpt-5.4"] },
+            });
+            fs.writeFileSync(openClawConfigPath, JSON.stringify(ocConfig, null, 2), "utf-8");
+            console.log(" " + c.success + c.white(` Worker agent "${workerAgentId}" registered in openclaw.json`));
+          } else {
+            console.log(" " + c.dim(`(skip) Worker agent "${workerAgentId}" already registered in openclaw.json`));
+          }
+        } catch {
+          console.log(" " + c.warning + " " + c.yellow(`Could not find openclaw.json — add agent id: ${workerAgentId} manually`));
+        }
+      }
+
       // Build image — always rebuild on init so native binaries (e.g. better-sqlite3)
       // are compiled for Linux inside the container, not reused from a stale host-built image.
       if (!buildImage()) {
@@ -643,6 +668,25 @@ network_policies:
       // Machine key env
       const mk = !!process.env.ARC402_MACHINE_KEY;
       checks.push({ label: "Machine key env", pass: mk, detail: mk ? "set" : "ARC402_MACHINE_KEY not in environment" });
+
+      // Worker agent registered in openclaw.json
+      {
+        const workerAgentId = process.env.OPENCLAW_WORKER_AGENT_ID || "arc";
+        const openClawConfigPath = process.env.OPENCLAW_CONFIG || path.join(os.homedir(), ".openclaw", "openclaw.json");
+        let workerAgentOk = false;
+        let workerAgentDetail = "";
+        try {
+          const ocConfig = JSON.parse(fs.readFileSync(openClawConfigPath, "utf-8"));
+          const agentList: Array<{id: string}> = ocConfig?.agents?.list ?? [];
+          workerAgentOk = agentList.some(a => a.id === workerAgentId);
+          workerAgentDetail = workerAgentOk
+            ? `"${workerAgentId}" found — gateway will route hired jobs`
+            : `"${workerAgentId}" not found in openclaw.json — run: arc402 workroom init to auto-add`;
+        } catch {
+          workerAgentDetail = "openclaw.json not found or unreadable";
+        }
+        checks.push({ label: "Worker agent (OpenClaw)", pass: workerAgentOk, detail: workerAgentDetail });
+      }
 
       // Network connectivity (if running)
       if (running) {
