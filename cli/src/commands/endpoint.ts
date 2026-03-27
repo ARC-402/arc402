@@ -390,13 +390,40 @@ async function buildDoctorChecks(endpoint = loadEndpointConfig()): Promise<Docto
       detail: `claimed at ${endpoint.claimedAt}`,
     });
   } else {
-    checks.push({
-      layer: "public",
-      label: "Subdomain claim",
-      ok: false,
-      detail: "not claimed yet",
-      fix: `Run \`arc402 endpoint claim ${endpoint.agentName}${endpoint.tunnelTarget ? "" : " --tunnel-target <https://...>"}\`.`,
-    });
+    // Before reporting "not claimed", check if AgentRegistry already has the endpoint on-chain.
+    // This handles fresh machines or wallet migrations where the subdomain was claimed in a
+    // previous session or on a different machine — claimedAt is a local flag, not chain truth.
+    let claimedOnChain = false;
+    try {
+      const cfg = loadConfig();
+      const registryAddress = readAgentRegistryAddress();
+      const walletAddress = endpoint.walletAddress ?? cfg.walletContractAddress;
+      if (registryAddress && walletAddress) {
+        const { provider } = await getClient(cfg);
+        const registry = new AgentRegistryClient(registryAddress, provider);
+        const agent = await registry.getAgent(walletAddress);
+        if (agent.endpoint && endpoint.publicUrl && agent.endpoint.toLowerCase() === endpoint.publicUrl.toLowerCase()) {
+          claimedOnChain = true;
+        }
+      }
+    } catch { /* non-fatal — fall through to local-only check */ }
+
+    if (claimedOnChain) {
+      checks.push({
+        layer: "public",
+        label: "Subdomain claim",
+        ok: true,
+        detail: `claimed on-chain (AgentRegistry) — local claimedAt not set (migrated or fresh machine). Run \`arc402 endpoint init ${endpoint.agentName}\` to sync.`,
+      });
+    } else {
+      checks.push({
+        layer: "public",
+        label: "Subdomain claim",
+        ok: false,
+        detail: "not claimed yet — local config and AgentRegistry have no endpoint for this wallet",
+        fix: `Run \`arc402 endpoint claim ${endpoint.agentName}${endpoint.tunnelTarget ? "" : " --tunnel-target <https://...>"}\`.`,
+      });
+    }
   }
 
   checks.push(await checkPublicHostname(endpoint));
@@ -519,7 +546,7 @@ export function registerEndpointCommands(program: Command): void {
       console.log(`Tunnel mode:     ${cfg.tunnelMode}`);
       console.log(`Local target:    ${cfg.localIngressTarget}`);
       console.log(`Tunnel target:   ${cfg.tunnelTarget ?? "not set"}`);
-      console.log(`Claimed at:      ${cfg.claimedAt ?? "not yet claimed"}`);
+      console.log(`Claimed at:      ${cfg.claimedAt ?? "not yet claimed (run doctor to verify on-chain state)"}`);
       console.log(`Config file:     ${ENDPOINT_CONFIG_PATH}`);
       console.log(`\nReadiness: ${allGood ? chalk.green("fully proven for current launch scope") : chalk.yellow("partial proof / needs attention")}`);
       if (brokenLayers.length) {
