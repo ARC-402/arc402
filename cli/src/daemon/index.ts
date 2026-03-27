@@ -591,6 +591,8 @@ export async function runDaemon(foreground = false): Promise<void> {
     agentType: (config.worker?.agent_type as import("./worker-executor").AgentType | undefined) ?? "claude-code",
     autoExecute: config.worker?.auto_execute ?? true,
     delivery: fileDelivery,
+    signer: machineKeySigner,
+    serviceAgreementAddress: config.serviceAgreementAddress ?? null,
   });
   workerExecutor.log = log;
 
@@ -931,7 +933,7 @@ export async function runDaemon(foreground = false): Promise<void> {
           const proposal = {
             messageId: String(msg.messageId ?? msg.id ?? `http_${Date.now()}`),
             hirerAddress: String(msg.hirerAddress ?? msg.hirer_address ?? msg.from ?? ""),
-            capability: String(msg.capability ?? ""),
+            capability: String(msg.capability ?? msg.serviceType ?? ""),
             priceEth: String(msg.priceEth ?? msg.price_eth ?? "0"),
             deadlineUnix: Number(msg.deadlineUnix ?? msg.deadline ?? 0),
             specHash: String(msg.specHash ?? msg.spec_hash ?? ""),

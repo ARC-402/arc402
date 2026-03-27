@@ -24,8 +24,13 @@ import * as os from "os";
 import * as http from "http";
 import * as https from "https";
 import { spawn, type ChildProcess } from "child_process";
+import { ethers } from "ethers";
 import { FileDeliveryManager, type DeliveryManifest } from "./file-delivery.js";
 import { createJobDirectory } from "./job-lifecycle.js";
+
+const COMMIT_DELIVERABLE_ABI = [
+  "function commitDeliverable(uint256 agreementId, bytes32 deliverableHash) external",
+];
 
 const ARC402_DIR = path.join(os.homedir(), ".arc402");
 const JOBS_DIR = path.join(ARC402_DIR, "jobs");
@@ -95,6 +100,8 @@ export class WorkerExecutor {
   private readonly agentType: AgentType;
   private readonly autoExecute: boolean;
   private readonly delivery: FileDeliveryManager;
+  private readonly signer: ethers.Signer | null;
+  private readonly serviceAgreementAddress: string | null;
 
   private readonly jobs = new Map<string, ExecutionRecord>();
   private queue: string[] = [];
@@ -111,12 +118,16 @@ export class WorkerExecutor {
     agentType?: AgentType;
     autoExecute?: boolean;
     delivery: FileDeliveryManager;
+    signer?: ethers.Signer | null;
+    serviceAgreementAddress?: string | null;
   }) {
     this.maxConcurrentJobs = opts.maxConcurrentJobs ?? 2;
     this.jobTimeoutMs = (opts.jobTimeoutSeconds ?? 3600) * 1000;
     this.agentType = opts.agentType ?? "openclaw";
     this.autoExecute = opts.autoExecute ?? true;
     this.delivery = opts.delivery;
+    this.signer = opts.signer ?? null;
+    this.serviceAgreementAddress = opts.serviceAgreementAddress ?? null;
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
@@ -252,6 +263,28 @@ export class WorkerExecutor {
       // Collect output files and upload
       const manifest = await this.collectDeliverables(rec, logStream);
       rec.deliverableHash = manifest.root_hash;
+
+      // Commit deliverable on-chain if signer and contract address are available
+      if (this.signer && this.serviceAgreementAddress) {
+        try {
+          logStream.write(`[worker-executor] Committing deliverable on-chain for agreement ${rec.agreementId}...\n`);
+          const saContract = new ethers.Contract(
+            this.serviceAgreementAddress,
+            COMMIT_DELIVERABLE_ABI,
+            this.signer
+          );
+          const tx = await saContract.commitDeliverable(BigInt(rec.agreementId), manifest.root_hash) as ethers.TransactionResponse;
+          const receipt = await tx.wait();
+          const txHash = receipt?.hash ?? tx.hash;
+          logStream.write(`[worker-executor] commitDeliverable tx: ${txHash}\n`);
+          this.log({ event: "worker_commit_deliverable", agreement_id: rec.agreementId, tx_hash: txHash, root_hash: manifest.root_hash });
+        } catch (commitErr) {
+          const msg = commitErr instanceof Error ? commitErr.message : String(commitErr);
+          logStream.write(`[worker-executor] Warning: commitDeliverable failed: ${msg}\n`);
+          this.log({ event: "worker_commit_deliverable_error", agreement_id: rec.agreementId, error: msg });
+        }
+      }
+
       rec.status = "completed";
       rec.completedAt = Date.now();
 

@@ -15,6 +15,20 @@ import { startSpinner } from "../ui/spinner";
 import { renderTree } from "../ui/tree";
 import { formatAddress } from "../ui/format";
 
+// ─── Gateway token helper ─────────────────────────────────────────────────────
+
+function getGatewayToken(): string {
+  if (process.env.OPENCLAW_GATEWAY_TOKEN) return process.env.OPENCLAW_GATEWAY_TOKEN;
+  try {
+    const cfgPath = path.join(os.homedir(), ".openclaw", "openclaw.json");
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+      return cfg?.gateway?.auth?.token ?? "";
+    }
+  } catch { /* ignore */ }
+  return "";
+}
+
 // ─── Daemon lifecycle notify ──────────────────────────────────────────────────
 
 function notifyDaemonWorkroomStatus(
@@ -476,7 +490,11 @@ network_policies:
         "-e", `OPENCLAW_GATEWAY_URL=http://172.17.0.1:${process.env.OPENCLAW_GATEWAY_PORT || "18789"}`,
         "-e", `OPENCLAW_GATEWAY_PORT=${process.env.OPENCLAW_GATEWAY_PORT || "18789"}`,
         "-e", `OPENCLAW_WORKER_AGENT_ID=${process.env.OPENCLAW_WORKER_AGENT_ID || "arc"}`,
-        ...(process.env.OPENCLAW_GATEWAY_TOKEN ? ["-e", `OPENCLAW_GATEWAY_TOKEN=${process.env.OPENCLAW_GATEWAY_TOKEN}`] : []),
+        ...(() => {
+          const tok = getGatewayToken();
+          if (!tok) console.warn("[workroom] Warning: OPENCLAW_GATEWAY_TOKEN not set — gateway auth will be skipped");
+          return tok ? ["-e", `OPENCLAW_GATEWAY_TOKEN=${tok}`] : [];
+        })(),
         // Inject enabled provider API keys (never written to container disk)
         ...providerEnvFlags,
         // Expose relay port

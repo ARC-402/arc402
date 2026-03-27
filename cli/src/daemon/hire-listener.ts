@@ -104,7 +104,7 @@ function parseProposal(msg: Record<string, unknown>): HireProposal | null {
   return {
     messageId: String(msg.messageId ?? msg.id ?? `msg_${Date.now()}`),
     hirerAddress: String(payload.hirerAddress ?? payload.hirer_address ?? msg.from ?? ""),
-    capability: String(payload.capability ?? ""),
+    capability: String(payload.capability ?? payload.serviceType ?? ""),
     priceEth: String(payload.priceEth ?? payload.price_eth ?? "0"),
     deadlineUnix: Number(payload.deadlineUnix ?? payload.deadline ?? 0),
     specHash: String(payload.specHash ?? payload.spec_hash ?? ""),
