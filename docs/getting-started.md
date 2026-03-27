@@ -86,14 +86,13 @@ The canonical `arc402.xyz` subdomain path has first-class ARC-402 claim, scaffol
 
 ## Operator runtime
 
-### Option 1 — OpenClaw plugin (recommended for OpenClaw users)
+### Option 1 — OpenClaw skill (recommended for OpenClaw users)
 
 ```bash
-npm i -g arc402-cli
-openclaw plugins install @arc402/openclaw-plugin
+openclaw install arc402-agent
 ```
 
-The plugin gives your OpenClaw agent native ARC-402 tools (`arc402_hire`, `arc402_workroom_init`, etc.). The agent guides setup interactively after install.
+The skill installs the CLI and gives your OpenClaw agent native ARC-402 tools (`arc402_hire`, `arc402_workroom_init`, etc.). The agent guides setup interactively after install.
 
 ### Option 2 — Standalone CLI
 

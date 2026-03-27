@@ -44,9 +44,10 @@ The runtime path connects them. At launch, ARC-402 starts and manages that ARC-4
 ### For OpenClaw Users (recommended)
 
 ```bash
-npm i -g arc402-cli
-openclaw plugins install @arc402/openclaw-plugin
+openclaw install arc402-agent
 ```
+
+The skill installs the CLI and gives your OpenClaw agent native ARC-402 tools.
 
 ### Standalone CLI
 
@@ -380,14 +381,14 @@ ARC-402 aims to provide a shared addressing and agreement layer for the agent ec
 
 | Contract | Address |
 |----------|---------|
-| PolicyEngine | [`0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847`](https://basescan.org/address/0xAA5Ef3489C929bFB3BFf5D5FE15aa62d3763c847) |
+| PolicyEngine | [`0x0743ab6a7280b416D3b75c7e5457390906312139`](https://basescan.org/address/0x0743ab6a7280b416d3b75c7e5457390906312139) |
 | TrustRegistryV3 | [`0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1`](https://basescan.org/address/0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1) |
 | IntentAttestation | [`0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460`](https://basescan.org/address/0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460) |
 | SettlementCoordinator | [`0x6653F385F98752575db3180b9306e2d9644f9Eb1`](https://basescan.org/address/0x6653F385F98752575db3180b9306e2d9644f9Eb1) |
 | ARC402RegistryV2 | [`0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622`](https://basescan.org/address/0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622) |
 | ARC402RegistryV3 | [`0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6`](https://basescan.org/address/0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6) |
 | AgentRegistry | [`0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865`](https://basescan.org/address/0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865) |
-| WalletFactoryV5 | [`0xcB52B5d746eEc05e141039E92e3dBefeAe496051`](https://basescan.org/address/0xcB52B5d746eEc05e141039E92e3dBefeAe496051) |
+| WalletFactoryV6 | [`0x801f0553585f511D9953419A9668edA078196997`](https://basescan.org/address/0x801f0553585f511d9953419a9668eda078196997) |
 | WalletCodeOracle v5 | [`0x594B1afdBb899F598fdbe468449EC202f4c4D7BD`](https://basescan.org/address/0x594B1afdBb899F598fdbe468449EC202f4c4D7BD) |
 | ServiceAgreement | [`0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6`](https://basescan.org/address/0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6) |
 | SessionChannels | [`0x578f8d1bd82E8D6268E329d664d663B4d985BE61`](https://basescan.org/address/0x578f8d1bd82E8D6268E329d664d663B4d985BE61) |
@@ -395,7 +396,7 @@ ARC-402 aims to provide a shared addressing and agreement layer for the agent ec
 | DisputeArbitration | [`0xF61b75E4903fbC81169FeF8b7787C13cB7750601`](https://basescan.org/address/0xF61b75E4903fbC81169FeF8b7787C13cB7750601) |
 | SponsorshipAttestation | [`0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22`](https://basescan.org/address/0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22) |
 | VouchingRegistry | [`0x94519194Bf17865770faD59eF581feC512Ae99c9`](https://basescan.org/address/0x94519194Bf17865770faD59eF581feC512Ae99c9) |
-| MigrationRegistry | [`0xb60B62357b90F254f555f03B162a30E22890e3B5`](https://basescan.org/address/0xb60B62357b90F254f555f03B162a30E22890e3B5) |
+| MigrationRegistryV2 | [`0x4821D8A590eD4DbEf114fCA3C2d9311e81D576DF`](https://basescan.org/address/0x4821d8a590ed4dbef114fca3c2d9311e81d576df) |
 | ReputationOracle | [`0x359F76a54F9A345546E430e4d6665A7dC9DaECd4`](https://basescan.org/address/0x359F76a54F9A345546E430e4d6665A7dC9DaECd4) |
 | ARC402Governance | [`0xE931DD2EEb9Af9353Dd5E2c1250492A0135E0EC4`](https://basescan.org/address/0xE931DD2EEb9Af9353Dd5E2c1250492A0135E0EC4) |
 | ARC402Guardian | [`0xED0A033B79626cdf9570B6c3baC7f699cD0032D8`](https://basescan.org/address/0xED0A033B79626cdf9570B6c3baC7f699cD0032D8) |
