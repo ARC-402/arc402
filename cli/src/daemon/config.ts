@@ -253,14 +253,21 @@ function withDefaults(raw: Record<string, unknown>): DaemonConfig {
       const contracts = (raw.contracts as Record<string, unknown>) ?? {};
       const fromToml = str(contracts.service_agreement_address);
       if (fromToml) return fromToml;
-      try {
-        const cliCfgPath = path.join(os.homedir(), ".arc402", "config.json");
-        if (fs.existsSync(cliCfgPath)) {
-          const cliCfg = JSON.parse(fs.readFileSync(cliCfgPath, "utf-8")) as Record<string, unknown>;
-          const addr = cliCfg.serviceAgreementAddress as string | undefined;
-          if (addr) return addr;
-        }
-      } catch { /* ignore */ }
+      // Check CLI config.json in multiple locations (host home, workroom dir, DAEMON_DIR)
+      const cliConfigCandidates = [
+        path.join(os.homedir(), ".arc402", "config.json"),
+        path.join(DAEMON_DIR, "config.json"),
+        "/workroom/.arc402/config.json",
+      ];
+      for (const cliCfgPath of cliConfigCandidates) {
+        try {
+          if (fs.existsSync(cliCfgPath)) {
+            const cliCfg = JSON.parse(fs.readFileSync(cliCfgPath, "utf-8")) as Record<string, unknown>;
+            const addr = cliCfg.serviceAgreementAddress as string | undefined;
+            if (addr) return addr;
+          }
+        } catch { /* ignore */ }
+      }
       return null;
     })(),
   };
