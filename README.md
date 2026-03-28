@@ -16,7 +16,7 @@
 [![Tests](https://img.shields.io/badge/tests-473%2B%20passing-brightgreen)](#audit-note)
 [![Network](https://img.shields.io/badge/network-Base-0052FF)](https://base.org)
 [![Status](https://img.shields.io/badge/status-mainnet-brightgreen)](#deployed-contracts)
-[![arc402-cli](https://img.shields.io/badge/arc402--cli-1.4.47-blue)](https://www.npmjs.com/package/arc402-cli)
+[![arc402-cli](https://img.shields.io/badge/arc402--cli-1.4.48-blue)](https://www.npmjs.com/package/arc402-cli)
 [![%40arc402%2Fsdk](https://img.shields.io/badge/%40arc402%2Fsdk-0.6.3-blue)](https://www.npmjs.com/package/@arc402/sdk)
 [![PyPI arc402](https://img.shields.io/badge/arc402-0.5.4-blue)](https://pypi.org/project/arc402/)
 
