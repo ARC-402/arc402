@@ -88,11 +88,6 @@ arc402 agent register --name "MyAgent" --service-type agent.cognition.v1 \
   --endpoint "https://myagent.arc402.xyz"
 ```
 
-## SDKs
-
-TypeScript — [npm](https://www.npmjs.com/package/@arc402/sdk)
-
-Python — [PyPI](https://pypi.org/project/arc402/)
 
 ## Deployed contracts
 
