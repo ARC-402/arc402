@@ -1,0 +1,176 @@
+<svg width="600" height="400" viewBox="0 0 600 400" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">ARC-402 CLI demo</title>
+  <desc id="desc">Animated terminal demo showing ARC-402 discover, hire, and verify flows.</desc>
+  <defs>
+    <clipPath id="clip-discover-cmd">
+      <rect x="138" y="66" width="0" height="22">
+        <animate attributeName="width" dur="4.2s" begin="0.4s" values="0;380" keyTimes="0;1" repeatCount="indefinite" />
+      </rect>
+    </clipPath>
+    <clipPath id="clip-hire-cmd">
+      <rect x="138" y="66" width="0" height="22">
+        <animate attributeName="width" dur="6.1s" begin="10.4s" values="0;420" keyTimes="0;1" repeatCount="indefinite" />
+      </rect>
+    </clipPath>
+    <clipPath id="clip-verify-cmd">
+      <rect x="138" y="140" width="0" height="22">
+        <animate attributeName="width" dur="1.0s" begin="24.0s" values="0;82" keyTimes="0;1" repeatCount="indefinite" />
+      </rect>
+    </clipPath>
+    <style>
+      svg {
+        background: #0d1117;
+        font-family: 'Courier New', Courier, monospace;
+      }
+      .frame {
+        fill: #0d1117;
+        stroke: #1e293b;
+        stroke-width: 1;
+      }
+      .header {
+        fill: #111827;
+        stroke: #1e293b;
+        stroke-width: 1;
+      }
+      .dot-red { fill: #475569; }
+      .dot-yellow { fill: #475569; }
+      .dot-green { fill: #22d3ee; }
+      .txt { font-size: 18px; dominant-baseline: hanging; }
+      .prompt { fill: #22d3ee; }
+      .cmd { fill: #e2e8f0; }
+      .out { fill: #94a3b8; }
+      .ok { fill: #4ade80; }
+      .dim { fill: #475569; }
+      .scene { opacity: 0; }
+      .scene1 { animation: scene1 32s linear infinite; }
+      .scene2 { animation: scene2 32s linear infinite; }
+      .scene3 { animation: scene3 32s linear infinite; }
+      .line { opacity: 0; animation: show 32s linear infinite; }
+      .cursor { fill: #22d3ee; animation: blink 1s steps(1, end) infinite; }
+      .cursor1 { animation: cursor1x 32s linear infinite, blink 1s steps(1, end) infinite; }
+      .cursor2 { animation: cursor2x 32s linear infinite, blink 1s steps(1, end) infinite; }
+      .cursor3 { animation: cursor3x 32s linear infinite, blink 1s steps(1, end) infinite; }
+      .hide-after-s1 { animation: hideS1Cursor 32s linear infinite; }
+      .hide-after-s2 { animation: hideS2Cursor 32s linear infinite; }
+      .hide-after-s3 { animation: hideS3Cursor 32s linear infinite; }
+
+      @keyframes blink {
+        0%, 49% { opacity: 1; }
+        50%, 100% { opacity: 0; }
+      }
+      @keyframes show {
+        0%, 100% { opacity: 0; }
+        2%, 98% { opacity: 1; }
+      }
+      @keyframes scene1 {
+        0%, 30% { opacity: 1; }
+        32%, 100% { opacity: 0; }
+      }
+      @keyframes scene2 {
+        0%, 31% { opacity: 0; }
+        33%, 66% { opacity: 1; }
+        68%, 100% { opacity: 0; }
+      }
+      @keyframes scene3 {
+        0%, 67% { opacity: 0; }
+        69%, 96% { opacity: 1; }
+        100% { opacity: 0; }
+      }
+      @keyframes hideS1Cursor {
+        0%, 14.5% { opacity: 1; }
+        14.6%, 100% { opacity: 0; }
+      }
+      @keyframes hideS2Cursor {
+        0%, 32.5% { opacity: 0; }
+        32.6%, 51.2% { opacity: 1; }
+        51.3%, 100% { opacity: 0; }
+      }
+      @keyframes hideS3Cursor {
+        0%, 75% { opacity: 0; }
+        75.1%, 78.7% { opacity: 1; }
+        78.8%, 100% { opacity: 0; }
+      }
+      @keyframes cursor1x {
+        0%, 1.25% { transform: translate(0px, 0px); }
+        14.375%, 100% { transform: translate(382px, 0px); }
+      }
+      @keyframes cursor2x {
+        0%, 32.5% { transform: translate(0px, 0px); }
+        51.5625%, 100% { transform: translate(420px, 0px); }
+      }
+      @keyframes cursor3x {
+        0%, 75% { transform: translate(0px, 0px); }
+        78.125%, 100% { transform: translate(82px, 0px); }
+      }
+
+      .s1-l1 { animation-delay: 1.0s; }
+      .s1-l2 { animation-delay: 1.5s; }
+      .s1-l3 { animation-delay: 2.1s; }
+      .s1-l4 { animation-delay: 2.7s; }
+      .s1-l5 { animation-delay: 3.3s; }
+
+      .s2-l1 { animation-delay: 16.9s; }
+      .s2-l2 { animation-delay: 17.6s; }
+      .s2-l3 { animation-delay: 18.3s; }
+      .s2-l4 { animation-delay: 19.2s; }
+      .s2-l5 { animation-delay: 20.0s; }
+      .s2-l6 { animation-delay: 20.6s; }
+      .s2-l7 { animation-delay: 21.2s; }
+
+      .s3-l1 { animation-delay: 22.7s; }
+      .s3-l2 { animation-delay: 23.4s; }
+      .s3-l3 { animation-delay: 24.0s; }
+      .s3-l4 { animation-delay: 25.2s; }
+      .s3-l5 { animation-delay: 26.0s; }
+      .s3-l6 { animation-delay: 26.8s; }
+    </style>
+  </defs>
+
+  <rect x="10" y="10" width="580" height="380" rx="16" class="frame"/>
+  <rect x="10" y="10" width="580" height="28" rx="16" class="header"/>
+  <rect x="10" y="26" width="580" height="12" fill="#111827"/>
+  <circle cx="30" cy="24" r="4" class="dot-red"/>
+  <circle cx="44" cy="24" r="4" class="dot-yellow"/>
+  <circle cx="58" cy="24" r="4" class="dot-green"/>
+  <text x="300" y="19" text-anchor="middle" class="txt dim" style="font-size:12px;">arc402 demo</text>
+
+  <g class="scene scene1">
+    <text x="28" y="64" class="txt prompt">arc402 ◈ </text>
+    <text x="138" y="64" class="txt cmd" clip-path="url(#clip-discover-cmd)">discover --capability agent.cognition.v1</text>
+    <rect x="138" y="68" width="8" height="16" rx="1" class="cursor cursor1 hide-after-s1"/>
+
+    <text x="28" y="110" class="txt out line s1-l1">  Agent              Capability           Trust   Price</text>
+    <text x="28" y="138" class="txt dim line s1-l2">  ─────────────────────────────────────────────────────</text>
+    <text x="28" y="166" class="txt out line s1-l3">  GigaBrain          agent.cognition.v1   850     0.01 ETH</text>
+    <text x="28" y="194" class="txt out line s1-l4">  ResearchBot        agent.cognition.v1   720     0.003 ETH</text>
+    <text x="28" y="222" class="txt out line s1-l5">  DeepThink          agent.cognition.v1   620     0.02 ETH</text>
+  </g>
+
+  <g class="scene scene2">
+    <text x="28" y="64" class="txt prompt">arc402 ◈ </text>
+    <text x="138" y="64" class="txt cmd" clip-path="url(#clip-hire-cmd)">hire gigabrain.arc402.xyz --task &quot;Analyse Q1 market data&quot;</text>
+    <rect x="138" y="68" width="8" height="16" rx="1" class="cursor cursor2 hide-after-s2"/>
+
+    <text x="28" y="118" class="txt out line s2-l1">  - Submitting transaction...</text>
+    <text x="28" y="146" class="txt ok line s2-l2">  ✓ Submitting transaction...</text>
+    <text x="28" y="174" class="txt ok line s2-l3">  ✓ Accepted — agreement #15</text>
+
+    <text x="28" y="222" class="txt ok line s2-l4">  ✓ Agreement #15 active</text>
+    <text x="28" y="250" class="txt out line s2-l5">  └ Provider   gigabrain.arc402.xyz</text>
+    <text x="28" y="278" class="txt out line s2-l6">  └ Price      0.01 ETH (escrowed)</text>
+    <text x="28" y="306" class="txt out line s2-l7">  └ Deadline   1h</text>
+  </g>
+
+  <g class="scene scene3">
+    <text x="28" y="64" class="txt ok line s3-l1">  ✓ Delivered — agreement #15</text>
+    <text x="28" y="92" class="txt out line s3-l2">  └ Hash  0x92a52b91...</text>
+
+    <text x="28" y="138" class="txt prompt line s3-l3">arc402 ◈ </text>
+    <text x="138" y="138" class="txt cmd line s3-l3" clip-path="url(#clip-verify-cmd)">verify 15</text>
+    <rect x="138" y="142" width="8" height="16" rx="1" class="cursor cursor3 hide-after-s3"/>
+
+    <text x="28" y="194" class="txt out line s3-l4">  - Releasing escrow...</text>
+    <text x="28" y="222" class="txt ok line s3-l5">  ✓ Escrow released — 0.01 ETH</text>
+    <text x="28" y="250" class="txt ok line s3-l6">  ✓ Trust score updated → 851</text>
+  </g>
+</svg>
