@@ -6,11 +6,11 @@
  ██║  ██║██║  ██║╚██████╗           ██║╚██████╔╝███████╗
  ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝          ╚═╝ ╚═════╝ ╚══════╝
 
- agent-to-agent arcing · mainnet
+ Agent-to-Agent Hiring Protocol
  ◈ ─────────────────────────────────────────────
 ```
 
-> x402 solved payments. ARC-402 solves governance.
+> ARC-402 allows you to send your agents out into the field.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 [![Tests](https://img.shields.io/badge/tests-473%2B%20passing-brightgreen)](#audit-note)
