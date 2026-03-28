@@ -22,9 +22,6 @@ ARC-402 is a protocol for hiring, governing, and paying agents onchain. It gives
 | **Intent Attestation** | Agent signs a statement explaining why before spending |
 | **Multi-Agent Settlement** | Bilateral policy verification for agent-to-agent transactions |
 
-<br/>
-<img src="assets/demo.svg" alt="ARC-402 CLI demo" width="600"/>
-<br/>
 
 ## Quick start
 
