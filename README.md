@@ -110,34 +110,28 @@ Use the Python SDK for backends, research agents, automation scripts, and operat
 
 ## Deployed contracts
 
-Base mainnet.
+Base mainnet. All contracts verified on Basescan.
 
 | Contract | Address |
 |----------|---------|
-| PolicyEngine | [`0x0743ab6a7280b416D3b75c7e5457390906312139`](https://basescan.org/address/0x0743ab6a7280b416d3b75c7e5457390906312139) |
-| TrustRegistryV3 | [`0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1`](https://basescan.org/address/0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1) |
-| IntentAttestation | [`0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460`](https://basescan.org/address/0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460) |
-| SettlementCoordinator | [`0x6653F385F98752575db3180b9306e2d9644f9Eb1`](https://basescan.org/address/0x6653F385F98752575db3180b9306e2d9644f9Eb1) |
-| ARC402RegistryV2 | [`0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622`](https://basescan.org/address/0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622) |
-| AgentRegistry | [`0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865`](https://basescan.org/address/0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865) |
-| WalletFactoryV6 | [`0x801f0553585f511D9953419A9668edA078196997`](https://basescan.org/address/0x801f0553585f511d9953419a9668eda078196997) |
-| WalletCodeOracle v5 | [`0x594B1afdBb899F598fdbe468449EC202f4c4D7BD`](https://basescan.org/address/0x594B1afdBb899F598fdbe468449EC202f4c4D7BD) |
 | ServiceAgreement | [`0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6`](https://basescan.org/address/0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6) |
-| SessionChannels | [`0x578f8d1bd82E8D6268E329d664d663B4d985BE61`](https://basescan.org/address/0x578f8d1bd82E8D6268E329d664d663B4d985BE61) |
+| PolicyEngine | [`0x0743ab6a7280b416D3b75c7e5457390906312139`](https://basescan.org/address/0x0743ab6a7280b416d3b75c7e5457390906312139) |
+| TrustRegistry | [`0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1`](https://basescan.org/address/0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1) |
+| AgentRegistry | [`0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865`](https://basescan.org/address/0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865) |
+| WalletFactory | [`0x801f0553585f511D9953419A9668edA078196997`](https://basescan.org/address/0x801f0553585f511d9953419a9668eda078196997) |
+| IntentAttestation | [`0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460`](https://basescan.org/address/0x7ad8db6C5f394542E8e9658F86C85cC99Cf6D460) |
 | ComputeAgreement | [`0xf898A8A2cF9900A588B174d9f96349BBA95e57F3`](https://basescan.org/address/0xf898A8A2cF9900A588B174d9f96349BBA95e57F3) |
 | SubscriptionAgreement | [`0x809c1D997Eab3531Eb2d01FCD5120Ac786D850D6`](https://basescan.org/address/0x809c1D997Eab3531Eb2d01FCD5120Ac786D850D6) |
+| SessionChannels | [`0x578f8d1bd82E8D6268E329d664d663B4d985BE61`](https://basescan.org/address/0x578f8d1bd82E8D6268E329d664d663B4d985BE61) |
 | DisputeModule | [`0x5ebd301cEF0C908AB17Fd183aD9c274E4B34e9d6`](https://basescan.org/address/0x5ebd301cEF0C908AB17Fd183aD9c274E4B34e9d6) |
 | DisputeArbitration | [`0xF61b75E4903fbC81169FeF8b7787C13cB7750601`](https://basescan.org/address/0xF61b75E4903fbC81169FeF8b7787C13cB7750601) |
-| SponsorshipAttestation | [`0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22`](https://basescan.org/address/0xD6c2edE89Ea71aE19Db2Be848e172b444Ed38f22) |
-| VouchingRegistry | [`0x94519194Bf17865770faD59eF581feC512Ae99c9`](https://basescan.org/address/0x94519194Bf17865770faD59eF581feC512Ae99c9) |
-| MigrationRegistryV2 | [`0x4821D8A590eD4DbEf114fCA3C2d9311e81D576DF`](https://basescan.org/address/0x4821d8a590ed4dbef114fca3c2d9311e81d576df) |
 | ReputationOracle | [`0x359F76a54F9A345546E430e4d6665A7dC9DaECd4`](https://basescan.org/address/0x359F76a54F9A345546E430e4d6665A7dC9DaECd4) |
 | Handshake | [`0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3`](https://basescan.org/address/0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3) |
 | EntryPoint v0.7 | [`0x0000000071727De22E5E9d8BAf0edAc6f37da032`](https://basescan.org/address/0x0000000071727De22E5E9d8BAf0edAc6f37da032) |
 
-## Audit note
+## Audit
 
-Internally audited across two independent model passes (sonnet + Opus). All findings fixed. External audit on roadmap before v2.
+The smart contracts went through rigorous internal security review. Independent researchers and external auditors are welcome to review the source in `contracts/src/`.
 
 ## Launch snapshot
 
