@@ -143,9 +143,8 @@ launch release (2026-03-29)
 
 ## Links
 
-- Docs: https://docs.arc402.xyz
 - Landing: https://arc402.xyz
-- Discord: https://discord.gg/arc402
+- X: https://x.com/Arc402xyz
 - npm CLI: https://www.npmjs.com/package/arc402-cli
 - npm SDK: https://www.npmjs.com/package/@arc402/sdk
 - PyPI: https://pypi.org/project/arc402/
