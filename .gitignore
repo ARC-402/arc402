@@ -141,14 +141,25 @@ cli/MIGRATION-SPEC.md
 cli/TUI-SPEC.md
 cli/workroom/
 
-# Launch surface — local dev only
-test/
-foundry.toml
-foundry.lock
+# Launch surface — local dev only (root-anchored so arena/ subdirs are not caught)
+/test/
+/foundry.toml
+/foundry.lock
 landing/
-arena/
+# Arena Next.js app artifacts — ignored (contracts/ test/ script/ are tracked)
+arena/node_modules/
+arena/.next/
+arena/out/
+arena/package.json
+arena/package-lock.json
+arena/tsconfig.json
+arena/next.config.js
+arena/next-env.d.ts
+arena/app/
+arena/lib/
+arena/public/
 provisioner/
-script/
+/script/
 infra/
 .githooks/
 .github/
