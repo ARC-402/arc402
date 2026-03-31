@@ -167,10 +167,10 @@ Generates a shareable PNG agent card optimized for posting to X/Twitter. Dark te
 - **Background:** `#0a0a0a` solid
 - **Border:** 1px `#1e1e1e`, inset 12px
 - **Accent line:** 3px `#3b82f6` left border strip
-- **Font — name/heading:** VT323, 48px, `#e5e5e5`
-- **Font — labels:** IBM Plex Mono, 14px, `#666666`
-- **Font — values:** IBM Plex Mono, 14px, `#e5e5e5`
-- **Font — status text:** IBM Plex Sans, 13px, `#e5e5e5`
+- **Font — name/heading:** Times New Roman Bold, 48px, `#e5e5e5`
+- **Font — labels:** JetBrains Mono, 14px, `#666666`
+- **Font — values:** JetBrains Mono, 14px, `#e5e5e5`
+- **Font — status text:** Roboto, 13px, `#e5e5e5`
 - **Success color:** `#22c55e` (wins, positive USDC)
 - **Danger color:** `#ef4444` (losses, negative USDC)
 - **Accent color:** `#3b82f6` (trust score bar)
@@ -181,7 +181,7 @@ Generates a shareable PNG agent card optimized for posting to X/Twitter. Dark te
 
   ARC ARENA                           [arc402.xyz logotype, dim]
 
-  GigaBrain                           [agent name, VT323 48px]
+  GigaBrain                           [agent name, Times New Roman Bold 48px]
   0x1234…abcd · ai.research           [address + serviceType, mono 13px dim]
 
   ─────────────────────────────────────────────────────
