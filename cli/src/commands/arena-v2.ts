@@ -10,9 +10,25 @@ import { AGENT_REGISTRY_ABI, TRUST_REGISTRY_ABI } from "../abis";
 import { startSpinner } from "../ui/spinner";
 import { c } from "../ui/colors";
 
-// ─── Hardcoded Arena v2 contract addresses ─────────────────────────────────
+// ─── Arena v2 contract addresses ───────────────────────────────────────────
+// Resolved dynamically from ARC402RegistryV3.extensions() at runtime.
+// Fallback to hardcoded values if registry is unreachable (graceful degradation).
 
-const ARENA_ADDRESSES = {
+const REGISTRY_V3 = "0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6";
+const REGISTRY_V3_ABI = ["function extensions(bytes32 key) view returns (address)"];
+
+const ARENA_KEYS = [
+  "arena.statusRegistry",
+  "arena.researchSquad",
+  "arena.squadBriefing",
+  "arena.agentNewsletter",
+  "arena.arenaPool",
+  "arena.intelligenceRegistry",
+] as const;
+
+type ArenaKey = typeof ARENA_KEYS[number];
+
+const ARENA_FALLBACK: Record<ArenaKey, string> = {
   "arena.statusRegistry":       "0x5367C514C733cc5A8D16DaC35E491d1839a5C244",
   "arena.researchSquad":        "0xa758d4a9f2EE2b77588E3f24a2B88574E3BF451C",
   "arena.squadBriefing":        "0x8Df0e3079390E07eCA9799641bda27615eC99a2A",
@@ -20,6 +36,41 @@ const ARENA_ADDRESSES = {
   "arena.arenaPool":            "0x299f8Aa1D30dE3dCFe689eaEDED7379C32DB8453",
   "arena.intelligenceRegistry": "0x8d5b4987C74Ad0a09B5682C6d4777bb4230A7b12",
 };
+
+// Module-level cache — resolved once per process, reused across all commands
+let _arenaAddressCache: Record<ArenaKey, string> | null = null;
+
+async function resolveArenaAddresses(rpcUrl?: string): Promise<Record<ArenaKey, string>> {
+  if (_arenaAddressCache) return _arenaAddressCache;
+
+  try {
+    const provider = new ethers.JsonRpcProvider(rpcUrl ?? "https://mainnet.base.org");
+    const registry = new ethers.Contract(REGISTRY_V3, REGISTRY_V3_ABI, provider);
+
+    const resolved: Partial<Record<ArenaKey, string>> = {};
+    await Promise.all(
+      ARENA_KEYS.map(async (key) => {
+        const onchain = await (registry["extensions"] as (k: string) => Promise<string>)(
+          ethers.keccak256(ethers.toUtf8Bytes(key))
+        );
+        resolved[key] = (onchain && onchain !== ethers.ZeroAddress)
+          ? onchain
+          : ARENA_FALLBACK[key];
+      })
+    );
+
+    _arenaAddressCache = resolved as Record<ArenaKey, string>;
+  } catch {
+    // Registry unreachable — use fallback silently
+    _arenaAddressCache = { ...ARENA_FALLBACK };
+  }
+
+  return _arenaAddressCache;
+}
+
+// Synchronous accessor used by commands that already have addresses resolved
+// Call resolveArenaAddresses() first in any command that needs these.
+let ARENA_ADDRESSES: Record<ArenaKey, string> = { ...ARENA_FALLBACK };
 
 const AGENT_REGISTRY_ADDR = "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865";
 const TRUST_REGISTRY_ADDR = "0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1";
@@ -164,6 +215,12 @@ function squadStatusLabel(status: number): string {
 // ─── Main register function ────────────────────────────────────────────────
 
 export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
+
+  // Resolve arena addresses from registry at startup (async, cached)
+  const cfg = loadConfig();
+  resolveArenaAddresses(cfg.rpcUrl).then((addrs) => {
+    ARENA_ADDRESSES = addrs;
+  }).catch(() => { /* fallback already set */ });
 
   // ══════════════════════════════════════════════════════════════════════════
   // IDENTITY

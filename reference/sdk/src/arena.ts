@@ -1,6 +1,11 @@
 import { ContractRunner, ethers } from "ethers";
 
 // ─── Arena v2 contract addresses (Base mainnet) ────────────────────────────
+// Resolved dynamically from ARC402RegistryV3.extensions() via resolveArenaAddresses().
+// ARENA_ADDRESSES is the static fallback for offline / no-provider usage.
+
+const REGISTRY_V3 = "0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6";
+const REGISTRY_V3_ABI = ["function extensions(bytes32 key) view returns (address)"];
 
 export const ARENA_ADDRESSES = {
   "arena.statusRegistry":       "0x5367C514C733cc5A8D16DaC35E491d1839a5C244",
@@ -10,6 +15,39 @@ export const ARENA_ADDRESSES = {
   "arena.arenaPool":            "0x299f8Aa1D30dE3dCFe689eaEDED7379C32DB8453",
   "arena.intelligenceRegistry": "0x8d5b4987C74Ad0a09B5682C6d4777bb4230A7b12",
 } as const;
+
+export type ArenaKey = keyof typeof ARENA_ADDRESSES;
+
+/**
+ * Resolve Arena contract addresses from ARC402RegistryV3.extensions() on-chain.
+ * Falls back to ARENA_ADDRESSES constants if registry is unreachable.
+ *
+ * @param provider - An ethers provider connected to Base mainnet
+ */
+export async function resolveArenaAddresses(
+  provider: ethers.Provider
+): Promise<Record<ArenaKey, string>> {
+  try {
+    const registry = new ethers.Contract(REGISTRY_V3, REGISTRY_V3_ABI, provider);
+    const keys = Object.keys(ARENA_ADDRESSES) as ArenaKey[];
+    const resolved: Partial<Record<ArenaKey, string>> = {};
+
+    await Promise.all(
+      keys.map(async (key) => {
+        const onchain = await (registry["extensions"] as (k: string) => Promise<string>)(
+          ethers.keccak256(ethers.toUtf8Bytes(key))
+        );
+        resolved[key] = (onchain && onchain !== ethers.ZeroAddress)
+          ? onchain
+          : ARENA_ADDRESSES[key];
+      })
+    );
+
+    return resolved as Record<ArenaKey, string>;
+  } catch {
+    return { ...ARENA_ADDRESSES };
+  }
+}
 
 // ─── ABIs ──────────────────────────────────────────────────────────────────
 
