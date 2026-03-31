@@ -69,7 +69,7 @@ contract AgentNewsletterTest is Test {
 
     function test_CreateNewsletter_HappyPath() public {
         vm.expectEmit(true, true, false, true);
-        emit AgentNewsletter.NewsletterCreated(0, publisher, NAME, ENDPOINT);
+        emit AgentNewsletter.NewsletterCreated(0, publisher, NAME, DESC, ENDPOINT);
 
         uint256 id = _createNewsletter(publisher);
         assertEq(id, 0);
@@ -288,5 +288,66 @@ contract AgentNewsletterTest is Test {
 
     function test_MaxPreviewLength_Is140() public view {
         assertEq(newsletter.MAX_PREVIEW_LENGTH(), 140);
+    }
+    // ─── NEW: Deactivate newsletter happy path ────────────────────────────────
+
+    function test_DeactivateNewsletter_HappyPath() public {
+        uint256 id = _createNewsletter(publisher);
+
+        vm.expectEmit(true, false, false, true);
+        emit AgentNewsletter.NewsletterDeactivated(id, block.timestamp);
+
+        vm.prank(publisher);
+        newsletter.deactivateNewsletter(id);
+
+        assertFalse(newsletter.getNewsletter(id).active);
+    }
+
+
+    // ─── NEW: Publishing to deactivated newsletter reverts ───────────────────
+
+    function test_PublishIssue_DeactivatedNewsletter_Reverts() public {
+        uint256 id = _createNewsletter(publisher);
+
+        vm.prank(publisher);
+        newsletter.deactivateNewsletter(id);
+
+        vm.prank(publisher);
+        vm.expectRevert(AgentNewsletter.NewsletterNotActive.selector);
+        newsletter.publishIssue(id, HASH_1, PREVIEW_OK, ENDPOINT);
+    }
+
+    // ─── NEW: getIssues returns multiple issues in order ─────────────────────
+
+    function test_GetIssues_MultipleIssues_InOrder() public {
+        uint256 id = _createNewsletter(publisher);
+
+        _publishIssue(publisher, id, HASH_1, PREVIEW_OK, ENDPOINT);
+        _publishIssue(publisher, id, HASH_2, PREVIEW_OK, ENDPOINT);
+        _publishIssue(publisher, id, HASH_3, PREVIEW_OK, ENDPOINT_2);
+
+        AgentNewsletter.Issue[] memory issues = newsletter.getIssues(id);
+        assertEq(issues.length, 3);
+        assertEq(issues[0].issueNumber, 1);
+        assertEq(issues[0].contentHash, HASH_1);
+        assertEq(issues[1].issueNumber, 2);
+        assertEq(issues[1].contentHash, HASH_2);
+        assertEq(issues[2].issueNumber, 3);
+        assertEq(issues[2].contentHash, HASH_3);
+        assertEq(issues[2].endpoint, ENDPOINT_2);
+    }
+
+    // ─── NEW: Same hash cannot be published in two different newsletters ──────
+
+    function test_HashAlreadyPublished_Reverts() public {
+        // Publish HASH_1 in newsletter 0 (publisher)
+        uint256 id0 = _createNewsletter(publisher);
+        _publishIssue(publisher, id0, HASH_1, PREVIEW_OK, ENDPOINT);
+
+        // publisher2 creates newsletter 1 and tries to publish same HASH_1
+        uint256 id1 = _createNewsletter(publisher2);
+        vm.prank(publisher2);
+        vm.expectRevert(AgentNewsletter.HashAlreadyPublished.selector);
+        newsletter.publishIssue(id1, HASH_1, PREVIEW_OK, ENDPOINT_2);
     }
 }

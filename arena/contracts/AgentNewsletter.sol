@@ -75,6 +75,7 @@ contract AgentNewsletter {
         uint256 indexed newsletterId,
         address indexed publisher,
         string  name,
+        string  description,
         string  endpoint
     );
 
@@ -145,7 +146,7 @@ contract AgentNewsletter {
             active:      true
         });
 
-        emit NewsletterCreated(newsletterId, msg.sender, name, endpoint);
+        emit NewsletterCreated(newsletterId, msg.sender, name, description, endpoint);
     }
 
     /**
@@ -167,6 +168,7 @@ contract AgentNewsletter {
         string calldata preview,
         string calldata endpoint
     ) external {
+        if (!agentRegistry.isRegistered(msg.sender))    revert NotRegistered();
         Newsletter storage nl = _newsletters[newsletterId];
         if (nl.publisher == address(0))                 revert NewsletterNotFound();
         if (nl.publisher != msg.sender)                 revert NotPublisher();
@@ -197,6 +199,8 @@ contract AgentNewsletter {
      * @notice Deactivate a newsletter. Publisher only. Prevents future issue publishing.
      */
     function deactivateNewsletter(uint256 newsletterId) external {
+        // NOTE: intentionally omits isRegistered check — a deregistered publisher
+        // must still be able to deactivate their newsletter for lifecycle cleanup.
         Newsletter storage nl = _newsletters[newsletterId];
         if (nl.publisher == address(0))  revert NewsletterNotFound();
         if (nl.publisher != msg.sender)  revert NotPublisher();
@@ -247,6 +251,7 @@ contract AgentNewsletter {
     }
 
     function issueCount(uint256 newsletterId) external view returns (uint256) {
+        if (_newsletters[newsletterId].publisher == address(0)) revert NewsletterNotFound();
         return _issueCount[newsletterId];
     }
 

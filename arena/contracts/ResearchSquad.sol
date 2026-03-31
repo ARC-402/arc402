@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "./interfaces/IAgentRegistry.sol";
+import "./interfaces/IResearchSquad.sol";
 
 /**
  * @title ResearchSquad
@@ -18,12 +19,12 @@ import "./interfaces/IAgentRegistry.sol";
  *
  * @dev    Solidity 0.8.24 · immutable · no via_ir · no upgradeable proxy
  */
-contract ResearchSquad {
+contract ResearchSquad is IResearchSquad {
 
     // ─── Types ────────────────────────────────────────────────────────────────
 
+    /// @dev `Archived` is reserved for future use; no current transition sets it.
     enum Status     { Active, Completed, Archived }
-    enum Role       { Contributor, Lead }
 
     struct Squad {
         string  name;
@@ -56,6 +57,7 @@ contract ResearchSquad {
     error InvalidDomainTag();
     error ZeroAddress();
     error HashAlreadyRecorded();
+    error SquadFull();
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
@@ -83,11 +85,22 @@ contract ResearchSquad {
         uint256 timestamp
     );
 
+    event AgentInvited(
+        uint256 indexed squadId,
+        address indexed agent,
+        address indexed invitedBy,
+        uint256 timestamp
+    );
+
     event SquadConcluded(
         uint256 indexed squadId,
         address indexed concludedBy,
         uint256 timestamp
     );
+
+    // ─── Constants ────────────────────────────────────────────────────────────
+
+    uint256 public constant MAX_SQUAD_MEMBERS = 500;
 
     // ─── State ────────────────────────────────────────────────────────────────
 
@@ -171,6 +184,8 @@ contract ResearchSquad {
         if (_isMember[squadId][msg.sender])    revert AlreadyMember();
         if (squad.inviteOnly && !_invited[squadId][msg.sender]) revert InviteOnly();
 
+        if (squad.memberCount >= MAX_SQUAD_MEMBERS) revert SquadFull();
+
         // Effects
         _isMember[squadId][msg.sender] = true;
         _roles[squadId][msg.sender]    = Role.Contributor;
@@ -184,17 +199,21 @@ contract ResearchSquad {
      * @notice Invite an agent to an invite-only squad. Caller must be LEAD.
      */
     function inviteAgent(uint256 squadId, address agent) external {
+        if (!agentRegistry.isRegistered(msg.sender)) revert NotRegistered();
         Squad storage squad = _squads[squadId];
         if (squad.creator == address(0))    revert SquadNotFound();
         if (squad.status != Status.Active)  revert SquadNotActive();
         if (!_isMember[squadId][msg.sender] || _roles[squadId][msg.sender] != Role.Lead)
             revert NotLead();
         if (agent == address(0))            revert ZeroAddress();
+        if (!agentRegistry.isRegistered(agent)) revert NotRegistered();
         if (_isMember[squadId][agent])      revert AlreadyMember();
         if (_invited[squadId][agent])       revert AlreadyInvited();
 
         // Effects
         _invited[squadId][agent] = true;
+
+        emit AgentInvited(squadId, agent, msg.sender, block.timestamp);
     }
 
     /**
@@ -205,6 +224,7 @@ contract ResearchSquad {
         bytes32        contributionHash,
         string calldata description
     ) external {
+        if (!agentRegistry.isRegistered(msg.sender)) revert NotRegistered();
         Squad storage squad = _squads[squadId];
         if (squad.creator == address(0))       revert SquadNotFound();
         if (squad.status != Status.Active)     revert SquadNotActive();
@@ -230,6 +250,7 @@ contract ResearchSquad {
      * @notice Conclude (complete) a squad. Caller must be LEAD.
      */
     function concludeSquad(uint256 squadId) external {
+        if (!agentRegistry.isRegistered(msg.sender)) revert NotRegistered();
         Squad storage squad = _squads[squadId];
         if (squad.creator == address(0))    revert SquadNotFound();
         if (squad.status != Status.Active)  revert SquadNotActive();

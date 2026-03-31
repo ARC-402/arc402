@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import "../contracts/ResearchSquad.sol";
+import "../contracts/interfaces/IResearchSquad.sol";
 
 // ─── Mock AgentRegistry ───────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ contract ResearchSquadTest is Test {
     function test_CreateSquad_CreatorIsLead() public {
         _createSquad(agentA, false);
         assertTrue(squad.isMember(0, agentA));
-        assertEq(uint8(squad.getMemberRole(0, agentA)), uint8(ResearchSquad.Role.Lead));
+        assertEq(uint8(squad.getMemberRole(0, agentA)), uint8(IResearchSquad.Role.Lead));
     }
 
     // ─── 3. Unregistered agent cannot create squad ───────────────────────────
@@ -112,13 +113,13 @@ contract ResearchSquadTest is Test {
         _createSquad(agentA, false);
 
         vm.expectEmit(true, true, false, true);
-        emit ResearchSquad.MemberJoined(0, agentB, ResearchSquad.Role.Contributor, block.timestamp);
+        emit ResearchSquad.MemberJoined(0, agentB, IResearchSquad.Role.Contributor, block.timestamp);
 
         vm.prank(agentB);
         squad.joinSquad(0);
 
         assertTrue(squad.isMember(0, agentB));
-        assertEq(uint8(squad.getMemberRole(0, agentB)), uint8(ResearchSquad.Role.Contributor));
+        assertEq(uint8(squad.getMemberRole(0, agentB)), uint8(IResearchSquad.Role.Contributor));
         assertEq(squad.getSquad(0).memberCount, 2);
     }
 
@@ -336,5 +337,76 @@ contract ResearchSquadTest is Test {
         ResearchSquad.Contribution[] memory contribs = squad.getSquadContributions(0);
         assertEq(contribs.length, 1);
         assertEq(contribs[0].contributor, agentB);
+    }
+
+    // ─── NEW: Contributor cannot conclude squad ───────────────────────────────
+
+    function test_ConcludeSquad_Contributor_Reverts() public {
+        uint256 id = _createSquad(agentA, false);
+
+        vm.prank(agentB);
+        squad.joinSquad(id);
+
+        vm.prank(agentB);
+        vm.expectRevert(ResearchSquad.NotLead.selector);
+        squad.concludeSquad(id);
+    }
+
+    // ─── NEW: Cannot join concluded squad ────────────────────────────────────
+
+    function test_JoinSquad_ConcludedSquad_Reverts() public {
+        uint256 id = _createSquad(agentA, false);
+
+        vm.prank(agentA);
+        squad.concludeSquad(id);
+
+        vm.prank(agentB);
+        vm.expectRevert(ResearchSquad.SquadNotActive.selector);
+        squad.joinSquad(id);
+    }
+
+    // ─── NEW: Cannot contribute to concluded squad ────────────────────────────
+
+    function test_RecordContribution_ConcludedSquad_Reverts() public {
+        uint256 id = _createSquad(agentA, false);
+
+        vm.prank(agentA);
+        squad.concludeSquad(id);
+
+        vm.prank(agentA);
+        vm.expectRevert(ResearchSquad.SquadNotActive.selector);
+        squad.recordContribution(id, HASH_1, DESC_1);
+    }
+
+    // ─── NEW: LEAD invites agent, invited = true ──────────────────────────────
+
+    function test_InviteAgent_HappyPath() public {
+        uint256 id = _createSquad(agentA, true);
+
+        vm.expectEmit(true, true, true, true);
+        emit ResearchSquad.AgentInvited(id, agentB, agentA, block.timestamp);
+
+        vm.prank(agentA);
+        squad.inviteAgent(id, agentB);
+
+        assertTrue(squad.isInvited(id, agentB));
+    }
+
+    // ─── NEW: getMembers returns all members after joins ──────────────────────
+
+    function test_GetMembers_ReturnsAll() public {
+        uint256 id = _createSquad(agentA, false);
+
+        vm.prank(agentB);
+        squad.joinSquad(id);
+
+        vm.prank(agentC);
+        squad.joinSquad(id);
+
+        address[] memory members = squad.getMembers(id);
+        assertEq(members.length, 3);
+        assertEq(members[0], agentA);
+        assertEq(members[1], agentB);
+        assertEq(members[2], agentC);
     }
 }

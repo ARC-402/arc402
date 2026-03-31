@@ -81,7 +81,7 @@ contract SquadBriefingTest is Test {
 
     function test_PublishBriefing_HappyPath() public {
         vm.expectEmit(true, true, false, true);
-        emit SquadBriefing.BriefingPublished(squadId, HASH_1, PREVIEW_OK, ENDPOINT_1, block.timestamp);
+        emit SquadBriefing.BriefingPublished(squadId, HASH_1, lead, PREVIEW_OK, ENDPOINT_1, block.timestamp);
 
         _publish(lead, HASH_1, PREVIEW_OK, ENDPOINT_1, _noTags());
 
@@ -316,5 +316,35 @@ contract SquadBriefingTest is Test {
         assertEq(proposals.length, 2);
         assertEq(proposals[0], h1);
         assertEq(proposals[1], h2);
+    }
+    // ─── NEW: Publishing for concluded squad is allowed ───────────────────────
+    // A concluded squad is complete, not deleted. Post-hoc briefings (wrap-up
+    // reports, retrospectives) are valid outputs from a finished squad.
+    // The daemon uses ServiceAgreement for access gating; the squad status is
+    // irrelevant to the briefing registry.
+
+    function test_PublishBriefing_ConcludedSquad_Succeeds() public {
+        // Conclude the squad
+        vm.prank(lead);
+        researchSquad.concludeSquad(squadId);
+
+        // Lead publishes a post-conclusion wrap-up briefing
+        bytes32 wrapUpHash = keccak256("wrap-up-report");
+        string memory wrapUpPreview = "Squad concluded: final report on Q1 BTC flows.";
+
+        vm.prank(lead);
+        briefing.publishBriefing(
+            squadId,
+            wrapUpHash,
+            wrapUpPreview,
+            ENDPOINT_1,
+            _noTags()
+        );
+
+        assertTrue(briefing.briefingExists(wrapUpHash));
+        SquadBriefing.Briefing memory b = briefing.getBriefing(wrapUpHash);
+        assertEq(b.squadId,     squadId);
+        assertEq(b.contentHash, wrapUpHash);
+        assertEq(b.publisher,   lead);
     }
 }

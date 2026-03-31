@@ -2,14 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "./interfaces/IAgentRegistry.sol";
-
-// ─── ResearchSquad interface ──────────────────────────────────────────────────
-
-interface IResearchSquad {
-    enum Role { Contributor, Lead }
-    function isMember(uint256 squadId, address agent) external view returns (bool);
-    function getMemberRole(uint256 squadId, address member) external view returns (Role);
-}
+import "./interfaces/IResearchSquad.sol";
 
 /**
  * @title SquadBriefing
@@ -43,6 +36,7 @@ contract SquadBriefing {
     // ─── Constants ────────────────────────────────────────────────────────────
 
     uint256 public constant MAX_PREVIEW_LENGTH = 140;
+    uint256 public constant MAX_TAGS = 20;
 
     // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -67,10 +61,11 @@ contract SquadBriefing {
     error ProposalNotFound();
     error ProposalAlreadyExists();
     error ProposalAlreadyApproved();
-    error NotProposalSquad();
     error ZeroAddress();
     error EmptyEndpoint();
     error EmptyContentHash();
+    error ProposalNotPending();
+    error TooManyTags();
 
     // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -92,6 +87,7 @@ contract SquadBriefing {
     event BriefingPublished(
         uint256 indexed squadId,
         bytes32 indexed contentHash,
+        address indexed publisher,
         string  preview,
         string  endpoint,
         uint256 timestamp
@@ -177,6 +173,7 @@ contract SquadBriefing {
         if (contentHash == bytes32(0))                  revert EmptyContentHash();
         if (bytes(endpoint).length == 0)                revert EmptyEndpoint();
         if (bytes(preview).length > MAX_PREVIEW_LENGTH) revert PreviewTooLong();
+        if (tags.length > MAX_TAGS)                     revert TooManyTags();
         if (_published[contentHash])                    revert HashAlreadyPublished();
 
         // Caller must be a LEAD of the squad
@@ -200,7 +197,7 @@ contract SquadBriefing {
             b.tags.push(tags[i]);
         }
 
-        emit BriefingPublished(squadId, contentHash, preview, endpoint, block.timestamp);
+        emit BriefingPublished(squadId, contentHash, msg.sender, preview, endpoint, block.timestamp);
     }
 
     /**
@@ -224,8 +221,14 @@ contract SquadBriefing {
         if (contentHash == bytes32(0))                  revert EmptyContentHash();
         if (bytes(endpoint).length == 0)                revert EmptyEndpoint();
         if (bytes(preview).length > MAX_PREVIEW_LENGTH) revert PreviewTooLong();
+        if (tags.length > MAX_TAGS)                     revert TooManyTags();
         if (_published[contentHash])                    revert HashAlreadyPublished();
-        if (_proposalExists[contentHash])               revert ProposalAlreadyExists();
+        // Re-proposal is allowed after rejection; block only if pending or approved
+        if (_proposalExists[contentHash]) {
+            ProposalStatus s = _proposals[contentHash].status;
+            if (s == ProposalStatus.Pending || s == ProposalStatus.Approved)
+                revert ProposalAlreadyExists();
+        }
         if (!researchSquad.isMember(squadId, msg.sender)) revert NotSquadMember();
 
         // Effects
@@ -287,7 +290,7 @@ contract SquadBriefing {
         }
 
         emit ProposalApproved(p.squadId, contentHash, msg.sender, block.timestamp);
-        emit BriefingPublished(p.squadId, contentHash, p.preview, p.endpoint, block.timestamp);
+        emit BriefingPublished(p.squadId, contentHash, p.proposer, p.preview, p.endpoint, block.timestamp);
     }
 
     /**
@@ -300,7 +303,7 @@ contract SquadBriefing {
         if (!_proposalExists[contentHash])           revert ProposalNotFound();
 
         Proposal storage p = _proposals[contentHash];
-        if (p.status != ProposalStatus.Pending)      revert ProposalAlreadyApproved();
+        if (p.status != ProposalStatus.Pending)      revert ProposalNotPending();
 
         if (!researchSquad.isMember(p.squadId, msg.sender))
             revert NotSquadLead();
@@ -309,6 +312,8 @@ contract SquadBriefing {
 
         // Effects
         p.status = ProposalStatus.Rejected;
+        // Note: _proposalExists stays true so getProposal() still works;
+        // re-proposal is allowed because proposeBriefing checks status == Rejected.
 
         emit ProposalRejected(p.squadId, contentHash, msg.sender, block.timestamp);
     }
@@ -369,6 +374,21 @@ contract SquadBriefing {
         returns (bytes32[] memory)
     {
         return _squadProposals[squadId];
+    }
+
+    /**
+     * @notice Returns full Proposal structs for all proposals of a squad (all statuses).
+     */
+    function getSquadProposalsFull(uint256 squadId)
+        external
+        view
+        returns (Proposal[] memory result)
+    {
+        bytes32[] storage hashes = _squadProposals[squadId];
+        result = new Proposal[](hashes.length);
+        for (uint256 i = 0; i < hashes.length; i++) {
+            result[i] = _proposals[hashes[i]];
+        }
     }
 
     function proposalExists(bytes32 contentHash) external view returns (bool) {
