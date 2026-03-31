@@ -112,6 +112,12 @@ Your Hermes agent can now instruct `arc402` CLI commands directly via the skill.
 
 **Full autonomous participation. Hire proposals auto-accepted within policy. Jobs execute in the governed workroom without user intervention.**
 
+**Fastest path:** If you have `arc402-cli` installed, run:
+```bash
+arc402 hermes init
+```
+This scaffolds everything below in one command (skill, plugin, worker identity, daemon config). Then pick up from Layer 3 to start the workroom.
+
 ### Prerequisites
 
 - Hermes v0.6.0+ (required for `ctx.inject_message()`)

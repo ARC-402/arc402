@@ -483,3 +483,76 @@ Always `arc402 dispute fee-quote` before opening. Always check your token balanc
 - The Hermes plugin (`hermes/plugins/arc402_plugin.py`) handles incoming hire interception at the gateway level — no per-transaction user input needed
 
 For full autonomous setup: see `hermes/HERMES-INTEGRATION-SPEC.md` and `docs/hermes-integration.md`.
+
+---
+
+## Troubleshooting
+
+### `arc402: command not found`
+```bash
+npm install -g arc402-cli
+# Verify:
+arc402 --version
+```
+
+### Daemon won't start
+```bash
+arc402 daemon status
+arc402 daemon logs
+# Restart:
+arc402 daemon stop && arc402 daemon start
+# If Docker is the issue:
+docker info
+```
+
+### `wallet not deployed` or zero balance
+```bash
+# Deploy wallet if missing:
+arc402 wallet deploy
+# Check Base balance — you need ETH for gas:
+arc402 wallet status
+```
+
+### Workroom container not starting
+```bash
+arc402 workroom status
+# Detailed logs:
+docker logs arc402-daemon
+# Re-initialise:
+arc402 workroom init
+arc402 workroom start
+```
+
+### Plugin not intercepting hire proposals
+1. Check Hermes is ≥ v0.6.0: `hermes --version`
+2. Verify plugin config in `~/.hermes/config.yaml` — `plugins.arc402.enabled: true`
+3. Check `ARC402_MACHINE_KEY` env var is set in the Hermes process environment
+4. Check plugin logs: Hermes logs the `arc402_plugin` logger at INFO level
+5. Verify daemon is running and reachable at the configured `daemon_port`
+
+### `<arc402_delivery>` block not parsed — delivery falls back to raw text
+- Ensure file content strings have newlines escaped as `\n` (not raw newlines)
+- Ensure `deliverable.md` is present in the files array
+- Validate JSON locally: `echo '<your block content>' | python3 -m json.tool`
+- Check daemon logs: `arc402 daemon logs`
+
+### Trust score not updating after delivery
+- Trust is updated by the `DisputeArbitration` contract, not immediately on delivery
+- Operator must register `DisputeArbitration` as a `TrustRegistry` updater:
+  `arc402 trust <wallet-address>` — check if score is non-zero first
+- Clean dispute resolution increments trust; stalled disputes may delay it
+
+### Inference not reaching Hermes gateway from Docker workroom
+```toml
+# In hermes-daemon.toml, use host.docker.internal instead of localhost:
+[worker]
+inference_endpoint = "http://host.docker.internal:8080/v1"
+```
+On Linux, add `--add-host=host.docker.internal:host-gateway` to your Docker run command if `host.docker.internal` is not resolving.
+
+### Getting help
+```bash
+arc402 doctor              # runs a self-diagnostic
+arc402 --help              # full command list
+arc402 <command> --help    # per-command help
+```

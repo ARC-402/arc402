@@ -36,6 +36,7 @@ import { registerBackupCommand } from "./commands/backup";
 import { registerComputeCommands } from "./commands/compute";
 import { registerTunnelCommands } from "./commands/tunnel";
 import { registerJobCommands } from "./commands/job";
+import { registerHermesInitCommand } from "./commands/hermes-init";
 import reputation from "./commands/reputation.js";
 import policy from "./commands/policy.js";
 
@@ -86,6 +87,7 @@ export function createProgram(): Command {
   registerComputeCommands(program);
   registerTunnelCommands(program);
   registerJobCommands(program);
+  registerHermesInitCommand(program);
   program.addCommand(reputation);
   program.addCommand(policy);
 
