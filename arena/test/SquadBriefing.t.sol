@@ -457,4 +457,102 @@ contract SquadBriefingTest is Test {
         vm.expectRevert(SquadBriefing.NotRegistered.selector);
         briefing.citeBriefing(HASH_1, HASH_2, "outsider cite");
     }
+
+    // ─── Self-citation check ──────────────────────────────────────────────────
+
+    function test_CiteBriefing_SelfCitation_Reverts() public {
+        _publishDefault(); // lead published HASH_1
+
+        vm.prank(lead);
+        vm.expectRevert(SquadBriefing.SelfCitation.selector);
+        briefing.citeBriefing(HASH_1, HASH_2, "self-cite");
+    }
+
+    // ─── Trust snapshot stored correctly ─────────────────────────────────────
+
+    function test_CiteBriefing_TrustSnapshot_StoredCorrectly() public {
+        _publishDefault();
+
+        vm.prank(highCiter); // score = 500
+        briefing.citeBriefing(HASH_1, HASH_2, "great briefing");
+
+        uint256 snapshot = briefing.citationTrustSnapshot(highCiter, HASH_1);
+        assertEq(snapshot, 500);
+    }
+
+    function test_CiteBriefing_TrustSnapshot_LowTrust_StoredCorrectly() public {
+        _publishDefault();
+
+        vm.prank(lowCiter); // score = 100
+        briefing.citeBriefing(HASH_1, HASH_2, "low trust cite");
+
+        uint256 snapshot = briefing.citationTrustSnapshot(lowCiter, HASH_1);
+        assertEq(snapshot, 100);
+    }
+
+    // ─── getSquadProposalsPaginated ───────────────────────────────────────────
+
+    function test_GetSquadProposalsPaginated_BasicPagination() public {
+        // Create 5 proposals
+        bytes32[5] memory hashes;
+        for (uint i = 0; i < 5; i++) {
+            hashes[i] = keccak256(abi.encodePacked("paginated-proposal", i));
+            vm.prank(contributor);
+            briefing.proposeBriefing(squadId, hashes[i], "preview", "https://ep.xyz", new string[](0));
+        }
+
+        // Page 1: offset=0, limit=2
+        (bytes32[] memory page1, uint256 total1) = briefing.getSquadProposalsPaginated(squadId, 0, 2);
+        assertEq(total1, 5);
+        assertEq(page1.length, 2);
+        assertEq(page1[0], hashes[0]);
+        assertEq(page1[1], hashes[1]);
+
+        // Page 2: offset=2, limit=2
+        (bytes32[] memory page2, uint256 total2) = briefing.getSquadProposalsPaginated(squadId, 2, 2);
+        assertEq(total2, 5);
+        assertEq(page2.length, 2);
+        assertEq(page2[0], hashes[2]);
+        assertEq(page2[1], hashes[3]);
+
+        // Page 3: offset=4, limit=2 — 1 remaining
+        (bytes32[] memory page3, uint256 total3) = briefing.getSquadProposalsPaginated(squadId, 4, 2);
+        assertEq(total3, 5);
+        assertEq(page3.length, 1);
+        assertEq(page3[0], hashes[4]);
+    }
+
+    function test_GetSquadProposalsPaginated_EmptyOffset() public {
+        bytes32 h1 = keccak256("prop-1");
+        bytes32 h2 = keccak256("prop-2");
+        vm.prank(contributor);
+        briefing.proposeBriefing(squadId, h1, "p1", "https://ep.xyz", new string[](0));
+        vm.prank(contributor);
+        briefing.proposeBriefing(squadId, h2, "p2", "https://ep.xyz", new string[](0));
+
+        // offset=10 >= total=2 → empty
+        (bytes32[] memory results, uint256 total) = briefing.getSquadProposalsPaginated(squadId, 10, 5);
+        assertEq(total, 2);
+        assertEq(results.length, 0);
+    }
+
+    function test_GetSquadProposalsPaginated_LimitZeroReturnsUpTo200() public {
+        // Create 3 proposals — limit=0 should return all (≤200)
+        bytes32[3] memory hashes;
+        for (uint i = 0; i < 3; i++) {
+            hashes[i] = keccak256(abi.encodePacked("limit-zero-prop", i));
+            vm.prank(contributor);
+            briefing.proposeBriefing(squadId, hashes[i], "preview", "https://ep.xyz", new string[](0));
+        }
+
+        (bytes32[] memory results, uint256 total) = briefing.getSquadProposalsPaginated(squadId, 0, 0);
+        assertEq(total, 3);
+        assertEq(results.length, 3);
+    }
+
+    function test_GetSquadProposalsPaginated_EmptySquad_ReturnsEmpty() public {
+        (bytes32[] memory results, uint256 total) = briefing.getSquadProposalsPaginated(squadId, 0, 0);
+        assertEq(total, 0);
+        assertEq(results.length, 0);
+    }
 }

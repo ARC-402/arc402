@@ -68,6 +68,7 @@ contract SquadBriefing {
     error ProposalNotPending();
     error TooManyTags();
     error AlreadyCited();
+    error SelfCitation();
     error BriefingNotPublished();
 
     // ─── Types ────────────────────────────────────────────────────────────────
@@ -143,6 +144,17 @@ contract SquadBriefing {
     mapping(bytes32 => uint256) public citationCount;
     mapping(bytes32 => uint256) public weightedCitationCount;
     mapping(bytes32 => mapping(address => bool)) private _hasCited;
+
+    /// @notice Trust score snapshot at the time of citation.
+    ///         Stores the citer's global trust score at the moment citeBriefing() was called,
+    ///         so historical citation weight is honest even if trust later changes.
+    ///
+    /// @dev    Intentional design note: SquadBriefing and IntelligenceRegistry maintain
+    ///         independent citation logic (briefings vs artifacts are different entities).
+    ///         No cross-contract reference is used to avoid circular dependency. Off-chain
+    ///         indexers should query each contract independently and merge citation counts.
+    /// citer address → contentHash → trust score at time of citation
+    mapping(address => mapping(bytes32 => uint256)) public citationTrustSnapshot;
 
     /// contentHash → Briefing
     mapping(bytes32 => Briefing) private _briefings;
@@ -423,6 +435,42 @@ contract SquadBriefing {
         }
     }
 
+    /**
+     * @notice Returns a paginated slice of proposal contentHashes for a squad.
+     *
+     * @dev    Intentional design note: SquadBriefing and IntelligenceRegistry maintain
+     *         independent citation logic. No cross-contract reference is used to avoid
+     *         circular dependency. Off-chain indexers merge citation counts from both
+     *         contracts independently.
+     *
+     * @param squadId  Squad to query.
+     * @param offset   Start index (0-based). If >= total, returns empty array.
+     * @param limit    Max results to return. 0 = up to 200.
+     * @return results  Slice of proposal contentHashes.
+     * @return total    Total number of proposals for this squad.
+     */
+    function getSquadProposalsPaginated(uint256 squadId, uint256 offset, uint256 limit)
+        external
+        view
+        returns (bytes32[] memory results, uint256 total)
+    {
+        bytes32[] storage all = _squadProposals[squadId];
+        total = all.length;
+
+        if (offset >= total) {
+            return (new bytes32[](0), total);
+        }
+
+        uint256 maxItems = limit == 0 ? 200 : limit;
+        uint256 available = total - offset;
+        uint256 count = available < maxItems ? available : maxItems;
+
+        results = new bytes32[](count);
+        for (uint256 i = 0; i < count; i++) {
+            results[i] = all[offset + i];
+        }
+    }
+
     function proposalExists(bytes32 contentHash) external view returns (bool) {
         return _proposalExists[contentHash];
     }
@@ -447,14 +495,19 @@ contract SquadBriefing {
         string calldata note
     ) external {
         // Checks
-        if (!agentRegistry.isRegistered(msg.sender)) revert NotRegistered();
-        if (!_published[contentHash])                revert BriefingNotPublished();
-        if (_hasCited[contentHash][msg.sender])      revert AlreadyCited();
+        if (!agentRegistry.isRegistered(msg.sender))            revert NotRegistered();
+        if (!_published[contentHash])                           revert BriefingNotPublished();
+        if (_hasCited[contentHash][msg.sender])                 revert AlreadyCited();
+        if (msg.sender == _briefings[contentHash].publisher)    revert SelfCitation();
 
         // Effects — dedup write BEFORE external call (strict CEI)
         _hasCited[contentHash][msg.sender] = true;
 
         uint256 citerScore = trustRegistry.getGlobalScore(msg.sender);
+
+        // Snapshot trust at cite-time so historical citation weight stays honest
+        // even if the citer's trust score drops later.
+        citationTrustSnapshot[msg.sender][contentHash] = citerScore;
         uint256 newRaw      = ++citationCount[contentHash];
         uint256 newWeighted = weightedCitationCount[contentHash];
 

@@ -341,7 +341,8 @@ contract IntelligenceRegistryTest is Test {
         _register(creator, HASH_1);
         _register(creator, HASH_2);
 
-        bytes32[] memory hashes = registry.getByCapability(TAG);
+        (bytes32[] memory hashes, uint256 total) = registry.getByCapability(TAG, 0, 0);
+        assertEq(total, 2);
         assertEq(hashes.length, 2);
         assertEq(hashes[0], HASH_1);
         assertEq(hashes[1], HASH_2);
@@ -358,8 +359,10 @@ contract IntelligenceRegistryTest is Test {
         vm.prank(creator);
         registry.register(_makeParams(HASH_3, "security.audit"));
 
-        assertEq(registry.getByCapability(TAG).length,              2); // HASH_1, HASH_2
-        assertEq(registry.getByCapability("security.audit").length, 1); // HASH_3
+        (, uint256 total1) = registry.getByCapability(TAG, 0, 0);
+        (, uint256 total2) = registry.getByCapability("security.audit", 0, 0);
+        assertEq(total1, 2); // HASH_1, HASH_2
+        assertEq(total2, 1); // HASH_3
     }
 
     // ─── 18. hasCited returns correct boolean ────────────────────────────────
@@ -429,7 +432,100 @@ contract IntelligenceRegistryTest is Test {
     // ─── 23. getByCapability returns empty for unknown tag ────────────────────
 
     function test_GetByCapability_UnknownTag_ReturnsEmpty() public {
-        bytes32[] memory hashes = registry.getByCapability("unknown.tag");
+        (bytes32[] memory hashes, uint256 total) = registry.getByCapability("unknown.tag", 0, 0);
         assertEq(hashes.length, 0);
+        assertEq(total, 0);
+    }
+
+    // ─── 24. getByCapability paginated — basic pagination ─────────────────────
+
+    function test_GetByCapability_Paginated() public {
+        // Register 5 artifacts under the same tag
+        bytes32[5] memory hashes;
+        for (uint i = 0; i < 5; i++) {
+            hashes[i] = keccak256(abi.encodePacked("paginated-artifact", i));
+            _register(creator, hashes[i]);
+        }
+
+        // Page 1: offset=0, limit=2
+        (bytes32[] memory page1, uint256 total1) = registry.getByCapability(TAG, 0, 2);
+        assertEq(total1, 5);
+        assertEq(page1.length, 2);
+        assertEq(page1[0], hashes[0]);
+        assertEq(page1[1], hashes[1]);
+
+        // Page 2: offset=2, limit=2
+        (bytes32[] memory page2, uint256 total2) = registry.getByCapability(TAG, 2, 2);
+        assertEq(total2, 5);
+        assertEq(page2.length, 2);
+        assertEq(page2[0], hashes[2]);
+        assertEq(page2[1], hashes[3]);
+
+        // Page 3: offset=4, limit=2 — only 1 remaining
+        (bytes32[] memory page3, uint256 total3) = registry.getByCapability(TAG, 4, 2);
+        assertEq(total3, 5);
+        assertEq(page3.length, 1);
+        assertEq(page3[0], hashes[4]);
+    }
+
+    // ─── 25. getByCapability offset >= total returns empty array ──────────────
+
+    function test_GetByCapability_EmptyOffset() public {
+        _register(creator, HASH_1);
+        _register(creator, HASH_2);
+
+        // offset=5 >= total=2 → empty
+        (bytes32[] memory results, uint256 total) = registry.getByCapability(TAG, 5, 10);
+        assertEq(total, 2);
+        assertEq(results.length, 0);
+    }
+
+    // ─── 26. getByCapability limit=0 returns up to 200 ───────────────────────
+
+    function test_GetByCapability_LimitZeroReturnsUpTo200() public {
+        // Register 5 artifacts — limit=0 should return all of them (≤200)
+        bytes32[5] memory hashes;
+        for (uint i = 0; i < 5; i++) {
+            hashes[i] = keccak256(abi.encodePacked("limit-zero-artifact", i));
+            _register(creator, hashes[i]);
+        }
+
+        (bytes32[] memory results, uint256 total) = registry.getByCapability(TAG, 0, 0);
+        assertEq(total, 5);
+        assertEq(results.length, 5);
+    }
+
+    // ─── 27. recordCitation self-citation reverts ─────────────────────────────
+
+    function test_RecordCitation_SelfCitation_Reverts() public {
+        _registerDefault(); // creator registers HASH_1
+
+        vm.prank(creator);
+        vm.expectRevert(IntelligenceRegistry.SelfCitation.selector);
+        registry.recordCitation(HASH_1);
+    }
+
+    // ─── 28. citationTrustSnapshot stored correctly ───────────────────────────
+
+    function test_CitationTrustSnapshot_StoredCorrectly() public {
+        _registerDefault();
+
+        vm.prank(citer1); // score = 500
+        registry.recordCitation(HASH_1);
+
+        uint256 snapshot = registry.citationTrustSnapshot(citer1, HASH_1);
+        assertEq(snapshot, 500);
+    }
+
+    // ─── 29. citationTrustSnapshot stores low-trust score accurately ──────────
+
+    function test_CitationTrustSnapshot_LowTrust_StoredCorrectly() public {
+        _registerDefault();
+
+        vm.prank(citer2); // score = 100
+        registry.recordCitation(HASH_1);
+
+        uint256 snapshot = registry.citationTrustSnapshot(citer2, HASH_1);
+        assertEq(snapshot, 100);
     }
 }

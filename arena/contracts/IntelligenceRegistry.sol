@@ -84,6 +84,7 @@ contract IntelligenceRegistry {
     error NotRegistered();
     error ArtifactNotFound();
     error AlreadyCited();
+    error SelfCitation();
     error EmptyContentHash();
     error PreviewTooLong();
     error EmptyEndpoint();
@@ -128,6 +129,12 @@ contract IntelligenceRegistry {
 
     /// contentHash → citer → hasCited
     mapping(bytes32 => mapping(address => bool)) private _cited;
+
+    /// @notice Trust score snapshot at the time of citation.
+    ///         Stores the citer's global trust score at the moment recordCitation() was called,
+    ///         so historical citation weight is honest even if trust later changes.
+    /// citer address → contentHash → trust score at time of citation
+    mapping(address => mapping(bytes32 => uint256)) public citationTrustSnapshot;
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
@@ -189,14 +196,19 @@ contract IntelligenceRegistry {
      */
     function recordCitation(bytes32 contentHash) external {
         // Checks
-        if (!agentRegistry.isRegistered(msg.sender)) revert NotRegistered();
-        if (!_exists[contentHash])                   revert ArtifactNotFound();
-        if (_cited[contentHash][msg.sender])         revert AlreadyCited();
+        if (!agentRegistry.isRegistered(msg.sender))        revert NotRegistered();
+        if (!_exists[contentHash])                          revert ArtifactNotFound();
+        if (_cited[contentHash][msg.sender])                revert AlreadyCited();
+        if (msg.sender == _artifacts[contentHash].creator)  revert SelfCitation();
 
         // Effects — dedup write BEFORE external call (strict CEI)
         _cited[contentHash][msg.sender] = true;
 
         uint256 citerScore = trustRegistry.getGlobalScore(msg.sender);
+
+        // Snapshot trust at cite-time so historical citation weight stays honest
+        // even if the citer's trust score drops later.
+        citationTrustSnapshot[msg.sender][contentHash] = citerScore;
 
         IntelligenceArtifact storage a = _artifacts[contentHash];
         uint256 newRaw      = ++a.citationCount;
@@ -228,14 +240,41 @@ contract IntelligenceRegistry {
     }
 
     /**
-     * @notice Returns all contentHashes registered under a capability tag.
+     * @notice Returns a paginated slice of contentHashes registered under a capability tag.
+     *
+     * @dev    Intentional design note: IntelligenceRegistry and SquadBriefing maintain
+     *         independent citation logic (briefings vs artifacts are different entities).
+     *         Citation counts for any contentHash (whether originating here or in
+     *         SquadBriefing) can be retrieved via getArtifact() — rawCount + weightedCount
+     *         are the canonical getCitationCounts view for off-chain indexers querying both
+     *         layers. No cross-contract reference is used to avoid circular dependency.
+     *
+     * @param tag     Capability tag to query.
+     * @param offset  Start index (0-based). If >= total, returns empty array.
+     * @param limit   Max results to return. 0 = up to 200.
+     * @return results  Slice of contentHashes.
+     * @return total    Total number of hashes under this tag (for pagination metadata).
      */
-    function getByCapability(string calldata tag)
+    function getByCapability(string calldata tag, uint256 offset, uint256 limit)
         external
         view
-        returns (bytes32[] memory)
+        returns (bytes32[] memory results, uint256 total)
     {
-        return _byCapability[tag];
+        bytes32[] storage all = _byCapability[tag];
+        total = all.length;
+
+        if (offset >= total) {
+            return (new bytes32[](0), total);
+        }
+
+        uint256 maxItems = limit == 0 ? 200 : limit;
+        uint256 available = total - offset;
+        uint256 count = available < maxItems ? available : maxItems;
+
+        results = new bytes32[](count);
+        for (uint256 i = 0; i < count; i++) {
+            results[i] = all[offset + i];
+        }
     }
 
     /**
