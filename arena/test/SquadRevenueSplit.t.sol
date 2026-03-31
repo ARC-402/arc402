@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
 import "../contracts/SquadRevenueSplit.sol";
@@ -55,6 +55,15 @@ contract MockAgentRegistrySRS {
 
 // ─── Reentrant attacker — tries to re-enter receive() ─────────────────────────
 // Target is mutable so we can set it after deploying the split (avoids forward-ref problem).
+
+// ─── Griefing recipient — always rejects ETH ─────────────────────────────────
+
+contract GriefingRecipient {
+    receive() external payable { revert("no ETH"); }
+    fallback() external payable { revert("no ETH"); }
+}
+
+// ─── Reentrant attacker — tries to re-enter receive() ─────────────────────────
 
 contract ReentrantAttacker {
     address payable public target;
@@ -470,5 +479,59 @@ contract SquadRevenueSplitTest is Test {
         vm.stopPrank();
 
         assertEq(usdc.balanceOf(alice), 500e6);
+    }
+
+    // ─── 9. Griefing: rejecting recipient does NOT block others ──────────────
+
+    function test_griefing_rejecting_recipient_does_not_block_others() public {
+        GriefingRecipient griefing = new GriefingRecipient();
+
+        address[] memory r = new address[](3);
+        uint256[] memory s = new uint256[](3);
+        r[0] = alice;               s[0] = 5_000;  // 50%
+        r[1] = address(griefing);   s[1] = 3_000;  // 30% — will reject ETH
+        r[2] = bob;                 s[2] = 2_000;  // 20%
+
+        SquadRevenueSplit splitG = new SquadRevenueSplit(r, s, address(usdc), address(agentReg));
+
+        uint256 preAlice = alice.balance;
+        uint256 preBob   = bob.balance;
+
+        vm.deal(address(this), 1 ether);
+        (bool ok,) = address(splitG).call{value: 1 ether}("");
+        assertTrue(ok); // outer call still succeeds
+
+        // Alice and Bob receive their shares
+        assertEq(alice.balance - preAlice, 0.5 ether);
+        assertEq(bob.balance   - preBob,   0.2 ether);
+
+        // Griefing recipient's share is held in pendingETH
+        assertEq(splitG.pendingETH(address(griefing)), 0.3 ether);
+
+        // Contract holds exactly the pending amount
+        assertEq(address(splitG).balance, 0.3 ether);
+    }
+
+    function test_griefing_pendingETH_claimable_if_recipient_fixes() public {
+        GriefingRecipient griefing = new GriefingRecipient();
+
+        address[] memory r = new address[](2);
+        uint256[] memory s = new uint256[](2);
+        r[0] = address(griefing); s[0] = 5_000;
+        r[1] = bob;               s[1] = 5_000;
+
+        SquadRevenueSplit splitG = new SquadRevenueSplit(r, s, address(usdc), address(agentReg));
+
+        vm.deal(address(this), 1 ether);
+        (bool ok,) = address(splitG).call{value: 1 ether}("");
+        assertTrue(ok);
+
+        assertEq(splitG.pendingETH(address(griefing)), 0.5 ether);
+
+        // Griefing contract can't claim (still rejects ETH)
+        vm.prank(address(griefing));
+        // claimETH will attempt to push to msg.sender (griefing) which reverts
+        vm.expectRevert(SquadRevenueSplit.TransferFailed.selector);
+        splitG.claimETH();
     }
 }

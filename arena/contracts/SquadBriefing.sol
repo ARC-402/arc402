@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity 0.8.24;
 
 import "./interfaces/IAgentRegistry.sol";
 import "./interfaces/IResearchSquad.sol";
@@ -258,8 +258,11 @@ contract SquadBriefing {
         if (!researchSquad.isMember(squadId, msg.sender)) revert NotSquadMember();
 
         // Effects
+        // Only push to _squadProposals on first proposal (not on re-proposal after rejection)
+        if (!_proposalExists[contentHash]) {
+            _squadProposals[squadId].push(contentHash);
+        }
         _proposalExists[contentHash] = true;
-        _squadProposals[squadId].push(contentHash);
 
         Proposal storage p = _proposals[contentHash];
         p.squadId     = squadId;
@@ -269,6 +272,8 @@ contract SquadBriefing {
         p.proposer    = msg.sender;
         p.timestamp   = block.timestamp;
         p.status      = ProposalStatus.Pending;
+        // Clear existing tags before re-populating (prevents unbounded growth on re-proposal)
+        delete p.tags;
         for (uint256 i = 0; i < tags.length; i++) {
             p.tags.push(tags[i]);
         }

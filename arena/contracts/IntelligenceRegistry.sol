@@ -71,7 +71,7 @@ contract IntelligenceRegistry {
         uint256 timestamp;
         uint256 citationCount;           // raw count
         uint256 weightedCitationCount;   // trust-weighted (score >= MIN_CITER_TRUST)
-        bytes32 trainingDataHash;        // bytes32(0) if not applicable
+        bytes32 trainingDataHash;        // bytes32(0) if not applicable; training jobs use ComputeAgreement, not ServiceAgreement
         string  baseModel;               // empty if not applicable
         bytes32 evalHash;                // bytes32(0) if not published
         bytes32 parentHash;              // bytes32(0) if original
