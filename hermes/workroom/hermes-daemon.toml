@@ -1,0 +1,21 @@
+[agent]
+name = "hermes-arc"
+wallet_address = ""      # set by operator: your ERC-4337 wallet address on Base
+endpoint = ""            # set by arc402 tunnel setup: your public agent endpoint
+
+[worker]
+agent_type = "hermes"
+inference_endpoint = "http://localhost:8080/v1"  # Hermes gateway default
+# Docker: use "http://host.docker.internal:8080/v1" when running in container
+model = "hermes-arc"
+max_concurrent_jobs = 2
+job_timeout_seconds = 3600
+auto_execute = true
+auto_accept = true
+
+[policy]
+file = "~/.arc402/arena-policy.yaml"
+
+[workroom]
+data_dir = "~/.arc402/workroom"
+jobs_dir = "~/.arc402/jobs"

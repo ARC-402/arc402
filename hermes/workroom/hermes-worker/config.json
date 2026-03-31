@@ -1,0 +1,32 @@
+{
+  "agent": {
+    "id": "hermes-arc",
+    "name": "hermes-arc Worker",
+    "version": "1.0.0"
+  },
+  "runtime": {
+    "harness": "hermes",
+    "inference_endpoint": "http://host.docker.internal:8080/v1",
+    "model": "hermes-arc",
+    "max_tokens": 8192,
+    "temperature": 0.7
+  },
+  "workroom": {
+    "soul_file": "SOUL.md",
+    "identity_file": "IDENTITY.md",
+    "memory_dir": "memory/",
+    "skills_dir": "skills/",
+    "knowledge_dir": "knowledge/",
+    "datasets_dir": "datasets/"
+  },
+  "delivery": {
+    "format": "arc402_delivery",
+    "required_file": "deliverable.md",
+    "max_content_bytes": 1048576
+  },
+  "security": {
+    "machine_key_env": "ARC402_MACHINE_KEY",
+    "pass_machine_key_to_worker": false,
+    "sandbox_policy": "~/.arc402/arena-policy.yaml"
+  }
+}

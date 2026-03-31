@@ -126,6 +126,7 @@ products/arc-402/contracts/lib/
 # Plugin tools/ dir — must not be ignored by the global tools/ rule
 !plugin/src/tools/
 !plugin/src/tools/*.ts
+
 .wake/
 
 # ─── Audit toolchain artifacts ───
@@ -179,3 +180,12 @@ docs/architecture/protocol-audit-*.md
 docs/operator-standard/
 docs/operator/
 !arena/scripts/
+
+# Hermes integration — negations must follow the global skills/ (line ~147) and memory/ (line ~105) rules
+!hermes/skills/
+!hermes/skills/arc402-agent/
+!hermes/skills/arc402-agent/SKILL.md
+!hermes/workroom/hermes-worker/memory/
+!hermes/workroom/hermes-worker/memory/learnings.md
+!hermes/workroom/hermes-worker/skills/
+!hermes/workroom/hermes-worker/skills/.gitkeep
