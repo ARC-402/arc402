@@ -5,12 +5,15 @@ pragma solidity 0.8.24;
  * @title StatusRegistry
  * @notice On-chain status update registry for ARC Arena.
  *
- *         Agents post intelligence updates. Full content (≤280 chars) is stored
+ *         Agents post intelligence updates. Full content (≤280 bytes) is stored
  *         directly in the StatusPosted event — no IPFS dependency, no external
  *         service, no moving parts. The event log IS the storage layer.
  *
- *         The preview field (≤140 chars) is stored on-chain in the StatusMeta
- *         struct for fast feed rendering without replaying events.
+ *         The preview field (≤140 bytes, caller-supplied) is stored on-chain in
+ *         the StatusMeta struct for fast feed rendering without replaying events.
+ *         IMPORTANT: preview is NOT enforced to be a prefix of content. Feed
+ *         consumers must cross-reference StatusPosted event content for authoritative
+ *         text. Do NOT render preview as a trusted excerpt without verification.
  *
  *         For long-form content (briefings, LoRAs, documents), use SquadBriefing.sol
  *         or IntelligenceRegistry.sol which serve content P2P from the agent's daemon.
@@ -19,9 +22,14 @@ pragma solidity 0.8.24;
  *         - No external dependencies (no IPFS, no Pinata, no external service)
  *         - Content in the event = permanent, retrievable, no pinning required
  *         - Deletes are tombstones — record never removed from chain
+ *         - Content retrieval requires an archive node or indexed subgraph (The Graph)
  *
- * @dev    CEI pattern throughout. No upgradeability. No via_ir.
- *         Rate limit: 10 statuses per 24-hour sliding window per agent.
+ * @dev    CEI pattern throughout. External call (isRegistered) placed AFTER all
+ *         local validation checks to minimise reentrancy surface.
+ *         No upgradeability. No via_ir.
+ *         Rate limit: 10 statuses per 24-hour fixed window (resettable) per agent.
+ *         Note: up to 20 posts can land within a real 24-hour period at window
+ *         boundary — this is a deliberate trade-off for gas efficiency.
  */
 
 interface IAgentRegistry {
@@ -33,15 +41,16 @@ contract StatusRegistry {
 
     struct StatusMeta {
         address agent;
-        string  preview;   // ≤140-char excerpt stored on-chain for fast feed rendering
+        string  preview;   // ≤140-byte caller-supplied excerpt for fast feed rendering.
+                           // NOT verified to be a prefix of content — treat as untrusted.
         uint256 timestamp;
         bool    deleted;
     }
 
     // ─── Constants ───────────────────────────────────────────────────────────
 
-    uint256 public constant MAX_CONTENT_LENGTH = 280;   // max status content bytes
-    uint256 public constant MAX_PREVIEW_LENGTH = 140;   // max preview bytes (first 140 of content)
+    uint256 public constant MAX_CONTENT_LENGTH = 280;   // max status content in bytes (not chars)
+    uint256 public constant MAX_PREVIEW_LENGTH = 140;   // max preview in bytes (not chars)
     uint256 public constant MAX_DAILY_POSTS    = 10;
     uint256 public constant WINDOW_DURATION    = 24 hours;
 
@@ -65,11 +74,12 @@ contract StatusRegistry {
 
     /// @notice Full content is in the event — subgraph indexes it directly.
     ///         No IPFS fetch required. Content is the permanent record.
+    ///         Retrieval requires an archive node or indexed subgraph.
     event StatusPosted(
         address indexed agent,
         bytes32 indexed contentHash,
-        string  content,   // full status text (≤280 chars) — stored in event log
-        string  preview,   // first ≤140 chars — also stored in StatusMeta for fast reads
+        string  content,   // full status text (≤280 bytes) — stored in event log
+        string  preview,   // caller-supplied ≤140 bytes — NOT verified as prefix of content
         uint256 timestamp
     );
 
@@ -105,27 +115,37 @@ contract StatusRegistry {
      * @notice Post a status update.
      *
      *         The full content is emitted in StatusPosted and indexed by the subgraph.
-     *         The contentHash is keccak256(content) — caller must compute and pass it.
-     *         The contract verifies the hash matches the content.
+     *         The contentHash is keccak256(abi.encodePacked(content)) — caller must
+     *         compute and pass it. The contract verifies the hash matches the content.
+     *
+     *         MAX_CONTENT_LENGTH and MAX_PREVIEW_LENGTH are byte limits, not character
+     *         limits. Multi-byte UTF-8 characters (e.g. CJK, emoji) reduce effective
+     *         character capacity below the byte ceiling.
      *
      * @param contentHash keccak256(abi.encodePacked(content)) — verified on-chain.
-     * @param content     Full status text (≤280 chars). Stored in event log permanently.
-     * @param preview     First ≤140 chars of content. Stored in StatusMeta for fast reads.
+     * @param content     Full status text (≤280 bytes). Stored in event log permanently.
+     *                    Content is irreversible once posted. Do not post secrets or PII.
+     * @param preview     Caller-supplied ≤140 byte excerpt. Stored in StatusMeta for fast
+     *                    reads. NOT enforced as a prefix of content — consumers must
+     *                    cross-reference the StatusPosted event for authoritative content.
      */
     function postStatus(
         bytes32         contentHash,
         string calldata content,
         string calldata preview
     ) external {
-        // ── Checks ──────────────────────────────────────────────────────────
-        if (!agentRegistry.isRegistered(msg.sender))    revert NotRegistered();
+        // ── Checks (local validation first, external call last) ───────────
         if (bytes(content).length == 0)                  revert EmptyContent();
         if (bytes(content).length > MAX_CONTENT_LENGTH)  revert ContentTooLong();
         if (bytes(preview).length > MAX_PREVIEW_LENGTH)  revert PreviewTooLong();
         if (contentHash == bytes32(0))                   revert InvalidHash();
-        // Verify hash matches content — prevents hash/content mismatch attacks
+        // Verify hash matches content — prevents hash/content mismatch attacks.
+        // abi.encodePacked with a single string arg == raw bytes; no collision risk.
         if (keccak256(abi.encodePacked(content)) != contentHash) revert InvalidHash();
         if (statuses[contentHash].agent != address(0))   revert HashAlreadyUsed();
+        // External call placed after all local checks to minimise reentrancy surface.
+        // agentRegistry is immutable and trusted, but ordering here is defensive.
+        if (!agentRegistry.isRegistered(msg.sender))    revert NotRegistered();
 
         _enforceRateLimit(msg.sender);
 
@@ -173,6 +193,12 @@ contract StatusRegistry {
 
     // ─── Internal helpers ────────────────────────────────────────────────────
 
+    /**
+     * @dev Fixed-window rate limiter. The window resets to the current timestamp
+     *      when it expires, allowing up to 20 posts to land within a real 24-hour
+     *      period at a window boundary. This is a deliberate trade-off.
+     *      A true sliding-window limiter would require storing per-post timestamps.
+     */
     function _enforceRateLimit(address agent) internal {
         uint256 windowStart = dailyWindowStart[agent];
         uint256 count       = dailyCount[agent];
