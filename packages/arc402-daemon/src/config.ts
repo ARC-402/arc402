@@ -333,9 +333,7 @@ export function loadDaemonConfig(configPath = DAEMON_TOML): DaemonConfig {
 }
 
 export function loadMachineKey(config: DaemonConfig): { privateKey: string; address: string } {
-  const envVarName = config.wallet.machine_key.startsWith("env:")
-    ? config.wallet.machine_key.slice(4)
-    : "ARC402_MACHINE_KEY";
+  const envVarName = getMachineKeyEnvVarName(config);
 
   const privateKey = process.env[envVarName];
   if (!privateKey) {
@@ -352,6 +350,12 @@ export function loadMachineKey(config: DaemonConfig): { privateKey: string; addr
   }
 
   return { privateKey, address };
+}
+
+export function getMachineKeyEnvVarName(config: DaemonConfig): string {
+  return config.wallet.machine_key.startsWith("env:")
+    ? config.wallet.machine_key.slice(4)
+    : "ARC402_MACHINE_KEY";
 }
 
 export const TEMPLATE_DAEMON_TOML = `# ~/.arc402/daemon.toml

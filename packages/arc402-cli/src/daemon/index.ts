@@ -460,6 +460,22 @@ function formatUptime(seconds: number): string {
   return `${s}s`;
 }
 
+function failStartup(stage: "config" | "machine-key", error: unknown, envVarName?: string): never {
+  const detail = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`ARC-402 daemon startup blocked during ${stage}: ${detail}\n`);
+  process.stderr.write("\nNext steps:\n");
+  if (stage === "config") {
+    process.stderr.write("  1. Run `arc402 daemon init` or `arc402 setup` to create ~/.arc402/daemon.toml.\n");
+    process.stderr.write("  2. Fill in wallet.contract_address and network.rpc_url in ~/.arc402/daemon.toml.\n");
+    process.stderr.write("  3. Retry with `arc402 daemon start`.\n");
+  } else {
+    process.stderr.write(`  1. Export ${envVarName ?? "ARC402_MACHINE_KEY"} with your machine key before starting the daemon.\n`);
+    process.stderr.write("  2. If you keep keys in ARC-402 CLI config, confirm `~/.arc402/config.json` still contains `privateKey`.\n");
+    process.stderr.write("  3. Retry with `arc402 daemon start` after the machine key is available.\n");
+  }
+  process.exit(1);
+}
+
 // ─── Daemon main ──────────────────────────────────────────────────────────────
 
 // serviceAgreementAddress is now part of DaemonConfig directly (see config.ts)
@@ -476,8 +492,7 @@ export async function runDaemon(foreground = false): Promise<void> {
     config = loadDaemonConfig();
     log({ event: "config_loaded", path: require("path").join(require("os").homedir(), ".arc402", "daemon.toml") });
   } catch (err) {
-    process.stderr.write(`Config error: ${err}\n`);
-    process.exit(1);
+    failStartup("config", err);
   }
 
   // ── Step 2: Load machine key ─────────────────────────────────────────────
@@ -489,8 +504,7 @@ export async function runDaemon(foreground = false): Promise<void> {
     machineKeyAddress = mk.address;
     log({ event: "machine_key_loaded", address: machineKeyAddress });
   } catch (err) {
-    process.stderr.write(`Machine key error: ${err}\n`);
-    process.exit(1);
+    failStartup("machine-key", err, config.wallet.machine_key.startsWith("env:") ? config.wallet.machine_key.slice(4) : undefined);
   }
 
   // ── Step 3: Connect to RPC ───────────────────────────────────────────────

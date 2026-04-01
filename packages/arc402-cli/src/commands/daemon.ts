@@ -19,6 +19,7 @@ import {
   DAEMON_SOCK,
   DAEMON_TOML,
   TEMPLATE_DAEMON_TOML,
+  getMachineKeyEnvVarName,
   loadDaemonConfig,
 } from "../daemon/config";
 import { buildNotifier } from "../daemon/notify";
@@ -379,6 +380,50 @@ async function startDaemonBackground(sandboxName?: string, runtimeRemoteRoot?: s
   process.exit(1);
 }
 
+function exitWithDaemonStartupGuidance(stage: "config" | "machine-key", detail: string, envVarName?: string): never {
+  console.error(`ARC-402 daemon startup blocked during ${stage}: ${detail}`);
+  console.error("");
+  console.error("Next steps:");
+  if (stage === "config") {
+    console.error("  1. Run `arc402 daemon init` or `arc402 setup` to create ~/.arc402/daemon.toml.");
+    console.error("  2. Fill in wallet.contract_address and network.rpc_url, then retry `arc402 daemon start`.");
+  } else {
+    console.error(`  1. Export ${envVarName ?? "ARC402_MACHINE_KEY"} before starting the daemon.`);
+    console.error("  2. If you rely on ARC-402 CLI config, make sure `~/.arc402/config.json` still contains `privateKey`.");
+    console.error("  3. Retry `arc402 daemon start` after the machine key is available.");
+  }
+  process.exit(1);
+}
+
+function validateDaemonStartupReadiness(): void {
+  let daemonConfig;
+  try {
+    daemonConfig = loadDaemonConfig();
+  } catch (error) {
+    exitWithDaemonStartupGuidance("config", error instanceof Error ? error.message : String(error));
+  }
+
+  const envVarName = getMachineKeyEnvVarName(daemonConfig);
+  let candidateKey = process.env[envVarName];
+  if (!candidateKey) {
+    try {
+      candidateKey = loadConfig().privateKey;
+    } catch {
+      // Ignore config load errors here; the daemon config guidance is enough.
+    }
+  }
+
+  if (!candidateKey) {
+    exitWithDaemonStartupGuidance("machine-key", `missing ${envVarName}`, envVarName);
+  }
+
+  try {
+    void new ethers.Wallet(candidateKey);
+  } catch {
+    exitWithDaemonStartupGuidance("machine-key", `invalid private key in ${envVarName} / ARC-402 config`, envVarName);
+  }
+}
+
 async function stopDaemon(opts: { wait?: boolean } = {}): Promise<boolean> {
   const pid = readPid();
   if (!pid) {
@@ -500,11 +545,7 @@ export function registerDaemonCommands(program: Command): void {
       const foreground = opts.foreground as boolean | undefined;
       const forceHost = opts.host as boolean | undefined;
 
-      if (!fs.existsSync(DAEMON_TOML)) {
-        console.error("daemon.toml not found.");
-        console.error("Run `arc402 daemon init` first so the OpenShell-owned runtime has a wallet, relay, and harness configuration to boot.");
-        process.exit(1);
-      }
+      validateDaemonStartupReadiness();
 
       const openShellCfg = forceHost ? undefined : readOpenShellConfig();
       const sandboxName = openShellCfg?.sandbox.name;

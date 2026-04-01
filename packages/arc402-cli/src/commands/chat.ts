@@ -420,6 +420,30 @@ function printHelp(): void {
   console.log("  exit              Leave the shell");
 }
 
+function printLocalDaemonSetupGuidance(config: ChatRuntimeConfig, detail?: string): void {
+  const configured = fs.existsSync(DAEMON_TOML);
+  console.log(
+    chalk.yellow(
+      configured
+        ? `Local daemon context is unavailable at ${config.daemonUrl}.`
+        : "Local daemon mode was selected, but this machine is not configured as an ARC-402 node yet."
+    )
+  );
+  if (detail) {
+    console.log(chalk.dim(`  ${detail}`));
+  }
+  console.log("");
+  console.log("Next steps:");
+  if (!configured) {
+    console.log("  1. Run `arc402 daemon init` or `arc402 setup` to create ~/.arc402/daemon.toml.");
+    console.log("  2. Fill in wallet, node, and harness settings, then start the node with `arc402 daemon start`.");
+  } else {
+    console.log("  1. Start the local node with `arc402 daemon start`.");
+    console.log("  2. If startup fails, inspect `arc402 daemon logs` for the exact guidance.");
+  }
+  console.log("  3. Re-run `arc402 chat --setup` and choose Remote if you meant to use another machine's node.");
+}
+
 async function dispatchCliCommand(line: string): Promise<void> {
   const tokens = parseTokens(line);
   if (tokens.length === 0) return;
@@ -497,16 +521,22 @@ export function registerChatCommand(program: Command): void {
       let activeConfig: ChatRuntimeConfig = runtimeConfig;
       const clientOptions: DaemonCommerceClientOptions = { baseUrl: activeConfig.daemonUrl };
 
+      if (activeConfig.nodeMode === "local" && !fs.existsSync(DAEMON_TOML)) {
+        printLocalDaemonSetupGuidance(activeConfig);
+        return;
+      }
+
       printBanner(activeConfig);
 
       try {
         await renderStatus(clientOptions);
       } catch (err) {
-        console.log(
-          chalk.yellow(
-            `  Daemon context unavailable from ${activeConfig.nodeMode} node ${activeConfig.daemonUrl}: ${err instanceof Error ? err.message : String(err)}`
-          )
-        );
+        const detail = err instanceof Error ? err.message : String(err);
+        if (activeConfig.nodeMode === "local") {
+          printLocalDaemonSetupGuidance(activeConfig, detail);
+          return;
+        }
+        console.log(chalk.yellow(`  Remote daemon context unavailable from ${activeConfig.daemonUrl}: ${detail}`));
       }
 
       printHelp();

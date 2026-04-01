@@ -13,7 +13,7 @@
  */
 import { fork, type ChildProcess } from "child_process";
 import * as path from "path";
-import { loadDaemonConfig, loadMachineKey } from "./config";
+import { getMachineKeyEnvVarName, loadDaemonConfig, loadMachineKey } from "./config";
 
 const legacy =
   process.argv.includes("--legacy") ||
@@ -35,7 +35,36 @@ if (legacy) {
   });
 } else {
   // ── Two-process split ──────────────────────────────────────────────────────
+  runStartupPreflight();
   startTwoProcessDaemon();
+}
+
+function runStartupPreflight(): void {
+  let config;
+  try {
+    config = loadDaemonConfig();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`ARC-402 daemon startup blocked during config: ${detail}\n`);
+    process.stderr.write("\nNext steps:\n");
+    process.stderr.write("  1. Run `arc402 daemon init` to create ~/.arc402/daemon.toml.\n");
+    process.stderr.write("  2. Fill in wallet.contract_address and network.rpc_url before starting the daemon.\n");
+    process.stderr.write("  3. Retry with `arc402-daemon` or `arc402 daemon start`.\n");
+    process.exit(1);
+  }
+
+  try {
+    loadMachineKey(config);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    const envVarName = getMachineKeyEnvVarName(config);
+    process.stderr.write(`ARC-402 daemon startup blocked during machine-key: ${detail}\n`);
+    process.stderr.write("\nNext steps:\n");
+    process.stderr.write(`  1. Export ${envVarName} with your machine key before starting the daemon.\n`);
+    process.stderr.write("  2. Confirm wallet.machine_key in ~/.arc402/daemon.toml points at that env var.\n");
+    process.stderr.write("  3. Retry after the machine key is available.\n");
+    process.exit(1);
+  }
 }
 
 function startTwoProcessDaemon(): void {

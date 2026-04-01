@@ -8,13 +8,14 @@
   "main": "./dist/index.js",
   "files": [
     "dist/",
-    "workroom/"
+    "workroom/",
+    "hermes/"
   ],
   "scripts": {
     "build": "tsc",
     "test": "node --test test/**/*.test.js",
-    "prepack": "npm run build && node -e \"const fs=require('fs'),path=require('path'); const src=path.resolve(__dirname,'../../workroom'); const dst=path.resolve(__dirname,'workroom'); if(fs.existsSync(src)){fs.rmSync(dst,{recursive:true,force:true}); fs.cpSync(src,dst,{recursive:true}); console.log('Copied workroom/ into package');} else { console.warn('WARNING: ../../workroom not found — workroom files will be missing from package'); }\"",
-    "postpack": "node -e \"const fs=require('fs'),path=require('path'); const dst=path.resolve(__dirname,'workroom'); fs.rmSync(dst,{recursive:true,force:true}); console.log('Removed packaged workroom/ copy');\"",
+    "prepack": "npm run build && node -e \"const fs=require('fs'),path=require('path'); const copies=[['../../workroom','workroom'],['../../hermes','hermes']]; for(const [srcRel,dstRel] of copies){ const src=path.resolve(__dirname,srcRel); const dst=path.resolve(__dirname,dstRel); if(fs.existsSync(src)){ fs.rmSync(dst,{recursive:true,force:true}); fs.cpSync(src,dst,{recursive:true}); console.log('Copied ' + dstRel + '/ into package'); } else { console.warn('WARNING: ' + srcRel + ' not found - ' + dstRel + '/ files will be missing from package'); } }\"",
+    "postpack": "node -e \"const fs=require('fs'),path=require('path'); for(const rel of ['workroom','hermes']){ const dst=path.resolve(__dirname,rel); fs.rmSync(dst,{recursive:true,force:true}); console.log('Removed packaged ' + rel + '/ copy'); }\"",
     "prepublishOnly": "npm run prepack"
   },
   "dependencies": {
