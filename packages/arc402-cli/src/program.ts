@@ -37,6 +37,8 @@ import { registerComputeCommands } from "./commands/compute";
 import { registerTunnelCommands } from "./commands/tunnel";
 import { registerJobCommands } from "./commands/job";
 import { registerHermesInitCommand } from "./commands/hermes-init";
+import { registerIndexCommands } from "./commands/index";
+import { registerSubscriptionCommands } from "./commands/subscription";
 import reputation from "./commands/reputation.js";
 import policy from "./commands/policy.js";
 
@@ -88,6 +90,8 @@ export function createProgram(): Command {
   registerTunnelCommands(program);
   registerJobCommands(program);
   registerHermesInitCommand(program);
+  registerIndexCommands(program);
+  registerSubscriptionCommands(program);
   program.addCommand(reputation);
   program.addCommand(policy);
 
