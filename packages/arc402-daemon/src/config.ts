@@ -105,6 +105,7 @@ export interface DaemonConfig {
     auto_execute: boolean;        // if false: accept on-chain but don't spawn agent (manual exec)
   };
   // Contract addresses — read from daemon.toml [contracts] section or CLI config.json fallback
+  policyEngineAddress: string | null;
   serviceAgreementAddress: string | null;
 }
 
@@ -257,6 +258,12 @@ function withDefaults(raw: Record<string, unknown>): DaemonConfig {
       job_timeout_seconds:   num(worker.job_timeout_seconds, 3600),
       auto_execute:          bool(worker.auto_execute, true),
     },
+    // Read policyEngineAddress from [contracts] section in daemon.toml.
+    policyEngineAddress: (() => {
+      const contracts = (raw.contracts as Record<string, unknown>) ?? {};
+      return str(contracts.policy_engine_address) || null;
+    })(),
+
     // Read serviceAgreementAddress from [contracts] section in daemon.toml,
     // or fall back to ~/.arc402/config.json (CLI config) if not set.
     serviceAgreementAddress: (() => {
