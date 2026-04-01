@@ -4,12 +4,14 @@ import * as readline from "readline";
 import { AgreementStatus, ServiceAgreementClient } from "@arc402/sdk";
 import { loadConfig } from "../config";
 import { getClient } from "../client";
-import { agreementStatusLabel, formatDate, printTable, truncateAddress } from "../utils/format";
+import { agreementStatusLabel, formatDate } from "../utils/format";
 import { formatDeadline } from "../utils/time";
 import { hashString } from "../utils/hash";
 import { c } from "../ui/colors";
 import { renderTree } from "../ui/tree";
 import { formatAddress } from "../ui/format";
+import type { Agreement, AgreementState } from "../tui/components/AgreementList";
+import { renderAgreementListText } from "../tui/components/text-renderers";
 
 // ─── AgreementTree minimal ABI ────────────────────────────────────────────────
 
@@ -21,6 +23,38 @@ const AGREEMENT_TREE_ABI = [
   "function allChildrenSettled(uint256 agreementId) external view returns (bool)",
   "function getDepth(uint256 agreementId) external view returns (uint256)",
 ];
+
+function mapAgreementState(status: AgreementStatus): AgreementState {
+  switch (Number(status)) {
+    case 0:
+      return "PROPOSED";
+    case 1:
+    case 6:
+      return "ACTIVE";
+    case 2:
+      return "PENDING_VERIFICATION";
+    case 3:
+      return "FULFILLED";
+    case 4:
+    case 8:
+    case 9:
+      return "DISPUTED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+function formatAgreementValue(rawPrice: unknown, rawToken: unknown): string {
+  if (typeof rawPrice !== "bigint") return "value n/a";
+  if (typeof rawToken === "string" && rawToken !== ethers.ZeroAddress) {
+    return `${rawPrice.toString()} token`;
+  }
+  try {
+    return `${Number(ethers.formatEther(rawPrice)).toFixed(4)} ETH`;
+  } catch {
+    return `${rawPrice.toString()} wei`;
+  }
+}
 
 export function registerAgreementsCommands(program: Command): void {
 
@@ -40,16 +74,39 @@ export function registerAgreementsCommands(program: Command): void {
         ? await client.getProviderAgreements(address)
         : await client.getClientAgreements(address);
       if (opts.json) return console.log(JSON.stringify(agreements, (_k, value) => typeof value === "bigint" ? value.toString() : value, 2));
-      printTable(
-        ["ID", "COUNTERPARTY", "SERVICE", "DEADLINE", "STATUS"],
-        agreements.map((agreement) => [
-          agreement.id.toString(),
-          truncateAddress(opts.as === "provider" ? agreement.client : agreement.provider),
-          agreement.serviceType,
-          formatDeadline(Number(agreement.deadline)),
-          agreementStatusLabel(agreement.status),
-        ])
+
+      const viewAgreements: Agreement[] = agreements.map((agreement) => {
+        const agreementRecord = agreement as unknown as Record<string, unknown>;
+        const counterparty = opts.as === "provider" ? agreement.client : agreement.provider;
+        return {
+          id: agreement.id.toString(),
+          state: mapAgreementState(agreement.status),
+          value: formatAgreementValue(agreementRecord.price, agreementRecord.token),
+          counterparty: counterparty,
+          timestamp: formatDeadline(Number(agreement.deadline)),
+        };
+      });
+
+      const totalEscrowWei = agreements.reduce((sum, agreement) => {
+        const price = (agreement as unknown as Record<string, unknown>).price;
+        return typeof price === "bigint" ? sum + price : sum;
+      }, 0n);
+      const verifyCandidate = agreements.find((agreement) => agreement.status === AgreementStatus.PENDING_VERIFICATION);
+      const disputedCandidate = agreements.find((agreement) =>
+        [AgreementStatus.DISPUTED, AgreementStatus.ESCALATED_TO_HUMAN, AgreementStatus.ESCALATED_TO_ARBITRATION].includes(agreement.status)
       );
+
+      const lines = renderAgreementListText({
+        title: opts.as === "provider" ? "Provider Agreements" : "Active Agreements",
+        agreements: viewAgreements,
+        summary: `${agreements.length} agreement${agreements.length === 1 ? "" : "s"} · ${Number(ethers.formatEther(totalEscrowWei)).toFixed(4)} ETH total escrowed`,
+        actionHints: [
+          verifyCandidate ? `arc402 verify ${verifyCandidate.id.toString()}   <- verify pending delivery` : "",
+          disputedCandidate ? `arc402 dispute status ${disputedCandidate.id.toString()}` : "",
+        ].filter(Boolean),
+      });
+
+      lines.forEach((line) => console.log(line));
     });
 
   // ── arc402 agreement <id> ────────────────────────────────────────────────────

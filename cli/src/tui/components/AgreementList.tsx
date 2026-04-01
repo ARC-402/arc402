@@ -2,12 +2,14 @@ import React from "react";
 import { Box, Text } from "ink";
 
 export type AgreementState =
+  | "ACTIVE"
   | "PROPOSED"
   | "ACCEPTED"
   | "PENDING_VERIFICATION"
   | "DELIVERED"
   | "FULFILLED"
-  | "DISPUTED";
+  | "DISPUTED"
+  | "UNKNOWN";
 
 export interface Agreement {
   id: number | string;
@@ -20,18 +22,22 @@ export interface Agreement {
 export interface AgreementListProps {
   agreements: Agreement[];
   title?: string;
+  summary?: string;
+  actionHints?: string[];
 }
 
 const STATE_STYLE: Record<
   AgreementState,
   { color: string; symbol: string }
 > = {
+  ACTIVE: { color: "cyan", symbol: "◉" },
   PROPOSED: { color: "yellow", symbol: "⚠" },
   ACCEPTED: { color: "cyan", symbol: "◈" },
   PENDING_VERIFICATION: { color: "yellow", symbol: "···" },
   DELIVERED: { color: "yellow", symbol: "⚠" },
   FULFILLED: { color: "green", symbol: "✓" },
   DISPUTED: { color: "red", symbol: "✗" },
+  UNKNOWN: { color: "white", symbol: "─" },
 };
 
 function truncateAddress(addr: string): string {
@@ -41,7 +47,12 @@ function truncateAddress(addr: string): string {
   return addr;
 }
 
-export function AgreementList({ agreements, title = "Your Agreements" }: AgreementListProps) {
+export function AgreementList({
+  agreements,
+  title = "Your Agreements",
+  summary,
+  actionHints = [],
+}: AgreementListProps) {
   if (agreements.length === 0) {
     return (
       <Box flexDirection="column" paddingLeft={1}>
@@ -87,6 +98,20 @@ export function AgreementList({ agreements, title = "Your Agreements" }: Agreeme
           </Box>
         );
       })}
+      {summary && (
+        <Box marginTop={1}>
+          <Text dimColor>{summary}</Text>
+        </Box>
+      )}
+      {actionHints.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          {actionHints.map((hint) => (
+            <Text key={hint} dimColor>
+              {hint}
+            </Text>
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }

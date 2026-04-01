@@ -25,8 +25,90 @@ import { startSpinner } from "../ui/spinner";
 import { renderTree } from "../ui/tree";
 import chalk from "chalk";
 import { c } from "../ui/colors";
+import { renderComputeCardText, formatDurationFromMinutes, formatEthAmount, formatUnixAge } from "../tui/components/text-renderers";
+import type { ComputeMetric, ComputeUsageSummary } from "../tui/components/ComputeCard";
 
 const bold = chalk.bold;
+
+interface ComputeProposalView {
+  sessionId: string;
+  clientAddress: string;
+  providerAddress?: string;
+  token?: string;
+  ratePerHourWei: string;
+  maxHours: number;
+  gpuSpecHash: string;
+  workloadDescription: string;
+  depositAmount: string;
+  proposedAt?: number;
+}
+
+interface ComputeSessionView {
+  proposal: ComputeProposalView;
+  status: string;
+  startedAt: number | null;
+  endedAt: number | null;
+  consumedMinutes: number;
+}
+
+interface CurrentComputeMetrics {
+  gpuUtilizationPercent?: number;
+  gpuMemoryUsedMB?: number;
+  gpuTemperatureC?: number;
+  activeMinutes?: number;
+  computeMinutes?: number;
+  timestamp?: number;
+}
+
+function formatTokenAmount(amount: bigint, token: string): string {
+  if (token === ethers.ZeroAddress) return formatEthAmount(amount);
+  return `${amount.toString()} ${token}`;
+}
+
+function buildUsageSummary(session: ComputeSessionView, current: CurrentComputeMetrics | null): ComputeUsageSummary {
+  const ratePerHourWei = BigInt(session.proposal.ratePerHourWei);
+  const depositWei = BigInt(session.proposal.depositAmount);
+  const token = session.proposal.token ?? ethers.ZeroAddress;
+  const consumedMinutes = current?.computeMinutes ?? session.consumedMinutes;
+  const costWei = BigInt(consumedMinutes) * ratePerHourWei / 60n;
+  const clampedCostWei = costWei > depositWei ? depositWei : costWei;
+  const remainingWei = depositWei > clampedCostWei ? depositWei - clampedCostWei : 0n;
+  const percentUsed = depositWei > 0n ? Number((clampedCostWei * 10_000n) / depositWei) / 100 : 0;
+
+  return {
+    consumed: formatDurationFromMinutes(consumedMinutes),
+    cost: formatTokenAmount(clampedCostWei, token),
+    remaining: formatTokenAmount(remainingWei, token),
+    escrowCeiling: `escrow ceiling: ${formatTokenAmount(depositWei, token)}`,
+    percentUsed,
+  };
+}
+
+function buildMetricRows(current: CurrentComputeMetrics | null): ComputeMetric[] {
+  if (!current) return [];
+
+  const rows: ComputeMetric[] = [];
+  if (typeof current.gpuUtilizationPercent === "number") {
+    rows.push({ label: "GPU util", value: `${current.gpuUtilizationPercent}%` });
+  }
+  if (typeof current.gpuMemoryUsedMB === "number") {
+    rows.push({ label: "Memory", value: `${current.gpuMemoryUsedMB} MB` });
+  }
+  if (typeof current.gpuTemperatureC === "number") {
+    rows.push({ label: "Temp", value: `${current.gpuTemperatureC} C` });
+  }
+  if (typeof current.activeMinutes === "number") {
+    rows.push({ label: "Active time", value: formatDurationFromMinutes(current.activeMinutes) });
+  }
+  if (typeof current.timestamp === "number") {
+    rows.push({ label: "Last poll", value: formatUnixAge(current.timestamp) ?? "now" });
+  }
+  return rows;
+}
+
+function printLines(lines: string[]): void {
+  lines.forEach((line) => console.log(line));
+}
 
 // ─── Daemon HTTP helper ───────────────────────────────────────────────────────
 
@@ -285,13 +367,21 @@ export function registerComputeCommands(program: Command): void {
         process.exit(1);
       }
 
-      renderTree([
-        { label: "Session ID", value: sessionId },
-        { label: "Provider", value: provider },
-        { label: "Rate", value: `${opts.rate} wei/hr` },
-        { label: "Max Hours", value: String(opts.hours) },
-        { label: "Deposit", value: `${deposit.toString()} ${isEth ? "wei" : token}`, last: !opts.notifyUrl },
-      ]);
+      printLines(renderComputeCardText({
+        title: "Compute Session Proposed",
+        sessionId,
+        provider,
+        gpuSpec: opts.gpuSpecHash,
+        rate: isEth ? `${formatEthAmount(ratePerHour)} / hour` : `${opts.rate} ${token} / hour`,
+        status: "PROPOSED",
+        usage: {
+          consumed: "0m",
+          cost: isEth ? formatEthAmount(0n) : `0 ${token}`,
+          remaining: isEth ? formatEthAmount(deposit) : `${deposit.toString()} ${token}`,
+          escrowCeiling: `escrow ceiling: ${isEth ? formatEthAmount(deposit) : `${deposit.toString()} ${token}`}`,
+          percentUsed: 0,
+        },
+      }));
 
       // Notify provider's HTTP endpoint (non-blocking)
       if (opts.notifyUrl) {
@@ -316,7 +406,7 @@ export function registerComputeCommands(program: Command): void {
         } catch { /* non-fatal */ }
       }
 
-      console.log(c.dim(`\nCheck status: arc402 compute status ${sessionId}`));
+      console.log(c.dim(`\narc402 compute status ${sessionId}   <- monitor session`));
     });
 
   // ── status ────────────────────────────────────────────────────────────────
@@ -341,15 +431,20 @@ export function registerComputeCommands(program: Command): void {
           return;
         }
         console.log(bold(`Compute sessions (${sessions.length}):`));
-        for (const s of sessions as Array<Record<string, unknown>>) {
-          const state = s as {
-            proposal: { sessionId: string; clientAddress: string };
-            status: string;
-            consumedMinutes: number;
-            startedAt: number | null;
-          };
-          const age = state.startedAt ? `started ${new Date(state.startedAt * 1000).toLocaleString()}` : "not started";
-          console.log(`  ${state.proposal.sessionId.slice(0, 12)}… — ${state.status} — ${state.consumedMinutes}min — ${age}`);
+        console.log("");
+        for (const state of sessions as ComputeSessionView[]) {
+          const age = state.startedAt ? `started ${formatUnixAge(state.startedAt)}` : "not started";
+          printLines(renderComputeCardText({
+            title: "Compute Session",
+            sessionId: state.proposal.sessionId,
+            provider: state.proposal.providerAddress ?? state.proposal.clientAddress,
+            gpuSpec: state.proposal.gpuSpecHash,
+            rate: `${formatEthAmount(BigInt(state.proposal.ratePerHourWei))} / hour`,
+            status: state.status.toUpperCase(),
+            started: age,
+            usage: buildUsageSummary(state, null),
+          }));
+          console.log("");
         }
         return;
       }
@@ -359,13 +454,22 @@ export function registerComputeCommands(program: Command): void {
         console.error(c.red("Session not found:"), result.data);
         process.exit(1);
       }
-      const { session, current } = result.data as { session: Record<string, unknown>; current: Record<string, unknown> | null };
-      console.log(bold(`Session: ${sessionId}`));
-      console.log(JSON.stringify(session, null, 2));
-      if (current) {
-        console.log(bold("Current metrics:"));
-        console.log(JSON.stringify(current, null, 2));
-      }
+      const { session, current } = result.data as { session: ComputeSessionView; current: CurrentComputeMetrics | null };
+      printLines(renderComputeCardText({
+        title: "Compute Session",
+        sessionId,
+        provider: session.proposal.providerAddress ?? session.proposal.clientAddress,
+        gpuSpec: session.proposal.gpuSpecHash,
+        rate: `${formatEthAmount(BigInt(session.proposal.ratePerHourWei))} / hour`,
+        started: session.startedAt ? formatUnixAge(session.startedAt) : "not started",
+        status: session.status.toUpperCase(),
+        usage: buildUsageSummary(session, current),
+        metrics: buildMetricRows(current),
+        footerHints: [
+          "arc402 compute end <session-id>   <- settle now",
+          current ? "[live snapshot from daemon metering]" : "[no live metrics available]",
+        ],
+      }));
     });
 
   // ── end ───────────────────────────────────────────────────────────────────
@@ -416,11 +520,20 @@ export function registerComputeCommands(program: Command): void {
       };
 
       endSpinner.succeed(" Session ended");
-      renderTree([
-        { label: "Consumed", value: `${data.consumedMinutes} minutes` },
-        { label: "Cost", value: `${data.costWei} wei` },
-        { label: "Refund", value: `${data.refundWei} wei`, last: true },
-      ]);
+      printLines(renderComputeCardText({
+        title: "Compute Session Ended",
+        sessionId,
+        provider: "settlement",
+        rate: "finalized",
+        status: data.status.toUpperCase(),
+        usage: {
+          consumed: formatDurationFromMinutes(data.consumedMinutes),
+          cost: formatEthAmount(BigInt(data.costWei)),
+          remaining: formatEthAmount(BigInt(data.refundWei)),
+          escrowCeiling: "refund released",
+          percentUsed: undefined,
+        },
+      }));
     });
 
   // ── withdraw ──────────────────────────────────────────────────────────────
@@ -485,26 +598,21 @@ export function registerComputeCommands(program: Command): void {
 
       console.log(bold(`Compute sessions (${count}):`));
       console.log("");
-      for (const raw of sessions) {
-        const s = raw as {
-          proposal: { sessionId: string; clientAddress: string; ratePerHourWei: string; maxHours: number };
-          status: string;
-          consumedMinutes: number;
-          startedAt: number | null;
-          endedAt: number | null;
-        };
-        console.log(`  ${s.proposal.sessionId}`);
-        console.log(`    Status:  ${s.status}`);
-        console.log(`    Client:  ${s.proposal.clientAddress}`);
-        console.log(`    Rate:    ${s.proposal.ratePerHourWei} wei/hr`);
-        console.log(`    Hours:   max ${s.proposal.maxHours}`);
-        console.log(`    Used:    ${s.consumedMinutes} minutes`);
-        if (s.startedAt) {
-          console.log(`    Started: ${new Date(s.startedAt * 1000).toLocaleString()}`);
-        }
-        if (s.endedAt) {
-          console.log(`    Ended:   ${new Date(s.endedAt * 1000).toLocaleString()}`);
-        }
+      for (const s of sessions as unknown as unknown as ComputeSessionView[]) {
+        printLines(renderComputeCardText({
+          title: "Compute Session",
+          sessionId: s.proposal.sessionId,
+          provider: s.proposal.providerAddress ?? s.proposal.clientAddress,
+          gpuSpec: s.proposal.gpuSpecHash,
+          rate: `${formatEthAmount(BigInt(s.proposal.ratePerHourWei))} / hour`,
+          started: s.startedAt ? formatUnixAge(s.startedAt) : "not started",
+          status: s.status.toUpperCase(),
+          usage: buildUsageSummary(s, null),
+          footerHints: [
+            `max ${s.proposal.maxHours}h`,
+            s.endedAt ? `ended ${formatUnixAge(s.endedAt)}` : "",
+          ].filter(Boolean),
+        }));
         console.log("");
       }
     });
