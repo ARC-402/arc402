@@ -27,6 +27,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { ethers } from "ethers";
 import { FileDeliveryManager, type DeliveryManifest } from "./file-delivery.js";
 import { createJobDirectory } from "./job-lifecycle.js";
+import { guardTaskContent } from "./prompt-guard.js";
 
 const ARC402_DIR = path.join(os.homedir(), ".arc402");
 const JOBS_DIR = path.join(ARC402_DIR, "jobs");
@@ -148,6 +149,10 @@ export class WorkerExecutor {
 
     // Write task.md to job dir
     const taskText = params.taskDescription ?? this.buildTask(capability, specHash, agreementId);
+    const guardResult = guardTaskContent(taskText);
+    if (!guardResult.safe) {
+      throw new Error(`Task content rejected by PromptGuard: ${guardResult.category}`);
+    }
     fs.writeFileSync(path.join(jobDir, "task.md"), taskText, "utf-8");
 
     const record: ExecutionRecord = {

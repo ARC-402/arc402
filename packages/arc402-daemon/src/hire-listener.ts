@@ -8,6 +8,7 @@ import { ethers } from "ethers";
 import type { DaemonConfig } from "./config";
 import type { DaemonDB } from "./server";
 import type { Notifier } from "./notify";
+import { guardTaskContent } from "./prompt-guard";
 
 export interface HireProposal {
   messageId: string;
@@ -196,6 +197,33 @@ export class HireListener {
         await this.notifier.notifyHireRejected(hireId, policyResult.reason ?? "policy_violation");
       }
       return;
+    }
+
+    if (proposal.taskDescription) {
+      const guardResult = guardTaskContent(proposal.taskDescription);
+      if (!guardResult.safe) {
+        const hireId = proposal.messageId;
+        this.db.insertHireRequest({
+          id: hireId,
+          agreement_id: proposal.agreementId ?? null,
+          hirer_address: proposal.hirerAddress,
+          capability: proposal.capability,
+          price_eth: proposal.priceEth,
+          deadline_unix: proposal.deadlineUnix,
+          spec_hash: proposal.specHash,
+          task_description: proposal.taskDescription,
+          status: "rejected",
+          reject_reason: `prompt_guard:${guardResult.category}`,
+        });
+
+        await this.notifier.send("hire_rejected", "PromptGuard Rejected Hire", [
+          `Hire: ${hireId}`,
+          `Category: ${guardResult.category}`,
+          `Severity: ${guardResult.severity}`,
+          `Excerpt: ${guardResult.excerpt}`,
+        ].join("\n")).catch(() => {});
+        return;
+      }
     }
 
     // Insert as pending_approval or auto-accept

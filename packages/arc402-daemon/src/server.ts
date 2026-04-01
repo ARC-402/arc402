@@ -39,6 +39,8 @@ import { DeliveryClient } from "./delivery-client";
 import { COMPUTE_AGREEMENT_ABI, SERVICE_AGREEMENT_ABI } from "./abis";
 import { HandshakeWatcher } from "./handshake-watcher.js";
 import { WorkerExecutor } from "./worker-executor.js";
+import { EndpointPolicy, hasExplicitCommerceDelegation, resolveJobId } from "./endpoint-policy";
+import { guardTaskContent } from "./prompt-guard";
 
 // ─── State DB ─────────────────────────────────────────────────────────────────
 
@@ -212,6 +214,19 @@ let rateLimitCleanupInterval: ReturnType<typeof setInterval> | null = null;
 // ─── Body size limit ──────────────────────────────────────────────────────────
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1 MB
+
+function collectInboundTaskTexts(payload: Record<string, unknown>): string[] {
+  const values = [
+    payload.task,
+    payload.taskDescription,
+    payload.task_description,
+    payload.content,
+    payload.prompt,
+    payload.workloadDescription,
+    payload.workload_description,
+  ];
+  return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
 
 // ─── Logger ───────────────────────────────────────────────────────────────────
 
@@ -595,9 +610,11 @@ export async function runDaemon(foreground = false): Promise<void> {
     serviceAgreementAddress: config.serviceAgreementAddress ?? null,
   });
   workerExecutor.log = log;
+  const endpointPolicy = new EndpointPolicy();
 
   // onJobCompleted: worker finished — submit fulfill UserOp on-chain, update DB, notify
   workerExecutor.onJobCompleted = (agreementId, rootHash) => {
+    endpointPolicy.releaseJob(agreementId);
     log({ event: "worker_job_completed", agreement_id: agreementId, root_hash: rootHash });
     const hire = db.getHireRequestByAgreementId(agreementId);
     if (!hire) {
@@ -654,6 +671,7 @@ export async function runDaemon(foreground = false): Promise<void> {
 
   // onJobFailed: worker failed — log, update DB, notify operator
   workerExecutor.onJobFailed = (agreementId, error) => {
+    endpointPolicy.releaseJob(agreementId);
     log({ event: "worker_job_failed", agreement_id: agreementId, error });
     const hire = db.getHireRequestByAgreementId(agreementId);
     if (hire) {
@@ -716,6 +734,7 @@ export async function runDaemon(foreground = false): Promise<void> {
       specHash: hire.spec_hash ?? "0x0",
       taskDescription: hire.task_description ?? hire.capability ?? undefined,
     });
+    endpointPolicy.lockForJob(hire.agreement_id);
     log({ event: "job_enqueued", id: hireId, agreement_id: hire.agreement_id, capability: hire.capability });
 
     // Seed staged deliverables if configured for this capability
@@ -889,6 +908,7 @@ export async function runDaemon(foreground = false): Promise<void> {
 
     const url = new URL(req.url || "/", `http://localhost:${httpPort}`);
     const pathname = url.pathname;
+    const jobId = resolveJobId(req.headers);
 
     // Rate limiting (all endpoints)
     const clientIp = (req.socket.remoteAddress ?? "unknown").replace(/^::ffff:/, "");
@@ -951,6 +971,20 @@ export async function runDaemon(foreground = false): Promise<void> {
       verifyRequestSignature(body, req);
       try {
           const msg = JSON.parse(body) as Record<string, unknown>;
+          if (jobId) {
+            endpointPolicy.lockForJob(jobId);
+            if (hasExplicitCommerceDelegation(msg, pathname)) {
+              endpointPolicy.grantCommerceDelegate(jobId);
+            }
+            if (!endpointPolicy.isAllowed(jobId, pathname)) {
+              res.writeHead(403, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({
+                error: "commerce_delegation_required",
+                reason: "This job was not granted commerce delegation. The worker agent cannot initiate hires or subscriptions.",
+              }));
+              return;
+            }
+          }
 
           // Resolve hirer address — prefer the on-chain smart wallet client field
           let resolvedHirerAddress = String(msg.hirerAddress ?? msg.hirer_address ?? msg.from ?? "");
@@ -966,6 +1000,27 @@ export async function runDaemon(foreground = false): Promise<void> {
           }
 
           const taskDescription = String(msg.task ?? msg.taskDescription ?? "");
+          for (const text of collectInboundTaskTexts(msg)) {
+            const guardResult = guardTaskContent(text);
+            if (!guardResult.safe) {
+              log({
+                event: "prompt_guard_rejected",
+                path: pathname,
+                job_id: jobId,
+                category: guardResult.category,
+                severity: guardResult.severity,
+                excerpt: guardResult.excerpt,
+              });
+              res.writeHead(400, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({
+                error: "task_rejected",
+                reason: "Task content failed security screening",
+                code: "PROMPT_INJECTION_DETECTED",
+                category: guardResult.category,
+              }));
+              return;
+            }
+          }
 
           // Feed into the hire listener's message handler
           const proposal = {
@@ -1043,6 +1098,7 @@ export async function runDaemon(foreground = false): Promise<void> {
               specHash: proposal.specHash,
               taskDescription: taskDescription || undefined,
             });
+            endpointPolicy.lockForJob(proposal.agreementId);
             log({ event: "http_job_enqueued", id: proposal.messageId, agreement_id: proposal.agreementId });
 
             // Seed staged deliverables if configured for this capability
@@ -1330,6 +1386,41 @@ export async function runDaemon(foreground = false): Promise<void> {
       if (body === null) return;
       try {
         const msg = JSON.parse(body) as Record<string, unknown>;
+        if (jobId) {
+          endpointPolicy.lockForJob(jobId);
+          if (hasExplicitCommerceDelegation(msg, pathname)) {
+            endpointPolicy.grantCommerceDelegate(jobId);
+          }
+          if (!endpointPolicy.isAllowed(jobId, pathname)) {
+            res.writeHead(403, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              error: "commerce_delegation_required",
+              reason: "This job was not granted commerce delegation. The worker agent cannot initiate hires or subscriptions.",
+            }));
+            return;
+          }
+        }
+        for (const text of collectInboundTaskTexts(msg)) {
+          const guardResult = guardTaskContent(text);
+          if (!guardResult.safe) {
+            log({
+              event: "prompt_guard_rejected",
+              path: pathname,
+              job_id: jobId,
+              category: guardResult.category,
+              severity: guardResult.severity,
+              excerpt: guardResult.excerpt,
+            });
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              error: "task_rejected",
+              reason: "Task content failed security screening",
+              code: "PROMPT_INJECTION_DETECTED",
+              category: guardResult.category,
+            }));
+            return;
+          }
+        }
         if (!computeSessions) {
           res.writeHead(503, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "compute_disabled" }));
