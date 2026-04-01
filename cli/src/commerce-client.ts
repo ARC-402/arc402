@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { configExists, loadConfig } from "./config";
 import { DAEMON_DIR, DAEMON_TOML, loadDaemonConfig } from "./daemon/config";
 
 export interface X402PaymentRequirement {
@@ -65,6 +66,14 @@ export interface DaemonAgreementsResponse {
 export interface DaemonCommerceClientOptions {
   baseUrl?: string;
   token?: string;
+}
+
+export type DaemonNodeMode = "local" | "remote";
+
+export interface ResolvedChatDaemonTarget {
+  baseUrl: string;
+  mode: DaemonNodeMode;
+  source: "flag" | "config" | "daemon" | "default-local";
 }
 
 function header(headers: Headers, key: string): string | undefined {
@@ -180,6 +189,61 @@ export function resolveDaemonApiBaseUrl(explicitBaseUrl?: string): string {
   }
 
   return "http://127.0.0.1:4403";
+}
+
+export function inferDaemonNodeMode(baseUrl: string): DaemonNodeMode {
+  try {
+    const url = new URL(baseUrl);
+    const hostname = url.hostname.toLowerCase();
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+      return "local";
+    }
+  } catch {
+    // Fall through and treat invalid/unparseable endpoints as remote user input.
+  }
+
+  return "remote";
+}
+
+export function resolveChatDaemonTarget(options: {
+  explicitBaseUrl?: string;
+  explicitNodeMode?: DaemonNodeMode;
+} = {}): ResolvedChatDaemonTarget {
+  const savedChat = configExists() ? loadConfig().chat : undefined;
+  const savedBaseUrl = savedChat?.daemonUrl?.trim() ? savedChat.daemonUrl.trim() : undefined;
+
+  if (options.explicitBaseUrl?.trim()) {
+    const baseUrl = trimTrailingSlash(options.explicitBaseUrl.trim());
+    return {
+      baseUrl,
+      mode: options.explicitNodeMode ?? inferDaemonNodeMode(baseUrl),
+      source: "flag",
+    };
+  }
+
+  if (savedBaseUrl) {
+    return {
+      baseUrl: trimTrailingSlash(savedBaseUrl),
+      mode: options.explicitNodeMode ?? savedChat?.nodeMode ?? inferDaemonNodeMode(savedBaseUrl),
+      source: "config",
+    };
+  }
+
+  if (fs.existsSync(DAEMON_TOML)) {
+    const baseUrl = resolveDaemonApiBaseUrl();
+    return {
+      baseUrl,
+      mode: options.explicitNodeMode ?? "local",
+      source: "daemon",
+    };
+  }
+
+  const baseUrl = resolveDaemonApiBaseUrl();
+  return {
+    baseUrl,
+    mode: options.explicitNodeMode ?? "local",
+    source: "default-local",
+  };
 }
 
 async function daemonJsonRequest<T>(

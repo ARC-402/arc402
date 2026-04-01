@@ -39,6 +39,9 @@ import { DeliveryClient } from "./delivery-client";
 import { COMPUTE_AGREEMENT_ABI, SERVICE_AGREEMENT_ABI } from "../abis";
 import { HandshakeWatcher } from "./handshake-watcher.js";
 import { WorkerExecutor } from "./worker-executor.js";
+import { createEventBus } from "./api";
+import { installSessionSchema, SessionManager } from "./session-manager";
+import { AuthServer } from "./auth-server";
 
 // ─── State DB ─────────────────────────────────────────────────────────────────
 
@@ -119,6 +122,7 @@ function openStateDB(dbPath: string): DaemonDB {
       status TEXT
     );
   `);
+  installSessionSchema(db);
 
   // Migration: add task_description column to existing DBs that predate this field
   try { db.exec(`ALTER TABLE hire_requests ADD COLUMN task_description TEXT`); } catch { /* already exists */ }
@@ -467,6 +471,7 @@ function formatUptime(seconds: number): string {
 export async function runDaemon(foreground = false): Promise<void> {
   fs.mkdirSync(DAEMON_DIR, { recursive: true, mode: 0o700 });
   const log = openLogger(DAEMON_LOG, foreground);
+  const eventBus = createEventBus(log);
 
   log({ event: "daemon_starting" });
 
@@ -539,13 +544,29 @@ export async function runDaemon(foreground = false): Promise<void> {
 
   // ── Step 7: Open state DB ────────────────────────────────────────────────
   let db: DaemonDB;
+  let rawDb: Database.Database;
   try {
+    rawDb = new Database(DAEMON_DB);
+    rawDb.pragma("journal_mode = WAL");
+    installSessionSchema(rawDb);
     db = openStateDB(DAEMON_DB);
     log({ event: "state_db_opened", path: DAEMON_DB });
   } catch (err) {
     process.stderr.write(`State DB error: ${err}\n`);
     process.exit(1);
   }
+
+  const daemonId = crypto
+    .createHash("sha256")
+    .update(`${config.wallet.contract_address}:${config.network.chain_id}`)
+    .digest("hex");
+  const sessionManager = new SessionManager({
+    db: rawDb,
+    daemonId,
+    chainId: config.network.chain_id,
+    ownerAddress: config.wallet.owner_address,
+  });
+  const authServer = new AuthServer(sessionManager, eventBus, log);
 
   // ── Setup notifier ───────────────────────────────────────────────────────
   const notifier = buildNotifier(config);
@@ -599,6 +620,7 @@ export async function runDaemon(foreground = false): Promise<void> {
   // onJobCompleted: worker finished — submit fulfill UserOp on-chain, update DB, notify
   workerExecutor.onJobCompleted = (agreementId, rootHash) => {
     log({ event: "worker_job_completed", agreement_id: agreementId, root_hash: rootHash });
+    eventBus.emitEvent("job_completed", { agreementId, rootHash });
     const hire = db.getHireRequestByAgreementId(agreementId);
     if (!hire) {
       log({ event: "worker_complete_no_hire", agreement_id: agreementId });
@@ -655,6 +677,7 @@ export async function runDaemon(foreground = false): Promise<void> {
   // onJobFailed: worker failed — log, update DB, notify operator
   workerExecutor.onJobFailed = (agreementId, error) => {
     log({ event: "worker_job_failed", agreement_id: agreementId, error });
+    eventBus.emitEvent("job_failed", { agreementId, reason: error });
     const hire = db.getHireRequestByAgreementId(agreementId);
     if (hire) {
       db.updateHireRequestStatus(hire.id, "rejected", `worker_failed: ${error}`);
@@ -715,6 +738,11 @@ export async function runDaemon(foreground = false): Promise<void> {
       capability: hire.capability ?? "general",
       specHash: hire.spec_hash ?? "0x0",
       taskDescription: hire.task_description ?? hire.capability ?? undefined,
+    });
+    eventBus.emitEvent("job_started", {
+      agreementId: hire.agreement_id,
+      capability: hire.capability ?? "general",
+      harness: config.worker?.agent_type ?? "claude-code",
     });
     log({ event: "job_enqueued", id: hireId, agreement_id: hire.agreement_id, capability: hire.capability });
 
@@ -784,6 +812,12 @@ export async function runDaemon(foreground = false): Promise<void> {
     config.wallet.contract_address,
     async (event) => {
       log({ event: "handshake_received", ...event, amount: event.amount.toString() });
+      eventBus.emitEvent("handshake_received", {
+        from: event.from,
+        type: String(event.hsType),
+        amount: event.amount.toString(),
+        note: event.note,
+      });
     },
     path.join(os.homedir(), '.arc402', 'processed-handshakes.json')
   );
@@ -851,7 +885,7 @@ export async function runDaemon(foreground = false): Promise<void> {
     });
   }
 
-  const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status"]);
+  const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status", "/events"]);
 
   // Protocol POST endpoints — open to external agents (no daemon token required).
   // These are inbound P2P messages: hire proposals, handshakes, delivery notifications, etc.
@@ -867,6 +901,11 @@ export async function runDaemon(foreground = false): Promise<void> {
     "/dispute",
     "/dispute/resolved",
     "/workroom/status",
+    "/auth/challenge",
+    "/auth/verify",
+    "/auth/step-up",
+    "/userop/simulate",
+    "/userop/execute",
   ]);
 
   // CORS whitelist — localhost for local tooling, arc402.xyz for the web app
@@ -894,6 +933,12 @@ export async function runDaemon(foreground = false): Promise<void> {
     const clientIp = (req.socket.remoteAddress ?? "unknown").replace(/^::ffff:/, "");
     if (!checkRateLimit(clientIp)) {
       log({ event: "rate_limited", ip: clientIp, path: pathname });
+      authServer.recordThreat({
+        severity: "warning",
+        category: "http.rate_limit",
+        reason: "too_many_requests",
+        details: { ip: clientIp, path: pathname },
+      });
       res.writeHead(429, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "too_many_requests" }));
       return;
@@ -909,6 +954,12 @@ export async function runDaemon(foreground = false): Promise<void> {
       const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
       if (token !== apiToken) {
         log({ event: "http_unauthorized", ip: clientIp, path: pathname });
+        authServer.recordThreat({
+          severity: "warning",
+          category: "http.authz",
+          reason: "unauthorized",
+          details: { ip: clientIp, path: pathname },
+        });
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "unauthorized" }));
         return;
@@ -930,6 +981,11 @@ export async function runDaemon(foreground = false): Promise<void> {
       return;
     }
 
+    if (pathname === "/events" && req.method === "GET") {
+      eventBus.addClient(req, res);
+      return;
+    }
+
     // Agent info
     if (pathname === "/agent") {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -941,6 +997,135 @@ export async function runDaemon(foreground = false): Promise<void> {
         bundlerMode: config.bundler.mode,
         relay: config.relay.enabled,
       }));
+      return;
+    }
+
+    if (pathname === "/auth/challenge" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const wallet = String(msg.wallet ?? config.wallet.contract_address);
+        const requestedScope = Array.isArray(msg.requestedScope)
+          ? msg.requestedScope.map((item) => String(item))
+          : ["userop.simulate", "userop.execute"];
+        const challenge = authServer.issueLoginChallenge(wallet, requestedScope);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(challenge));
+      } catch (error) {
+        authServer.recordThreat({
+          severity: "warning",
+          category: "auth.challenge",
+          reason: "invalid_request",
+          details: { error: String(error) },
+        });
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_request" }));
+      }
+      return;
+    }
+
+    if (pathname === "/auth/verify" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const challengeId = String(msg.challengeId ?? "");
+        const signature = String(msg.signature ?? "");
+        const result = authServer.verifyLogin(challengeId, signature);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          sessionToken: result.sessionToken,
+          session: {
+            id: result.session.id,
+            wallet: result.session.wallet,
+            requestedScope: JSON.parse(result.session.requested_scope),
+            expiresAt: result.session.expires_at,
+          },
+        }));
+      } catch (error) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      }
+      return;
+    }
+
+    if (pathname === "/auth/step-up" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const result = authServer.handleStepUp({
+          sessionToken: String(msg.sessionToken ?? ""),
+          challengeId: msg.challengeId ? String(msg.challengeId) : undefined,
+          signature: msg.signature ? String(msg.signature) : undefined,
+          operation: msg.operation ? String(msg.operation) : undefined,
+          target: msg.target ? String(msg.target) : undefined,
+          counterparty: msg.counterparty ? String(msg.counterparty) : undefined,
+          valueWei: msg.valueWei ? String(msg.valueWei) : undefined,
+        });
+        res.writeHead(result.status === "challenge_required" ? 202 : 200, {
+          "Content-Type": "application/json",
+        });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      }
+      return;
+    }
+
+    if (pathname === "/userop/simulate" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const result = authServer.simulateUserOp({
+          sessionToken: String(msg.sessionToken ?? ""),
+          operation: String(msg.operation ?? "userop.execute"),
+          target: msg.target ? String(msg.target) : undefined,
+          counterparty: msg.counterparty ? String(msg.counterparty) : undefined,
+          valueWei: msg.valueWei ? String(msg.valueWei) : undefined,
+        });
+        if (result.requiresStepUp) {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ code: "STEP_UP_REQUIRED", ...result }));
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (error) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
+      }
+      return;
+    }
+
+    if (pathname === "/userop/execute" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const msg = JSON.parse(body) as Record<string, unknown>;
+        const result = authServer.executeUserOp({
+          sessionToken: String(msg.sessionToken ?? ""),
+          simulationId: String(msg.simulationId ?? ""),
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          status: "executed",
+          simulationId: result.id,
+          executedAt: result.executed_at,
+        }));
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        if (reason === "step_up_required") {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ code: "STEP_UP_REQUIRED", error: reason }));
+          return;
+        }
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: reason }));
+      }
       return;
     }
 
@@ -1027,6 +1212,12 @@ export async function runDaemon(foreground = false): Promise<void> {
           });
 
           log({ event: "http_hire_received", id: proposal.messageId, hirer: proposal.hirerAddress, status });
+          eventBus.emitEvent("job_started", {
+            agreementId: proposal.agreementId ?? proposal.messageId,
+            hirer: proposal.hirerAddress,
+            capability: proposal.capability,
+            status,
+          });
 
           if (config.notifications.notify_on_hire_request) {
             await notifier.notifyHireRequest(proposal.messageId, proposal.hirerAddress, proposal.priceEth, proposal.capability);
@@ -1319,6 +1510,15 @@ export async function runDaemon(foreground = false): Promise<void> {
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(statusPayload));
+      return;
+    }
+
+    if (pathname === "/security/events" && req.method === "GET") {
+      const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") ?? "50")));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        events: authServer.listSecurityEvents(limit),
+      }));
       return;
     }
 
@@ -1808,6 +2008,7 @@ export async function runDaemon(foreground = false): Promise<void> {
 
     // Stop on-chain watchers
     await handshakeWatcher.stop();
+    rawDb.close();
 
     // Stop accepting new hire requests
     if (relayInterval) clearInterval(relayInterval);
