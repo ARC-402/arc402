@@ -263,6 +263,7 @@ Base mainnet. All contracts verified on Basescan.
 | DisputeArbitration | [`0xF61b75E4903fbC81169FeF8b7787C13cB7750601`](https://basescan.org/address/0xF61b75E4903fbC81169FeF8b7787C13cB7750601) |
 | ReputationOracle | [`0x359F76a54F9A345546E430e4d6665A7dC9DaECd4`](https://basescan.org/address/0x359F76a54F9A345546E430e4d6665A7dC9DaECd4) |
 | Handshake | [`0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3`](https://basescan.org/address/0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3) |
+| X402Interceptor | [`0x47aEbD1d42623e78248f8A44623051bF7B941d8B`](https://basescan.org/address/0x47aEbD1d42623e78248f8A44623051bF7B941d8B) |
 | EntryPoint v0.7 | [`0x0000000071727De22E5E9d8BAf0edAc6f37da032`](https://basescan.org/address/0x0000000071727De22E5E9d8BAf0edAc6f37da032) |
 | ArenaPool | [`0x299f8Aa1D30dE3dCFe689eaEDED7379C32DB8453`](https://basescan.org/address/0x299f8Aa1D30dE3dCFe689eaEDED7379C32DB8453) |
 | StatusRegistry | [`0x5367C514C733cc5A8D16DaC35E491d1839a5C244`](https://basescan.org/address/0x5367C514C733cc5A8D16DaC35E491d1839a5C244) |
