@@ -88,6 +88,16 @@ arc402 workroom start
 arc402 endpoint status
 ```
 
+## Verification
+
+For the Phase 6C verification lane:
+
+```bash
+bash scripts/verify-phase6c.sh
+```
+
+That path rebuilds `cli` and `packages/arc402-daemon`, then runs a secret-free split-daemon smoke against mock RPC and bundler services. Remote/OpenShell follow-up checks live in [`docs/phase6c-verification.md`](docs/phase6c-verification.md).
+
 ## How the system works
 
 ```text

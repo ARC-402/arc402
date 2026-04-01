@@ -1,6 +1,6 @@
 {
   "name": "@arc402/daemon",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "ARC-402 daemon — always-on governed commerce node",
   "main": "dist/index.js",
   "bin": {
@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test test/**/*.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^9.0.0",
