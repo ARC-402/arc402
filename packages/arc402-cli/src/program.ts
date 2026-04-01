@@ -23,6 +23,7 @@ import { registerTrustCommand } from "./commands/trust";
 import { registerWalletCommands } from "./commands/wallet";
 import { registerOwnerCommands } from "./commands/owner";
 import { registerSetupCommands } from "./commands/setup";
+import { registerChatCommand } from "./commands/chat";
 import { registerVerifyCommand } from "./commands/verify";
 import { registerContractInteractionCommands } from "./commands/contract-interaction";
 import { registerWatchtowerCommands } from "./commands/watchtower";
@@ -76,6 +77,7 @@ export function createProgram(): Command {
   registerWalletCommands(program);
   registerOwnerCommands(program);
   registerSetupCommands(program);
+  registerChatCommand(program);
   registerVerifyCommand(program);
   registerContractInteractionCommands(program);
   registerWatchtowerCommands(program);
