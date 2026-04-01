@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useEffect } from "react";
-import { Box, Text, useApp } from "ink";
+import React, { useState, useCallback, useEffect, useRef } from "react";
+import { Box, Text, useApp, measureElement } from "ink";
+import type { DOMElement } from "ink/build/dom.js";
 import { Header } from "./Header";
 import { Viewport } from "./Viewport";
 import { Footer } from "./Footer";
@@ -7,11 +8,12 @@ import { InputLine } from "./InputLine";
 import { useCommand } from "./useCommand";
 import { useChat } from "./useChat";
 import { useScroll } from "./useScroll";
+import { useTerminalSize } from "./useTerminalSize";
+import { useNotifications } from "./useNotifications";
 import { createProgram } from "../program";
+import { StatusCard } from "./components/StatusCard";
+import { ToastContainer } from "./components/Toast";
 import chalk from "chalk";
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const pkg = require("../../package.json") as { version: string };
 
 const BUILTIN_CMDS = ["help", "exit", "quit", "clear", "status"];
 
@@ -27,20 +29,31 @@ interface AppProps {
  */
 export function App({ version, network, wallet, balance }: AppProps) {
   const { exit } = useApp();
-  const [outputBuffer, setOutputBuffer] = useState<string[]>([
+  const [outputBuffer, setOutputBuffer] = useState<React.ReactNode[]>([
     chalk.dim("  Type 'help' to see available commands"),
     "",
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [footerHeight, setFooterHeight] = useState(1);
+  const headerRef = useRef<DOMElement>(null);
+  const footerRef = useRef<DOMElement>(null);
 
   const { execute, isRunning } = useCommand();
   const { send, isSending } = useChat();
+  const { rows } = useTerminalSize();
+  const { toasts, dismiss } = useNotifications();
 
-  // Approximate viewport height for scroll management
-  const HEADER_ROWS = 15;
-  const FOOTER_ROWS = 1;
-  const rows = process.stdout.rows ?? 24;
-  const viewportHeight = Math.max(1, rows - HEADER_ROWS - FOOTER_ROWS);
+  useEffect(() => {
+    if (headerRef.current) {
+      setHeaderHeight(measureElement(headerRef.current).height);
+    }
+    if (footerRef.current) {
+      setFooterHeight(Math.max(1, measureElement(footerRef.current).height));
+    }
+  }, [rows, version, network, wallet, balance, toasts.length]);
+
+  const viewportHeight = Math.max(1, rows - headerHeight - footerHeight);
 
   const { scrollOffset, isAutoScroll, scrollUp, scrollDown, snapToBottom } =
     useScroll(viewportHeight);
@@ -55,9 +68,16 @@ export function App({ version, network, wallet, balance }: AppProps) {
     }
   });
 
-  const appendLine = useCallback((line: string) => {
-    setOutputBuffer((prev) => [...prev, line]);
+  const appendEntry = useCallback((entry: React.ReactNode) => {
+    setOutputBuffer((prev) => [...prev, entry]);
   }, []);
+
+  const appendLine = useCallback(
+    (line: string) => {
+      appendEntry(line);
+    },
+    [appendEntry]
+  );
 
   const handleCommand = useCallback(
     async (input: string): Promise<void> => {
@@ -143,16 +163,13 @@ export function App({ version, network, wallet, balance }: AppProps) {
 
       // ── Built-in: status ───────────────────────────────────────────────────
       if (input === "status") {
-        if (network)
-          appendLine(
-            ` ${chalk.dim("Network")}   ${chalk.white(network)}`
-          );
-        if (wallet)
-          appendLine(` ${chalk.dim("Wallet")}    ${chalk.white(wallet)}`);
-        if (balance)
-          appendLine(` ${chalk.dim("Balance")}   ${chalk.white(balance)}`);
-        if (!network && !wallet && !balance)
-          appendLine(chalk.dim("  No config found. Run 'config init' to get started."));
+        appendEntry(
+          <StatusCard
+            network={network}
+            wallet={wallet}
+            balance={balance}
+          />
+        );
         appendLine("");
         setIsProcessing(false);
         return;
@@ -187,6 +204,7 @@ export function App({ version, network, wallet, balance }: AppProps) {
     <Box flexDirection="column" height="100%">
       {/* HEADER — fixed, never scrolls */}
       <Header
+        ref={headerRef}
         version={version}
         network={network}
         wallet={wallet}
@@ -203,10 +221,12 @@ export function App({ version, network, wallet, balance }: AppProps) {
         lines={outputBuffer}
         scrollOffset={scrollOffset}
         isAutoScroll={isAutoScroll}
+        viewportHeight={viewportHeight}
       />
 
       {/* FOOTER — fixed, input pinned */}
-      <Footer>
+      <Footer ref={footerRef}>
+        <ToastContainer toasts={toasts} onDismiss={dismiss} />
         <InputLine onSubmit={handleCommand} isDisabled={isDisabled} />
       </Footer>
     </Box>

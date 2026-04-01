@@ -1,10 +1,11 @@
 import React from "react";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text } from "ink";
 
 interface ViewportProps {
-  lines: string[];
+  lines: React.ReactNode[];
   scrollOffset: number;
   isAutoScroll: boolean;
+  viewportHeight: number;
 }
 
 /**
@@ -13,18 +14,12 @@ interface ViewportProps {
  * scrollOffset=0 means pinned to bottom (auto-scroll).
  * Positive scrollOffset means scrolled up by that many lines.
  */
-export function Viewport({ lines, scrollOffset, isAutoScroll }: ViewportProps) {
-  const { stdout } = useStdout();
-  const termRows = stdout?.rows ?? 24;
-
-  // We'll compute the viewport height: total rows minus fixed areas
-  // Header is approximately bannerLines + separator (~14-16 rows)
-  // Footer is 1 row
-  // We'll use a reasonable estimate here; the parent App can pass exact height
-  const HEADER_ROWS = 15; // approximate
-  const FOOTER_ROWS = 1;
-  const viewportHeight = Math.max(1, termRows - HEADER_ROWS - FOOTER_ROWS);
-
+export function Viewport({
+  lines,
+  scrollOffset,
+  isAutoScroll,
+  viewportHeight,
+}: ViewportProps) {
   // Compute the window slice
   // scrollOffset=0 → show last viewportHeight lines
   // scrollOffset=N → show lines ending viewportHeight+N from end
@@ -46,10 +41,7 @@ export function Viewport({ lines, scrollOffset, isAutoScroll }: ViewportProps) {
 
   // Pad with empty lines if fewer than viewportHeight
   const padCount = Math.max(0, viewportHeight - visibleLines.length);
-  const paddedLines = [
-    ...Array(padCount).fill(""),
-    ...visibleLines,
-  ];
+  const paddedLines = [...Array<React.ReactNode>(padCount).fill(""), ...visibleLines];
 
   const canScrollDown = scrollOffset > 0;
 
@@ -57,7 +49,13 @@ export function Viewport({ lines, scrollOffset, isAutoScroll }: ViewportProps) {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" flexGrow={1}>
         {paddedLines.map((line, i) => (
-          <Text key={i}>{line}</Text>
+          typeof line === "string" ? (
+            <Text key={i}>{line}</Text>
+          ) : (
+            <Box key={i} flexDirection="column">
+              {line}
+            </Box>
+          )
         ))}
       </Box>
       {canScrollDown && !isAutoScroll && (
