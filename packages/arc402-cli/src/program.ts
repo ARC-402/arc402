@@ -40,6 +40,7 @@ import { registerJobCommands } from "./commands/job";
 import { registerHermesInitCommand } from "./commands/hermes-init";
 import { registerIndexCommands } from "./commands/index";
 import { registerSubscriptionCommands } from "./commands/subscription";
+import { registerStatusCommand } from "./commands/status";
 import reputation from "./commands/reputation.js";
 import policy from "./commands/policy.js";
 
@@ -53,6 +54,7 @@ export function createProgram(): Command {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     .version((require("../package.json") as { version: string }).version);
 
+  registerStatusCommand(program);
   registerConfigCommands(program);
   registerHandshakeCommand(program);
   registerAgentCommands(program);

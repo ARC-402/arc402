@@ -13,6 +13,7 @@
  */
 import { fork, type ChildProcess } from "child_process";
 import * as path from "path";
+import { loadDaemonConfig, loadMachineKey } from "./config";
 
 const legacy =
   process.argv.includes("--legacy") ||
@@ -38,6 +39,20 @@ if (legacy) {
 }
 
 function startTwoProcessDaemon(): void {
+  try {
+    const cfg = loadDaemonConfig();
+    loadMachineKey(cfg);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write("ARC-402 daemon is not ready to start.\n");
+    process.stderr.write(`${message}\n\n`);
+    process.stderr.write("Next steps:\n");
+    process.stderr.write("  • Run `arc402 setup` for guided onboarding, or `arc402 daemon init` to create daemon.toml.\n");
+    process.stderr.write("  • Export the required machine key environment variable before starting the daemon.\n");
+    process.stderr.write("  • If this should be a remote operator machine, use `arc402 chat --setup` and choose Remote instead of starting a local daemon.\n");
+    process.exit(1);
+  }
+
   const signerPath = path.join(__dirname, "signer.js");
   const apiPath    = path.join(__dirname, "api.js");
 

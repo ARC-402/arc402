@@ -304,6 +304,13 @@ async function runGuidedSetup(seed?: Partial<ChatRuntimeConfig>): Promise<ChatRu
       ? chalk.green(`  OK: daemon responded at ${runtime.daemonUrl}`)
       : chalk.yellow(`  Daemon check failed: ${daemonTest.error}`)
   );
+  if (!daemonTest.ok) {
+    if (runtime.nodeMode === "local") {
+      console.log(chalk.dim("  Local node hint: run `arc402 setup` or `arc402 daemon init`, then start the daemon before using local chat."));
+    } else {
+      console.log(chalk.dim("  Remote node hint: confirm the URL is reachable and the remote ARC-402 node is online."));
+    }
+  }
 
   const readiness = getHarnessReadiness(runtime.harness);
   console.log(
