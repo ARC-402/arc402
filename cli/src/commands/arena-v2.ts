@@ -9,6 +9,12 @@ import { requireSigner } from "../client";
 import { AGENT_REGISTRY_ABI, TRUST_REGISTRY_ABI } from "../abis";
 import { startSpinner } from "../ui/spinner";
 import { c } from "../ui/colors";
+import {
+  renderRoundsList,
+  renderSquadCard,
+  type ArenaRoundViewModel,
+  type ArenaSquadViewModel,
+} from "../ui/arena-ux";
 
 // ─── Arena v2 contract addresses ───────────────────────────────────────────
 // Resolved dynamically from ARC402RegistryV3.extensions() at runtime.
@@ -742,27 +748,23 @@ export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
           return;
         }
 
-        console.log();
-        console.log(chalk.bold("  Arena Rounds"));
-        console.log();
+        const viewModel: ArenaRoundViewModel[] = rounds.map((entry) => {
+          const round = entry as Record<string, unknown>;
+          return {
+            id: String(round["id"]),
+            question: String(round["question"] ?? "Untitled round"),
+            category: String(round["category"] ?? ""),
+            yesPot: BigInt(String(round["yesPot"] ?? "0")),
+            noPot: BigInt(String(round["noPot"] ?? "0")),
+            stakingClosesAt: Number(round["stakingClosesAt"] ?? 0),
+            resolvesAt: Number(round["resolvesAt"] ?? 0),
+            resolved: Boolean(round["resolved"]),
+            outcome: round["outcome"] as boolean | undefined,
+          };
+        });
 
-        if (rounds.length === 0) {
-          console.log(chalk.dim("  No rounds found."));
-        } else {
-          for (const r of rounds) {
-            const round = r as Record<string, unknown>;
-            const roundId = String(round["id"]);
-            const resolved = round["resolved"] as boolean;
-            const statusTag = resolved
-              ? round["outcome"] ? chalk.green("YES") : chalk.red("NO")
-              : chalk.yellow("open");
-            const yesPot = BigInt(String(round["yesPot"] ?? "0"));
-            const noPot  = BigInt(String(round["noPot"] ?? "0"));
-            console.log(`  [${roundId}]  ${statusTag}  ${chalk.bold(String(round["question"]).slice(0, 60))}`);
-            console.log(`         ${chalk.dim(String(round["category"] ?? ""))}  YES: ${formatUsdc(yesPot)}  NO: ${formatUsdc(noPot)}  ${chalk.dim(formatElapsed(Number(round["createdAt"])))}`);
-            console.log();
-          }
-        }
+        const title = opts.status === "open" ? "Active Rounds" : "Arena Rounds";
+        console.log(renderRoundsList(viewModel, title));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(` ${c.failure} Subgraph unavailable: ${msg}`);
@@ -1653,35 +1655,35 @@ export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
 
         const members = (squad["members"] as unknown[]) ?? [];
 
-        console.log();
-        console.log(chalk.bold(`  Squad — ${squad["name"]}`));
-        console.log(`  ID       ${formatSquadId(BigInt(sid))}`);
-        console.log(`  Domain   ${squad["domainTag"]}`);
-        console.log(`  Status   ${squadStatusLabel(Number(squad["status"]))}`);
-        console.log(`  Creator  ${truncateAddr(String(squad["creator"]))}`);
-        console.log(`  Members  ${squad["memberCount"]}`);
-        console.log(`  Invite   ${squad["inviteOnly"] ? "yes" : "no"}`);
-        console.log(`  Created  ${formatElapsed(Number(squad["createdAt"]))}`);
+        const squadView: ArenaSquadViewModel = {
+          id: formatSquadId(BigInt(sid)),
+          name: String(squad["name"] ?? "Unnamed squad"),
+          domainTag: String(squad["domainTag"] ?? ""),
+          creator: truncateAddr(String(squad["creator"] ?? "")),
+          status: squadStatusLabel(Number(squad["status"])),
+          inviteOnly: Boolean(squad["inviteOnly"]),
+          memberCount: Number(squad["memberCount"] ?? members.length),
+          createdAt: Number(squad["createdAt"] ?? 0),
+          members: members.map((entry) => {
+            const member = entry as Record<string, unknown>;
+            const agent = String(member["agent"] ?? "");
+            return {
+              agent: truncateAddr(agent),
+              role: String(member["role"] ?? "member"),
+              isLead: agent.toLowerCase() === String(squad["creator"] ?? "").toLowerCase(),
+            };
+          }),
+          briefings: briefings.map((entry) => {
+            const briefing = entry as Record<string, unknown>;
+            return {
+              preview: String(briefing["preview"] ?? ""),
+              publishedAt: Number(briefing["publishedAt"] ?? 0),
+              tags: ((briefing["tags"] as string[] | undefined) ?? []).filter(Boolean),
+            };
+          }),
+        };
 
-        if (members.length > 0) {
-          console.log();
-          console.log(chalk.bold("  Members"));
-          for (const m of members) {
-            const member = m as Record<string, unknown>;
-            console.log(`    ${truncateAddr(String(member["agent"]))}  role:${member["role"]}`);
-          }
-        }
-
-        if (briefings.length > 0) {
-          console.log();
-          console.log(chalk.bold("  Briefings"));
-          for (const b of briefings) {
-            const br = b as Record<string, unknown>;
-            const tags = (br["tags"] as string[])?.join(", ") ?? "";
-            console.log(`    ${chalk.dim(formatElapsed(Number(br["publishedAt"])))}  ${String(br["preview"]).slice(0, 50)}  ${chalk.dim(tags)}`);
-          }
-        }
-        console.log();
+        console.log(renderSquadCard(squadView));
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(` ${c.failure} Subgraph unavailable: ${msg}`);
