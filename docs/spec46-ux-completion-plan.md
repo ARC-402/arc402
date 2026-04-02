@@ -131,9 +131,9 @@ No claiming completion before Phase 6 is complete.
 - [ ] no clipping / overflow on narrow and wide terminal states
 
 ### Forge review gate
-- [ ] diff read line-by-line
-- [ ] layout architecture makes sense, not just symptom patching
-- [ ] fallback behavior for first render / zero measurement is safe
+- [x] diff read line-by-line
+- [x] layout architecture makes sense, not just symptom patching
+- [x] fallback behavior for first render / zero measurement is safe
 
 ### Lego manual review
 - [ ] real resize in your own terminal feels stable
@@ -144,16 +144,16 @@ No claiming completion before Phase 6 is complete.
 **Goal:** build the actual domain render system.
 
 ### Deliverables
-- [ ] `StatusCard`
-- [ ] `HireCard`
-- [ ] `DiscoverList`
-- [ ] `AgreementList`
-- [ ] `ComputeCard`
-- [ ] `SubscribeCard`
-- [ ] `RoundsList`
-- [ ] `SquadCard`
-- [ ] `WorkroomCard`
-- [ ] shared rendering conventions documented in code comments / pattern usage
+- [x] `StatusCard`
+- [x] `HireCard`
+- [x] `DiscoverList`
+- [x] `AgreementList`
+- [x] `ComputeCard`
+- [x] `SubscribeCard`
+- [x] `RoundsList`
+- [x] `SquadCard`
+- [x] `WorkroomCard`
+- [x] shared rendering conventions documented in code comments / pattern usage
 
 ### Likely files
 - `packages/arc402-cli/src/tui/components/commerce/StatusCard.tsx`
@@ -167,16 +167,16 @@ No claiming completion before Phase 6 is complete.
 - `packages/arc402-cli/src/tui/components/commerce/WorkroomCard.tsx`
 
 ### Acceptance criteria
-- [ ] all 9 components exist
-- [ ] all have typed props
-- [ ] all can render real command data
-- [ ] visual language is consistent across all components
-- [ ] status/color semantics are consistent
+- [x] all 9 components exist
+- [x] all have typed props
+- [x] all can render real command data
+- [x] visual language is consistent across all components
+- [x] status/color semantics are consistent
 
 ### Forge review gate
-- [ ] renderer pattern is coherent
-- [ ] no fragmented visual language
-- [ ] typography / spacing / hierarchy feel branded and intentional
+- [x] renderer pattern is coherent
+- [x] no fragmented visual language
+- [x] typography / spacing / hierarchy feel branded and intentional
 
 ### Lego manual review
 - [ ] the renderer system feels like one product, not 9 separate experiments
@@ -661,9 +661,9 @@ Use this before declaring the lane complete.
 - [x] Phase tracker created
 - [x] Claude Code prompt pack created for all 6 phases
 - [x] Phase 1 launched
-- [ ] Phase 1 reviewed
-- [ ] Phase 2 launched
-- [ ] Phase 2 reviewed
+- [x] Phase 1 reviewed
+- [x] Phase 2 launched
+- [x] Phase 2 reviewed
 - [ ] Phase 3 launched
 - [ ] Phase 3 reviewed
 - [ ] Phase 4 launched
