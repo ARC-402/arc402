@@ -1,6 +1,6 @@
 # @arc402/arc402
 
-ARC-402 protocol as a native OpenClaw plugin. One install gives every agent the full protocol stack.
+ARC-402 as a native OpenClaw control plugin for the ARC-402 node/daemon stack. The plugin is the host-side control surface; the node, daemon, and workroom remain the runtime source of truth.
 
 ## Install
 
@@ -12,7 +12,7 @@ npm i -g arc402-cli
 openclaw plugins install @arc402/arc402
 ```
 
-`arc402-cli` is a peer dependency — it must be installed globally before the plugin will work. The plugin delegates all protocol operations to the CLI.
+`arc402-cli` is a peer dependency — it must be installed globally before the plugin will work. The plugin delegates protocol operations to the CLI and manages the ARC-402 node from OpenClaw; it does not replace the daemon/workroom runtime.
 
 After install, your agent can guide setup interactively:
 - `arc402_workroom_init` — create the governed workroom
@@ -21,22 +21,22 @@ After install, your agent can guide setup interactively:
 
 ## Architecture
 
-**The plugin is the HOST-SIDE remote control.** It runs as part of the operator's personal OpenClaw agent (e.g., GigaBrain) on the host machine.
+**The plugin is the HOST-SIDE remote control.** It runs as part of the operator's personal OpenClaw agent on the host machine and talks to the ARC-402 node/daemon lifecycle.
 
-**All hired work executes in the workroom** — a governed Docker container with iptables network policy, process isolation, and GPU passthrough. The workroom daemon handles ALL inbound traffic:
+**All hired work executes in the workroom** — a governed Docker container with iptables network policy, process isolation, and GPU passthrough. The ARC-402 daemon/workroom runtime handles inbound protocol traffic and delivery:
 - Receiving hire proposals (`POST /hire`)
 - File delivery (`GET /job/:id/files/:name`)
 - Compute session signals (`POST /compute/propose`, etc.)
 - Execution receipts
 
-**The Cloudflare tunnel points to `workroom:4402`, not the host gateway.** Inbound work must go through the governed environment. This is non-negotiable.
+**The public endpoint points at the ARC-402 node/daemon on port 4402, not the OpenClaw host gateway.** Inbound work must go through the governed node environment. This is non-negotiable.
 
 **The plugin registers ZERO HTTP routes.** It only registers outbound agent tools and event hooks.
 
 ```
-Hiring agent  ──→  Cloudflare tunnel  ──→  workroom:4402 (daemon)
-                                                    │
-Host OpenClaw ──→  plugin tools  ──→  contracts / workroom docker mgmt
+Hiring agent  ──→  public endpoint / tunnel  ──→  ARC-402 daemon :4402
+                                                        │
+Host OpenClaw ──→  plugin tools  ──→  contracts / node / workroom mgmt
 ```
 
 ## What you get
@@ -138,10 +138,10 @@ npm run typecheck  # tsc --noEmit
 
 | | arc402-cli | @arc402/arc402 |
 |-|-----------|------------------------|
-| Install | `npm i -g arc402-cli` + `openclaw install arc402-agent` | `openclaw plugins install @arc402/arc402` |
+| Install | `npm i -g arc402-cli` + `openclaw install arc402-agent` | `npm i -g arc402-cli` + `openclaw plugins install @arc402/arc402` |
 | Agent tools | CLI subprocess | Native `api.registerTool()` |
-| Inbound HTTP | Port 4402, standalone daemon | Workroom daemon (Docker, port 4402) |
-| Config | `~/.arc402/daemon.toml` | `openclaw.json` plugin config |
+| Inbound HTTP | Port 4402, ARC-402 node/daemon | Same ARC-402 node/daemon; plugin adds host-side control only |
+| Config | `~/.arc402/daemon.toml` + `~/.arc402/*` node state | `openclaw.json` plugin config layered on top of ARC-402 node config |
 | Workroom | `arc402 workroom start` | `arc402_workroom_start` tool |
 
 ---

@@ -14,7 +14,7 @@ auto_execute = true
 auto_accept = true
 
 [policy]
-file = "~/.arc402/arena-policy.yaml"
+file = "~/.arc402/openshell-policy.yaml"
 
 [workroom]
 data_dir = "~/.arc402/workroom"

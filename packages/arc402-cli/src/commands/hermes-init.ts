@@ -7,7 +7,7 @@
  *   1. Checks Hermes is installed
  *   2. Installs the arc402-agent skill into ~/.hermes/skills/
  *   3. Copies the arc402 plugin into ~/.hermes/plugins/
- *   4. Scaffolds ~/.arc402/worker/hermes-arc/ with SOUL.md, IDENTITY.md, config.json
+ *   4. Scaffolds ~/.arc402/worker/ with SOUL.md, IDENTITY.md, config.json
  *   5. Generates ~/.arc402/hermes-daemon.toml with prompts for wallet + endpoint
  *   6. Prints a setup summary and next steps
  */
@@ -166,9 +166,9 @@ export function registerHermesInitCommand(program: Command): void {
 
       // ── Step 4: Worker scaffold ────────────────────────────────────────────
 
-      printSection("Scaffolding ~/.arc402/worker/hermes-arc/");
+      printSection("Scaffolding ~/.arc402/worker/");
       const workerSrcDir = path.join(repoRoot, "hermes", "workroom", "hermes-worker");
-      const workerDestDir = path.join(ARC402_DIR, "worker", "hermes-arc");
+      const workerDestDir = path.join(ARC402_DIR, "worker");
 
       ensureDir(path.join(workerDestDir, "memory"));
       ensureDir(path.join(workerDestDir, "skills"));
@@ -180,18 +180,18 @@ export function registerHermesInitCommand(program: Command): void {
         const src = path.join(workerSrcDir, file);
         const dest = path.join(workerDestDir, file);
         if (fs.existsSync(dest)) {
-          console.log(chalk.dim(`  exists  ${path.join("~/.arc402/worker/hermes-arc", file)} (skipped — not overwriting)`));
+          console.log(chalk.dim(`  exists  ${path.join("~/.arc402/worker", file)} (skipped — not overwriting)`));
         } else {
-          copyFile(src, dest, path.join("~/.arc402/worker/hermes-arc", file));
+          copyFile(src, dest, path.join("~/.arc402/worker", file));
         }
       }
 
       const learningsSrc = path.join(workerSrcDir, "memory", "learnings.md");
       const learningsDest = path.join(workerDestDir, "memory", "learnings.md");
       if (!fs.existsSync(learningsDest)) {
-        copyFile(learningsSrc, learningsDest, "~/.arc402/worker/hermes-arc/memory/learnings.md");
+        copyFile(learningsSrc, learningsDest, "~/.arc402/worker/memory/learnings.md");
       } else {
-        console.log(chalk.dim("  exists  ~/.arc402/worker/hermes-arc/memory/learnings.md (skipped — keeping existing learnings)"));
+        console.log(chalk.dim("  exists  ~/.arc402/worker/memory/learnings.md (skipped — keeping existing learnings)"));
       }
 
       // ── Step 5: hermes-daemon.toml ─────────────────────────────────────────
@@ -246,7 +246,7 @@ export function registerHermesInitCommand(program: Command): void {
           `auto_accept = true`,
           ``,
           `[policy]`,
-          `file = "~/.arc402/arena-policy.yaml"`,
+          `file = "~/.arc402/openshell-policy.yaml"`,
           ``,
           `[workroom]`,
           `data_dir = "~/.arc402/workroom"`,
@@ -264,7 +264,7 @@ export function registerHermesInitCommand(program: Command): void {
       console.log(chalk.bold("Files installed:"));
       console.log(`  ${chalk.cyan("~/.hermes/skills/arc402-agent/SKILL.md")}   — teaches your agent to use arc402 CLI`);
       console.log(`  ${chalk.cyan("~/.hermes/plugins/arc402_plugin.py")}        — gateway-level hire interception`);
-      console.log(`  ${chalk.cyan("~/.arc402/worker/hermes-arc/")}              — worker identity + memory scaffold`);
+      console.log(`  ${chalk.cyan("~/.arc402/worker/")}                         — worker identity + memory scaffold`);
       console.log(`  ${chalk.cyan("~/.arc402/hermes-daemon.toml")}             — daemon config`);
 
       console.log(`\n${chalk.bold("Next steps:")}`);

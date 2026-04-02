@@ -1,13 +1,14 @@
 /**
  * ARC-402 OpenClaw Plugin — entry point
  *
- * HOST-SIDE remote control for the ARC-402 protocol. One install gives every
- * agent native tools for hiring, compute, subscriptions, workroom management,
- * and on-chain operations.
+ * HOST-SIDE control surface for the ARC-402 node/daemon stack. The plugin adds
+ * native OpenClaw tools for hiring, compute, subscriptions, workroom
+ * management, and on-chain operations; the daemon/workroom runtime remains the
+ * execution source of truth.
  *
  * ALL inbound HTTP handling (hire proposals, file delivery, compute sessions)
- * belongs exclusively to the workroom daemon running inside the governed Docker
- * container. The Cloudflare tunnel points to workroom:4402, not this host.
+ * belongs exclusively to the ARC-402 daemon/workroom runtime. The public
+ * endpoint points at the node on port 4402, not this host gateway.
  *
  * Install: openclaw plugins install @arc402/arc402
  */

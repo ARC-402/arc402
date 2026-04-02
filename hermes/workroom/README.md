@@ -12,9 +12,9 @@ This directory contains the config files and identity templates for running an A
 hermes/workroom/
 ├── hermes-daemon.toml          ← Daemon config (copy to ~/.arc402/hermes-daemon.toml)
 └── hermes-worker/
-    ├── SOUL.md                 ← Worker agent identity (copy to ~/.arc402/worker/hermes-arc/)
-    ├── IDENTITY.md             ← Worker role card (copy to ~/.arc402/worker/hermes-arc/)
-    ├── config.json             ← Worker runtime config (copy to ~/.arc402/worker/hermes-arc/)
+    ├── SOUL.md                 ← Worker agent identity (copy to ~/.arc402/worker/)
+    ├── IDENTITY.md             ← Worker role card (copy to ~/.arc402/worker/)
+    ├── config.json             ← Worker runtime config (copy to ~/.arc402/worker/)
     ├── memory/
     │   └── learnings.md        ← Starts empty; daemon appends after each job
     ├── skills/
@@ -48,11 +48,11 @@ Everything else is pre-set with sensible defaults for Hermes operators. Change `
 ### Step 2 — Copy the worker identity
 
 ```bash
-mkdir -p ~/.arc402/worker/hermes-arc/{memory,skills,knowledge,datasets}
-cp hermes/workroom/hermes-worker/SOUL.md     ~/.arc402/worker/hermes-arc/SOUL.md
-cp hermes/workroom/hermes-worker/IDENTITY.md ~/.arc402/worker/hermes-arc/IDENTITY.md
-cp hermes/workroom/hermes-worker/config.json ~/.arc402/worker/hermes-arc/config.json
-cp hermes/workroom/hermes-worker/memory/learnings.md ~/.arc402/worker/hermes-arc/memory/learnings.md
+mkdir -p ~/.arc402/worker/{memory,skills,knowledge,datasets}
+cp hermes/workroom/hermes-worker/SOUL.md     ~/.arc402/worker/SOUL.md
+cp hermes/workroom/hermes-worker/IDENTITY.md ~/.arc402/worker/IDENTITY.md
+cp hermes/workroom/hermes-worker/config.json ~/.arc402/worker/config.json
+cp hermes/workroom/hermes-worker/memory/learnings.md ~/.arc402/worker/memory/learnings.md
 ```
 
 You can edit `SOUL.md` to customise your worker's identity, specialisation, and operating principles. Leave `config.json` and `IDENTITY.md` as-is unless you know what you're changing.
@@ -117,7 +117,7 @@ On Linux, Docker doesn't automatically resolve `host.docker.internal`. Add this 
 
 After each completed job, the daemon:
 1. Extracts learnings from the delivered work
-2. Appends them to `~/.arc402/worker/hermes-arc/memory/learnings.md`
+2. Appends them to `~/.arc402/worker/memory/learnings.md`
 3. These learnings are injected into the next job's context
 
 Workers get better with use. The `learnings.md` file accumulates professional expertise — never client-specific confidential data.
@@ -171,4 +171,4 @@ If you have `arc402-cli` installed, the `hermes init` command automates the copy
 arc402 hermes init
 ```
 
-It checks for Hermes, copies skill and plugin files, scaffolds `~/.arc402/worker/hermes-arc/`, and generates `~/.arc402/hermes-daemon.toml` with prompts for your wallet address and endpoint.
+It checks for Hermes, copies skill and plugin files, scaffolds `~/.arc402/worker/`, and generates `~/.arc402/hermes-daemon.toml` with prompts for your wallet address and endpoint.

@@ -13,7 +13,7 @@ I am a purpose-built worker identity, separate from the Hermes gateway agent the
 - **Model:** Operator-configured via Hermes (routed by gateway, not set here)
 - **Container:** ARC-402 workroom Docker container
 - **Job directory:** `/workroom/jobs/agreement-<id>/` (inside container)
-- **Worker directory:** `/workroom/worker/` (inside container)
+- **Worker directory:** `/workroom/worker/` (inside container, mounted from `~/.arc402/worker/`)
 
 ## My Capabilities
 
@@ -41,3 +41,4 @@ My on-chain trust score is built through completed agreements. Every clean deliv
 
 I am reachable via the endpoint registered by my operator in ARC402RegistryV3.
 My on-chain address matches the `wallet_address` in `hermes-daemon.toml`.
+My runtime network boundary is enforced by `~/.arc402/openshell-policy.yaml` on the operator machine.

@@ -60,8 +60,8 @@ arc402 daemon init
 
 # 3. Initialize the workroom
 arc402 workroom init
-# Creates or reuses the arc402-daemon sandbox
-# Registers the worker agent
+# Creates or reuses the governed workroom runtime
+# Reads worker identity files from ~/.arc402/worker/
 
 # 4. Check status
 arc402 workroom status
@@ -467,8 +467,8 @@ Always `arc402 dispute fee-quote` before opening. Always check your token balanc
 | Contract | Address |
 |----------|---------|
 | ARC402RegistryV3 | `0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6` |
-| ComputeAgreement | `0x0e06afE90aAD3e0D91e217C46d98F049C2528AF7` |
-| SubscriptionAgreement | `0xe1b6D3d0890E09582166EB450a78F6bff038CE5A` |
+| ComputeAgreement | `0xf898A8A2cF9900A588B174d9f96349BBA95e57F3` |
+| SubscriptionAgreement | `0x809c1D997Eab3531Eb2d01FCD5120Ac786D850D6` |
 | Handshake | `0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3` |
 
 ---
@@ -481,6 +481,7 @@ Always `arc402 dispute fee-quote` before opening. Always check your token balanc
 - The `hermes-arc` model ID routes through the Hermes gateway to the operator's configured model
 - Machine key for autonomous operation is read from `ARC402_MACHINE_KEY` env var (never logged, never passed to worker processes)
 - The Hermes plugin (`hermes/plugins/arc402_plugin.py`) handles incoming hire interception at the gateway level — no per-transaction user input needed
+- Worker identity files for the current node/workroom runtime live in `~/.arc402/worker/`, not a nested `~/.arc402/worker/hermes-arc/` subdirectory
 
 For full autonomous setup: see `hermes/HERMES-INTEGRATION-SPEC.md` and `docs/hermes-integration.md`.
 

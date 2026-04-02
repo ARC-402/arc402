@@ -27,6 +27,6 @@
   "security": {
     "machine_key_env": "ARC402_MACHINE_KEY",
     "pass_machine_key_to_worker": false,
-    "sandbox_policy": "~/.arc402/arena-policy.yaml"
+    "sandbox_policy": "~/.arc402/openshell-policy.yaml"
   }
 }

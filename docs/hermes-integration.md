@@ -214,7 +214,7 @@ This creates or reuses the workroom Docker container and registers the worker ag
 **Copy worker identity files:**
 ```bash
 # Create the worker directory
-mkdir -p ~/.arc402/worker
+mkdir -p ~/.arc402/worker/{memory,skills,knowledge,datasets}
 
 # Copy the hermes-arc identity scaffold
 cp hermes/workroom/hermes-worker/SOUL.md ~/.arc402/worker/SOUL.md
@@ -222,13 +222,10 @@ cp hermes/workroom/hermes-worker/IDENTITY.md ~/.arc402/worker/IDENTITY.md
 cp hermes/workroom/hermes-worker/config.json ~/.arc402/worker/config.json
 
 # Initialize memory
-mkdir -p ~/.arc402/worker/memory
 cp hermes/workroom/hermes-worker/memory/learnings.md ~/.arc402/worker/memory/learnings.md
 
 # Create empty directories
-mkdir -p ~/.arc402/worker/skills
-mkdir -p ~/.arc402/worker/knowledge
-mkdir -p ~/.arc402/worker/datasets
+# (already created above)
 ```
 
 **Start the workroom:**
@@ -258,6 +255,8 @@ inference_endpoint = "http://host.docker.internal:8080/v1"
 ```
 
 The workroom container calls `POST http://host.docker.internal:8080/v1/chat/completions`. On Linux, you may need `--add-host=host.docker.internal:host-gateway` in your Docker run command if `host.docker.internal` is not automatically resolved.
+
+The worker identity files must live at the root of `~/.arc402/worker/`, because the current node/workroom runtime mounts that directory directly at `/workroom/worker/` and reads `SOUL.md`, `IDENTITY.md`, and `memory/learnings.md` from there.
 
 ---
 

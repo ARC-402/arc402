@@ -1,7 +1,7 @@
 {
   "id": "arc402",
   "name": "ARC-402 Protocol",
-  "description": "Agent-to-agent commerce — hire, deliver, compute, subscribe. Governed execution with cryptographic receipts.",
+  "description": "OpenClaw control surface for the ARC-402 node/daemon stack — hire, deliver, compute, subscribe with governed execution and cryptographic receipts.",
   "version": "1.3.5",
   "configSchema": {
     "type": "object",

@@ -20,14 +20,14 @@ This spec covers everything needed for Hermes operators to participate in ARC-40
 ```
 Hermes Gateway (host)
   ├── arc402-agent Skill        — teaches agent to use arc402 CLI
-  ├── arc402 Plugin             — autonomous protocol operations at gateway level
-  ├── arc402 daemon (port 4402) — wallet + policy + job routing
+  ├── arc402 Plugin             — Hermes control surface over the ARC-402 node/daemon
+  ├── ARC-402 node/daemon       — wallet + policy + job routing
   └── Workroom Container (Docker)
         └── Worker Agent (hermes-arc identity)
               └── Inference → Hermes gateway OpenAI-compat endpoint
 ```
 
-The workroom container routes inference back to the Hermes gateway the operator is already running. No separate LLM required. No new WorkerExecutor code — one config line points at a different endpoint.
+The workroom container routes inference back to the Hermes gateway the operator is already running. No separate LLM required. No new WorkerExecutor code — one config line points at a different endpoint. The daemon remains the node authority; the Hermes plugin is an integration surface, not a replacement runtime.
 
 ---
 
@@ -163,7 +163,7 @@ auto_execute = true
 auto_accept = true
 
 [policy]
-file = "~/.arc402/arena-policy.yaml"
+file = "~/.arc402/openshell-policy.yaml"
 
 [workroom]
 data_dir = "~/.arc402/workroom"
@@ -186,9 +186,7 @@ gateway on the host. The workroom daemon manages your lifecycle.
 
 Emit your final deliverable as:
 <arc402_delivery>
-<file name="deliverable.md">
-[your work here]
-</file>
+{"files":[{"name":"deliverable.md","content":"# Deliverable\n\n[your work here]"}]}
 </arc402_delivery>
 ```
 
@@ -234,40 +232,31 @@ Also publish to ARC-402 docs site and include in Hermes docs PR.
 ### Spec content
 
 **Single file delivery:**
-```xml
+```text
 <arc402_delivery>
-<file name="deliverable.md">
-[content here]
-</file>
+{"files":[{"name":"deliverable.md","content":"[content here]"}]}
 </arc402_delivery>
 ```
 
 **Multi-file delivery:**
-```xml
+```text
 <arc402_delivery>
-<file name="deliverable.md">
-[summary]
-</file>
-<file name="output.json">
-[structured data]
-</file>
-<file name="report.md">
-[full report]
-</file>
+{"files":[{"name":"deliverable.md","content":"[summary]"},{"name":"output.json","content":"[structured data]"},{"name":"report.md","content":"[full report]"}]}
 </arc402_delivery>
 ```
 
 **Rules:**
 - The block must appear once in the agent's final message
-- `name` attribute is required on every `<file>` tag
-- File names must be relative (no path separators)
+- The inner payload is a JSON object with a `files` array
+- Each file entry must include string `name` and `content` fields
+- File names are flattened by `path.basename()`; path components are stripped
 - `deliverable.md` must always be present as the primary artifact
-- Content is UTF-8 plain text or valid JSON
+- Content must be valid JSON string content (escape newlines as `\n` and quotes as `\"`)
 - Maximum total content: 1MB (enforced by daemon parser)
 
 **Parser behavior:**
 - WorkerExecutor scans the full agent output for `<arc402_delivery>`
-- Extracts all `<file>` blocks
+- Parses the JSON payload inside the first `<arc402_delivery>` block
 - Writes each to the job staging directory
 - Computes root hash over all file contents
 - Commits hash on-chain via `commitDeliverable()`
