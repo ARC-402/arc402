@@ -7,6 +7,8 @@ import { InputLine } from "./InputLine";
 import { useCommand } from "./useCommand";
 import { useChat } from "./useChat";
 import { useScroll } from "./useScroll";
+import { useTerminalSize } from "./useTerminalSize";
+import { getBannerLines } from "../ui/banner";
 import { createProgram } from "../program";
 import chalk from "chalk";
 
@@ -36,11 +38,14 @@ export function App({ version, network, wallet, balance }: AppProps) {
   const { execute, isRunning } = useCommand();
   const { send, isSending } = useChat();
 
-  // Approximate viewport height for scroll management
-  const HEADER_ROWS = 15;
+  // Measure viewport height from actual terminal size and real header line count.
+  // The separator Box rendered between Header and Viewport adds 1 row.
+  // Footer (InputLine) is 1 row.
+  const { rows } = useTerminalSize();
+  const headerLineCount = getBannerLines({ network, wallet, balance }).length;
+  const SEPARATOR_ROWS = 1;
   const FOOTER_ROWS = 1;
-  const rows = process.stdout.rows ?? 24;
-  const viewportHeight = Math.max(1, rows - HEADER_ROWS - FOOTER_ROWS);
+  const viewportHeight = Math.max(1, rows - headerLineCount - SEPARATOR_ROWS - FOOTER_ROWS);
 
   const { scrollOffset, isAutoScroll, scrollUp, scrollDown, snapToBottom } =
     useScroll(viewportHeight);
@@ -203,6 +208,7 @@ export function App({ version, network, wallet, balance }: AppProps) {
         lines={outputBuffer}
         scrollOffset={scrollOffset}
         isAutoScroll={isAutoScroll}
+        viewportHeight={viewportHeight}
       />
 
       {/* FOOTER — fixed, input pinned */}

@@ -1,10 +1,12 @@
 import React from "react";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text } from "ink";
 
 interface ViewportProps {
   lines: string[];
   scrollOffset: number;
   isAutoScroll: boolean;
+  /** Exact number of rows available for content, computed by App from measured layout. */
+  viewportHeight: number;
 }
 
 /**
@@ -13,17 +15,7 @@ interface ViewportProps {
  * scrollOffset=0 means pinned to bottom (auto-scroll).
  * Positive scrollOffset means scrolled up by that many lines.
  */
-export function Viewport({ lines, scrollOffset, isAutoScroll }: ViewportProps) {
-  const { stdout } = useStdout();
-  const termRows = stdout?.rows ?? 24;
-
-  // We'll compute the viewport height: total rows minus fixed areas
-  // Header is approximately bannerLines + separator (~14-16 rows)
-  // Footer is 1 row
-  // We'll use a reasonable estimate here; the parent App can pass exact height
-  const HEADER_ROWS = 15; // approximate
-  const FOOTER_ROWS = 1;
-  const viewportHeight = Math.max(1, termRows - HEADER_ROWS - FOOTER_ROWS);
+export function Viewport({ lines, scrollOffset, isAutoScroll, viewportHeight }: ViewportProps) {
 
   // Compute the window slice
   // scrollOffset=0 → show last viewportHeight lines
