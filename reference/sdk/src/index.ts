@@ -37,6 +37,8 @@ export { resolveEndpoint, notifyEndpoint, notifyHire, notifyHandshake, notifyHir
 export type { EndpointNotifyResult } from "./endpoint";
 export { DeliveryClient, DEFAULT_DAEMON_URL } from "./delivery";
 export type { DeliveryFile, DeliveryManifest, DeliveryClientOptions } from "./delivery";
+export { DaemonClient, DaemonNodeClient, DaemonClientError, DEFAULT_DAEMON_HTTP_URL, DEFAULT_DAEMON_API_URL, DEFAULT_DAEMON_TOKEN_PATH, DEFAULT_DAEMON_CONFIG_PATH, resolveDaemonHttpBaseUrl, resolveDaemonApiBaseUrl, loadLocalDaemonToken } from "./daemon";
+export type { DaemonNodeClientOptions, DaemonHealthStatus, DaemonWalletStatus, DaemonWorkroomStatus, DaemonAgreementRecord, DaemonAgreementsResponse, AuthChallengeResponse, AuthSessionResponse, RevokeSessionsResponse } from "./daemon";
 
 // Base Mainnet contract addresses
 export const COMPUTE_AGREEMENT_ADDRESS = "0xf898A8A2cF9900A588B174d9f96349BBA95e57F3";
