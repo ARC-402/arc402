@@ -6,6 +6,8 @@ import { getClient } from "../client";
 import { getTrustTier, printTable, truncateAddress } from "../utils/format";
 import { c } from '../ui/colors';
 import { renderTree } from '../ui/tree';
+import { isTuiRenderMode } from "../tui/render-inline";
+import { printDiscoverList } from "../tui/command-renderers";
 
 // Minimal ABI for the new getAgentsWithCapability function (Spec 18)
 const CAPABILITY_REGISTRY_EXTRA_ABI = [
@@ -319,6 +321,24 @@ export function registerDiscoverCommand(program: Command): void {
       }
 
       const onlineCount = withStatus.filter((a) => a.endpointStatus === "online").length;
+      if (isTuiRenderMode()) {
+        await printDiscoverList({
+          summary: `${withStatus.length} agent${withStatus.length === 1 ? "" : "s"} · ${onlineCount} online`,
+          status: { label: effectiveSort, tone: "info" },
+          agents: withStatus.map((agent) => ({
+            rank: agent.rank,
+            name: agent.name,
+            wallet: agent.wallet,
+            serviceType: agent.serviceType,
+            trustScore: agent.trustScore,
+            compositeScore: agent.compositeScore,
+            endpointStatus: agent.endpointStatus,
+            capabilitySummary: (agent.canonicalCapabilities.length ? agent.canonicalCapabilities : agent.capabilities).slice(0, 3).join(", ") || "none",
+            priceLabel: agent.priceUsd === null ? undefined : `$${agent.priceUsd}`,
+          })),
+        });
+        return;
+      }
       console.log('\n ' + c.mark + c.white(' Discover Results') + c.dim(` — ${withStatus.length} agent${withStatus.length !== 1 ? 's' : ''} found, ${onlineCount} online`));
 
       // Tree output per agent

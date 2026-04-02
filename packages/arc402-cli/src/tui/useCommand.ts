@@ -60,6 +60,7 @@ export function useCommand(): UseCommandResult {
       (process.stderr as any).write = capturedWrite;
 
       try {
+        process.env.ARC402_TUI_MODE = "1";
         const tokens = parseTokens(input);
         const prog = createProgram();
         prog.exitOverride();
@@ -89,6 +90,7 @@ export function useCommand(): UseCommandResult {
           onLine(` ${c.failure} ${chalk.red(e.message ?? String(err))}`);
         }
       } finally {
+        delete process.env.ARC402_TUI_MODE;
         // Flush remaining buffer
         if (captureBuffer.trim()) {
           onLine(captureBuffer);

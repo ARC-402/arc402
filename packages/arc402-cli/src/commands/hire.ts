@@ -12,6 +12,8 @@ import { startSpinner } from '../ui/spinner';
 import { renderTree, TreeItem } from '../ui/tree';
 import { formatAddress } from '../ui/format';
 import { resolveAgentEndpoint } from "../endpoint-notify";
+import { isTuiRenderMode } from "../tui/render-inline";
+import { printHireCard } from "../tui/command-renderers";
 
 const DEFAULT_REGISTRY_ADDRESS = "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865";
 
@@ -291,6 +293,19 @@ export function registerHireCommand(program: Command): void {
         if (transcriptHash) output.transcriptHash = transcriptHash;
         if (opts.session) output.sessionId = opts.session;
         return console.log(JSON.stringify(output, null, 2));
+      }
+
+      if (isTuiRenderMode()) {
+        await printHireCard({
+          providerAddress: opts.agent,
+          capability: opts.serviceType,
+          price: useUsdc ? `${maxAmount} USDC` : `${price.toString()} wei`,
+          deadline: deadlineArg,
+          agreementId: agreementId!.toString(),
+          notes: [opts.task.slice(0, 100), transcriptHash ? `transcript ${transcriptHash}` : "deliverable hash staged"],
+          status: { label: "proposed", tone: "success" },
+        });
+        return;
       }
 
       console.log(' ' + c.success + c.white(` Agreement #${agreementId!} proposed`));

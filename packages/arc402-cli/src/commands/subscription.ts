@@ -5,6 +5,8 @@ import {
   fetchNewsletterIssue,
   inspectCommerceEndpoint,
 } from "../commerce-client";
+import { isTuiRenderMode } from "../tui/render-inline";
+import { printSubscribeCard } from "../tui/command-renderers";
 
 interface JsonCapableOptions {
   json?: boolean;
@@ -44,6 +46,18 @@ export function registerSubscriptionCommands(program: Command): void {
     .option("--json", "Output as JSON")
     .action(async (endpoint, opts) => {
       const inspection = await inspectCommerceEndpoint(endpoint);
+      if (!opts.json && isTuiRenderMode()) {
+        await printSubscribeCard({
+          provider: endpoint,
+          planId: opts.plan ?? inspection.subscription?.plan ?? "unspecified",
+          rateLabel: inspection.subscription?.rate ?? inspection.x402?.amount ?? "n/a",
+          months: Number.parseInt(opts.months as string, 10),
+          paymentOptions: inspection.paymentOptions,
+          accessSummary: [inspection.subscription?.endpoint ?? endpoint, inspection.x402?.description ?? "read-only scaffold"],
+          status: { label: inspection.paymentRequired ? "payment required" : "inspect", tone: inspection.paymentRequired ? "warning" : "info" },
+        });
+        return;
+      }
       outputScaffold(
         "Subscribe",
         {
@@ -68,6 +82,16 @@ export function registerSubscriptionCommands(program: Command): void {
     .argument("<id>", "Subscription id")
     .option("--json", "Output as JSON")
     .action(async (id, opts) => {
+      if (!opts.json && isTuiRenderMode()) {
+        await printSubscribeCard({
+          provider: `subscription ${id}`,
+          planId: "status",
+          rateLabel: "pending query binding",
+          accessSummary: ["Contract/subgraph lookup pending"],
+          status: { label: "scaffold", tone: "warning" },
+        });
+        return;
+      }
       outputScaffold("Subscription Status", { id, note: "Status lookup contract/subgraph binding pending." }, opts as JsonCapableOptions);
     });
 
@@ -75,6 +99,16 @@ export function registerSubscriptionCommands(program: Command): void {
     .command("list")
     .option("--json", "Output as JSON")
     .action(async (opts) => {
+      if (!opts.json && isTuiRenderMode()) {
+        await printSubscribeCard({
+          provider: "subscriptions",
+          planId: "list",
+          rateLabel: "query source pending",
+          accessSummary: ["List query scaffolding only"],
+          status: { label: "scaffold", tone: "warning" },
+        });
+        return;
+      }
       outputScaffold("Subscription List", { note: "List query scaffolding only. No implicit storage contract assumed." }, opts as JsonCapableOptions);
     });
 
@@ -83,6 +117,16 @@ export function registerSubscriptionCommands(program: Command): void {
     .argument("<id>", "Subscription id")
     .option("--json", "Output as JSON")
     .action(async (id, opts) => {
+      if (!opts.json && isTuiRenderMode()) {
+        await printSubscribeCard({
+          provider: `subscription ${id}`,
+          planId: "cancel",
+          rateLabel: "write path deferred",
+          accessSummary: ["Cancellation intentionally not wired in this phase"],
+          status: { label: "deferred", tone: "warning" },
+        });
+        return;
+      }
       outputScaffold("Subscription Cancel", { id, note: "Cancellation write path intentionally not wired in this phase." }, opts as JsonCapableOptions);
     });
 
@@ -92,6 +136,17 @@ export function registerSubscriptionCommands(program: Command): void {
     .requiredOption("--months <n>", "Additional months to purchase")
     .option("--json", "Output as JSON")
     .action(async (id, opts) => {
+      if (!opts.json && isTuiRenderMode()) {
+        await printSubscribeCard({
+          provider: `subscription ${id}`,
+          planId: "topup",
+          rateLabel: `+${opts.months} months`,
+          months: Number.parseInt(opts.months as string, 10),
+          accessSummary: ["Top-up command shape is staged"],
+          status: { label: "scaffold", tone: "warning" },
+        });
+        return;
+      }
       outputScaffold(
         "Subscription Topup",
         {

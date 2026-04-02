@@ -25,6 +25,8 @@ import { startSpinner } from "../ui/spinner";
 import { renderTree } from "../ui/tree";
 import chalk from "chalk";
 import { c } from "../ui/colors";
+import { isTuiRenderMode } from "../tui/render-inline";
+import { printComputeCard } from "../tui/command-renderers";
 
 const bold = chalk.bold;
 
@@ -360,6 +362,26 @@ export function registerComputeCommands(program: Command): void {
         process.exit(1);
       }
       const { session, current } = result.data as { session: Record<string, unknown>; current: Record<string, unknown> | null };
+      if (isTuiRenderMode()) {
+        const proposal = (session.proposal ?? {}) as Record<string, unknown>;
+        const consumedMinutes = Number(session.consumedMinutes ?? current?.consumedMinutes ?? 0);
+        const maxHours = Number(proposal.maxHours ?? 0);
+        const ratePerHourWei = String(proposal.ratePerHourWei ?? "0");
+        const totalBudgetWei = maxHours > 0 ? BigInt(ratePerHourWei) * BigInt(maxHours) : 0n;
+        const costWei = current?.costWei ? BigInt(String(current.costWei)) : (BigInt(ratePerHourWei) * BigInt(consumedMinutes)) / 60n;
+        await printComputeCard({
+          sessionId,
+          provider: String(proposal.clientAddress ?? "unknown"),
+          gpuSpec: String(proposal.gpuSpecHash ?? "gpu session"),
+          rateLabel: `${ratePerHourWei} wei/hr`,
+          consumedLabel: `${consumedMinutes} minutes`,
+          costLabel: `${costWei.toString()} wei`,
+          remainingLabel: totalBudgetWei > 0n ? `${(totalBudgetWei - costWei > 0n ? totalBudgetWei - costWei : 0n).toString()} wei` : undefined,
+          utilizationPercent: totalBudgetWei > 0n ? Number((costWei * 10000n) / totalBudgetWei) / 100 : undefined,
+          status: { label: String(session.status ?? "unknown"), tone: "info" },
+        });
+        return;
+      }
       console.log(bold(`Session: ${sessionId}`));
       console.log(JSON.stringify(session, null, 2));
       if (current) {
@@ -478,6 +500,30 @@ export function registerComputeCommands(program: Command): void {
       }
 
       const { sessions, count } = result.data as { sessions: Array<Record<string, unknown>>; count: number };
+      if (isTuiRenderMode()) {
+        for (const raw of sessions) {
+          const s = raw as {
+            proposal: { sessionId: string; clientAddress: string; ratePerHourWei: string; maxHours: number; gpuSpecHash?: string };
+            status: string;
+            consumedMinutes: number;
+          };
+          const totalBudgetWei = BigInt(s.proposal.ratePerHourWei) * BigInt(s.proposal.maxHours);
+          const costWei = (BigInt(s.proposal.ratePerHourWei) * BigInt(s.consumedMinutes)) / 60n;
+          await printComputeCard({
+            sessionId: s.proposal.sessionId,
+            provider: s.proposal.clientAddress,
+            gpuSpec: s.proposal.gpuSpecHash ?? "gpu session",
+            rateLabel: `${s.proposal.ratePerHourWei} wei/hr`,
+            consumedLabel: `${s.consumedMinutes} minutes`,
+            costLabel: `${costWei.toString()} wei`,
+            remainingLabel: `${(totalBudgetWei - costWei > 0n ? totalBudgetWei - costWei : 0n).toString()} wei`,
+            utilizationPercent: totalBudgetWei > 0n ? Number((costWei * 10000n) / totalBudgetWei) / 100 : undefined,
+            status: { label: s.status, tone: "info" },
+          });
+          console.log("");
+        }
+        return;
+      }
       if (count === 0) {
         console.log("No compute sessions.");
         return;

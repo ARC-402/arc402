@@ -187,26 +187,26 @@ No claiming completion before Phase 6 is complete.
 **Goal:** wire the commerce renderer system into actual command flows.
 
 ### Deliverables
-- [ ] `arc402 status` uses `StatusCard`
-- [ ] `discover` uses `DiscoverList`
-- [ ] `hire` uses `HireCard`
-- [ ] `agreements` uses `AgreementList`
-- [ ] `compute` uses `ComputeCard`
-- [ ] `subscribe` uses `SubscribeCard`
-- [ ] arena flows use `RoundsList` / `SquadCard`
-- [ ] `workroom status` uses `WorkroomCard`
-- [ ] subprocess-inside-TUI anti-pattern audited and removed from flagship commands
+- [x] `arc402 status` uses `StatusCard`
+- [x] `discover` uses `DiscoverList`
+- [x] `hire` uses `HireCard`
+- [x] `agreements` uses `AgreementList`
+- [x] `compute` uses `ComputeCard`
+- [x] `subscribe` uses `SubscribeCard`
+- [x] arena flows use `RoundsList` / `SquadCard`
+- [x] `workroom status` uses `WorkroomCard`
+- [x] subprocess-inside-TUI anti-pattern audited and removed from flagship commands
 
 ### Acceptance criteria
-- [ ] `arc402 status` no longer bricks
-- [ ] command outputs render inline in TUI mode
+- [x] `arc402 status` no longer bricks
+- [x] command outputs render inline in TUI mode
 - [ ] no flagship command falls back to ugly utility output while claiming completion
-- [ ] `--json` behavior remains clean and non-decorative
+- [x] `--json` behavior remains clean and non-decorative
 
 ### Forge review gate
-- [ ] command wiring matches phase intent
-- [ ] no hidden subprocess recursion
-- [ ] no TUI-only hacks that break non-TUI mode
+- [x] command wiring matches phase intent
+- [x] no hidden subprocess recursion
+- [x] no TUI-only hacks that break non-TUI mode
 
 ### Lego manual review
 - [ ] status / discover / hire flow feels premium in a real terminal

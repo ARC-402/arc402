@@ -10,6 +10,8 @@ import { hashString } from "../utils/hash";
 import { c } from "../ui/colors";
 import { renderTree } from "../ui/tree";
 import { formatAddress } from "../ui/format";
+import { isTuiRenderMode } from "../tui/render-inline";
+import { printAgreementList } from "../tui/command-renderers";
 
 // ─── AgreementTree minimal ABI ────────────────────────────────────────────────
 
@@ -40,6 +42,23 @@ export function registerAgreementsCommands(program: Command): void {
         ? await client.getProviderAgreements(address)
         : await client.getClientAgreements(address);
       if (opts.json) return console.log(JSON.stringify(agreements, (_k, value) => typeof value === "bigint" ? value.toString() : value, 2));
+      if (isTuiRenderMode()) {
+        const totalEscrowWei = agreements.reduce((sum, agreement) => sum + BigInt(agreement.price ?? 0n), 0n);
+        await printAgreementList({
+          roleLabel: opts.as === "provider" ? "Provider Agreements" : "Client Agreements",
+          totalEscrowLabel: `${totalEscrowWei.toString()} wei escrowed`,
+          status: { label: `${agreements.length} total`, tone: "info" },
+          agreements: agreements.map((agreement) => ({
+            id: agreement.id.toString(),
+            counterparty: opts.as === "provider" ? agreement.client : agreement.provider,
+            serviceType: agreement.serviceType,
+            status: agreementStatusLabel(agreement.status),
+            deadlineMinutes: Math.max(0, Math.round((Number(agreement.deadline) - Math.floor(Date.now() / 1000)) / 60)),
+            price: `${BigInt(agreement.price ?? 0n).toString()} wei`,
+          })),
+        });
+        return;
+      }
       printTable(
         ["ID", "COUNTERPARTY", "SERVICE", "DEADLINE", "STATUS"],
         agreements.map((agreement) => [

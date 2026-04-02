@@ -9,6 +9,8 @@ import { requireSigner } from "../client";
 import { AGENT_REGISTRY_ABI, TRUST_REGISTRY_ABI } from "../abis";
 import { startSpinner } from "../ui/spinner";
 import { c } from "../ui/colors";
+import { isTuiRenderMode } from "../tui/render-inline";
+import { printRoundsList, printSquadCard } from "../tui/command-renderers";
 
 // ─── Arena v2 contract addresses ───────────────────────────────────────────
 // Resolved dynamically from ARC402RegistryV3.extensions() at runtime.
@@ -742,6 +744,27 @@ export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
           return;
         }
 
+        if (isTuiRenderMode()) {
+          await printRoundsList({
+            title: "Arena Rounds",
+            status: { label: opts.status ?? "all", tone: "info" },
+            rounds: rounds.map((r) => {
+              const round = r as Record<string, unknown>;
+              return {
+                id: String(round["id"]),
+                question: String(round["question"]),
+                category: String(round["category"] ?? ""),
+                yesLabel: formatUsdc(BigInt(String(round["yesPot"] ?? "0"))),
+                noLabel: formatUsdc(BigInt(String(round["noPot"] ?? "0"))),
+                timingLabel: formatElapsed(Number(round["createdAt"])),
+                resolved: Boolean(round["resolved"]),
+                outcomeLabel: Boolean(round["resolved"]) ? (round["outcome"] ? "YES" : "NO") : undefined,
+              };
+            }),
+          });
+          return;
+        }
+
         console.log();
         console.log(chalk.bold("  Arena Rounds"));
         console.log();
@@ -1423,6 +1446,23 @@ export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
           return;
         }
 
+        if (isTuiRenderMode()) {
+          for (const s of squads) {
+            const sq = s as Record<string, unknown>;
+            await printSquadCard({
+              id: formatSquadId(BigInt(String(sq["id"]))),
+              name: String(sq["name"]),
+              domainTag: String(sq["domainTag"]),
+              statusLabel: squadStatusLabel(Number(sq["status"])),
+              creator: truncateAddr(String(sq["creator"])),
+              memberCount: Number(sq["memberCount"]),
+              inviteOnly: Boolean(sq["inviteOnly"]),
+            });
+            console.log("");
+          }
+          return;
+        }
+
         console.log();
         console.log(chalk.bold("  Research Squads"));
         console.log();
@@ -1652,6 +1692,27 @@ export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
         }
 
         const members = (squad["members"] as unknown[]) ?? [];
+
+        if (isTuiRenderMode()) {
+          await printSquadCard({
+            id: formatSquadId(BigInt(sid)),
+            name: String(squad["name"]),
+            domainTag: String(squad["domainTag"]),
+            statusLabel: squadStatusLabel(Number(squad["status"])),
+            creator: truncateAddr(String(squad["creator"])),
+            memberCount: Number(squad["memberCount"]),
+            inviteOnly: Boolean(squad["inviteOnly"]),
+            members: members.map((m) => {
+              const member = m as Record<string, unknown>;
+              return { agent: truncateAddr(String(member["agent"])), role: String(member["role"] ?? "member") };
+            }),
+            briefings: briefings.map((b) => {
+              const br = b as Record<string, unknown>;
+              return { preview: String(br["preview"]).slice(0, 50), publishedLabel: formatElapsed(Number(br["publishedAt"])), tags: (br["tags"] as string[]) ?? [] };
+            }),
+          });
+          return;
+        }
 
         console.log();
         console.log(chalk.bold(`  Squad — ${squad["name"]}`));

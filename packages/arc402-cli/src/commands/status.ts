@@ -12,6 +12,8 @@ import {
 } from "../commerce-client";
 import { configExists, loadConfig } from "../config";
 import { DAEMON_TOML, loadDaemonConfig } from "../daemon/config";
+import { isTuiRenderMode } from "../tui/render-inline";
+import { printStatusCard } from "../tui/command-renderers";
 
 type SummaryHeading =
   | { type: "title"; text: string }
@@ -81,6 +83,29 @@ export async function renderOperatorSummary(options: OperatorSummaryOptions = {}
       fetchDaemonAgreements({ baseUrl: target.baseUrl }),
     ]);
 
+    if (isTuiRenderMode()) {
+      const active = agreements.agreements.filter((agreement) => {
+        const status = String((agreement.status ?? agreement.state ?? "")).toLowerCase();
+        return status.includes("accept") || status.includes("active") || status.includes("proposed");
+      }).length;
+      const pendingVerification = agreements.agreements.filter((agreement) => {
+        const status = String((agreement.status ?? agreement.state ?? "")).toLowerCase();
+        return status.includes("verify") || status.includes("pending");
+      }).length;
+      const disputed = agreements.agreements.filter((agreement) => String((agreement.status ?? agreement.state ?? "")).toLowerCase().includes("disput")).length;
+
+      await printStatusCard({
+        wallet: wallet.wallet,
+        network: `chain ${wallet.chainId}`,
+        balance: target.mode === "local" ? target.baseUrl : `${target.mode} · ${target.baseUrl}`,
+        endpoint: wallet.rpcUrl,
+        agreements: { active, pendingVerification, disputed },
+        workroom: { status: workroom.status },
+        status: { label: health.ok ? "online" : "offline", tone: health.ok ? "success" : "danger" },
+      });
+      return;
+    }
+
     console.log(`  Wallet:    ${wallet.wallet}`);
     console.log(`  Daemon:    ${health.ok ? chalk.green("online") : chalk.red("offline")} (${wallet.daemonId})`);
     console.log(`  Workroom:  ${workroom.status}`);
@@ -96,6 +121,22 @@ export async function renderOperatorSummary(options: OperatorSummaryOptions = {}
         ? "configured locally but not responding"
         : "not configured on this machine"
       : "remote node unreachable";
+
+    if (isTuiRenderMode()) {
+      await printStatusCard({
+        wallet: fallbackWallet ?? "not configured",
+        network: `${target.mode} node`,
+        balance: target.baseUrl,
+        endpoint: message,
+        workroom: { status: "waiting for daemon context" },
+        status: { label: daemonState, tone: "warning" },
+      });
+      if (options.includeGuidance ?? true) {
+        console.log("");
+        renderDaemonGuidance(target);
+      }
+      return;
+    }
 
     console.log(`  Wallet:    ${fallbackWallet ?? "not configured"}`);
     console.log(`  Daemon:    ${chalk.yellow(daemonState)}`);

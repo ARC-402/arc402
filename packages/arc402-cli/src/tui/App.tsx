@@ -148,16 +148,7 @@ export function App({ version, network, wallet, balance }: AppProps) {
 
       // ── Built-in: status ───────────────────────────────────────────────────
       if (input === "status") {
-        if (network)
-          appendLine(
-            ` ${chalk.dim("Network")}   ${chalk.white(network)}`
-          );
-        if (wallet)
-          appendLine(` ${chalk.dim("Wallet")}    ${chalk.white(wallet)}`);
-        if (balance)
-          appendLine(` ${chalk.dim("Balance")}   ${chalk.white(balance)}`);
-        if (!network && !wallet && !balance)
-          appendLine(chalk.dim("  No config found. Run 'config init' to get started."));
+        await execute("status", appendLine);
         appendLine("");
         setIsProcessing(false);
         return;

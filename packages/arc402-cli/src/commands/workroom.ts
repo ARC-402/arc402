@@ -16,6 +16,8 @@ import { c } from "../ui/colors";
 import { startSpinner } from "../ui/spinner";
 import { renderTree } from "../ui/tree";
 import { formatAddress } from "../ui/format";
+import { isTuiRenderMode } from "../tui/render-inline";
+import { printWorkroomCard } from "../tui/command-renderers";
 
 // ─── Gateway token helper ─────────────────────────────────────────────────────
 
@@ -685,6 +687,17 @@ network_policies:
     .command("status")
     .description("Show ARC-402 Workroom health, policy, and active state.")
     .action(async () => {
+      if (isTuiRenderMode()) {
+        await printWorkroomCard({
+          statusLabel: containerRunning() ? "running" : containerExists() ? "stopped" : "not created",
+          runtime: WORKROOM_CONTAINER,
+          harness: process.env.OPENCLAW_WORKER_AGENT_ID || "arc",
+          policyHash: getPolicyHash(),
+          queueDepth: 0,
+          status: { label: containerRunning() ? "healthy" : "attention", tone: containerRunning() ? "success" : "warning" },
+        });
+        return;
+      }
       console.log(c.brightCyan("ARC-402 Workroom Status"));
       console.log(c.dim("───────────────────────"));
 
