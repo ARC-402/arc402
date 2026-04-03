@@ -1,6 +1,6 @@
 {
   "name": "arc402-cli",
-  "version": "1.6.6",
+  "version": "1.7.1",
   "description": "ARC-402 CLI for discovery, negotiation payloads, hire/remediation/dispute workflows, and network reads",
   "bin": {
     "arc402": "./dist/index.js"
@@ -40,6 +40,7 @@
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "react": "^18.3.1",
+    "react-reconciler": "^0.26.2",
     "smol-toml": "^1.6.0",
     "tweetnacl": "^1.0.3",
     "yaml": "^2.8.2"
