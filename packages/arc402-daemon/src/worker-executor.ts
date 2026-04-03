@@ -28,6 +28,7 @@ import { ethers } from "ethers";
 import { FileDeliveryManager, type DeliveryManifest } from "./file-delivery.js";
 import { createJobDirectory } from "./job-lifecycle.js";
 import { guardTaskContent } from "./prompt-guard.js";
+import { contextManager } from "./context-manager.js";
 
 const ARC402_DIR = path.join(os.homedir(), ".arc402");
 const JOBS_DIR = path.join(ARC402_DIR, "jobs");
@@ -279,6 +280,16 @@ export class WorkerExecutor {
       });
 
       this.onJobCompleted?.(rec.agreementId, manifest.root_hash);
+
+      // §9 ContextManager — record learnings from this job (non-blocking)
+      contextManager.onJobComplete({
+        workerId: this.agentType,
+        harness: this.agentType,
+        task: rec.capability,
+        deliverable: manifest.root_hash,
+        agreementId: rec.agreementId,
+        durationMs: rec.completedAt! - rec.startedAt,
+      }).catch(() => {});
 
     } catch (err) {
       const msg = String(err instanceof Error ? err.message : err);
