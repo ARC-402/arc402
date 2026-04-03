@@ -1,5 +1,6 @@
 import React from "react";
-import { render, ScreenManager } from "../renderer/index.js";
+import { render } from "ink";
+import { ScreenManager } from "../renderer/index.js";
 import { App } from "./App";
 import fs from "fs";
 import path from "path";
