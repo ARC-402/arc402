@@ -557,17 +557,23 @@ async function dispatchToHarness(
     // Determine endpoint
     let endpoint: string;
     if (harness === "openclaw") {
-      // Try reading gateway URL from openclaw config
+      // Resolve openclaw gateway endpoint
       try {
         const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, "utf8");
         const ocConfig = JSON.parse(raw) as Record<string, unknown>;
-        const gatewayUrl =
-          (ocConfig["gateway"] as Record<string, unknown> | undefined)?.["url"] ??
-          ocConfig["gatewayUrl"] ??
-          ocConfig["baseUrl"];
-        endpoint = gatewayUrl ? String(gatewayUrl).replace(/\/$/, "") + "/v1/chat/completions" : `${config.daemonUrl}/v1/chat/completions`;
+        const gatewayConfig = ocConfig["gateway"] as Record<string, unknown> | undefined;
+        
+        // Resolve gateway URL: prioritize explicit url, fall back to localhost + port
+        let gatewayUrl = gatewayConfig?.["url"] as string | undefined;
+        if (!gatewayUrl || gatewayUrl === "lan" || gatewayUrl === "local") {
+          // Use localhost + port from config
+          const port = gatewayConfig?.["port"] ?? 18789;
+          gatewayUrl = `http://127.0.0.1:${port}`;
+        }
+        endpoint = gatewayUrl.replace(/\/$/, "") + "/v1/chat/completions";
       } catch {
-        endpoint = `${config.daemonUrl}/v1/chat/completions`;
+        // Fallback: try default localhost:18789
+        endpoint = "http://127.0.0.1:18789/v1/chat/completions";
       }
     } else {
       endpoint = `${config.daemonUrl}/v1/chat/completions`;
