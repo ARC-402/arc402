@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import chalk from "chalk";
-import { c } from "../ui/colors";
+
+const c = { failure: "✗" };
 
 interface UseChatResult {
   send: (message: string, onLine: (line: string) => void) => Promise<void>;

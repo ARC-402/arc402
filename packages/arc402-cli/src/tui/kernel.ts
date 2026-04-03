@@ -16,6 +16,7 @@ import { getClient } from "../client";
 import { agreementStatusLabel } from "../utils/format";
 import { DAEMON_DIR, DAEMON_TOML, loadDaemonConfig } from "../daemon/config";
 import { printAgreementList, printDiscoverList, printRoundsList, printSquadCard, printStatusCard, printSubscribeCard, printWorkroomCard } from "./command-renderers";
+import type { KernelPayload } from "./kernel-payload";
 
 function readConfiguredWallet(): string | undefined {
   if (fs.existsSync(DAEMON_TOML)) {
@@ -199,59 +200,100 @@ export function getTuiSubCommands(): Map<string, string[]> {
   ]);
 }
 
-export async function executeTuiKernel(input: string): Promise<boolean> {
+async function renderKernelPayload(payload: KernelPayload): Promise<void> {
+  switch (payload.type) {
+    case "status":
+      await printStatusCard(payload.props);
+      if (payload.guidance?.length) {
+        const { writeTuiLine } = await import("./render-inline");
+        for (const line of payload.guidance) writeTuiLine(line);
+      }
+      break;
+    case "discover":
+      await printDiscoverList(payload.props);
+      break;
+    case "agreements":
+      await printAgreementList(payload.props);
+      break;
+    case "workroom":
+      await printWorkroomCard(payload.props);
+      break;
+    case "subscribe":
+      await printSubscribeCard(payload.props);
+      break;
+    case "rounds":
+      await printRoundsList(payload.props);
+      break;
+    case "squad":
+      await printSquadCard(payload.props);
+      break;
+    case "squads":
+      for (const card of payload.cards) {
+        await printSquadCard(card);
+        const { writeTuiLine } = await import("./render-inline");
+        writeTuiLine("");
+      }
+      break;
+    case "not_found":
+    case "error": {
+      const { writeTuiLine } = await import("./render-inline");
+      writeTuiLine(payload.message);
+      break;
+    }
+  }
+}
+
+export async function executeKernelForPayload(input: string): Promise<KernelPayload | null> {
   const tokens = parseTokens(input);
-  if (tokens.length === 0) return false;
+  if (tokens.length === 0) return null;
 
   if (tokens[0] === "status") {
-    await executeStatusKernel(tokens.slice(1));
-    return true;
+    return fetchStatusProps(tokens.slice(1));
   }
 
   if (tokens[0] === "discover") {
-    await executeDiscoverKernel(tokens.slice(1));
-    return true;
+    return fetchDiscoverProps(tokens.slice(1));
   }
 
   if (tokens[0] === "agreements") {
-    await executeAgreementsKernel(tokens.slice(1));
-    return true;
+    return fetchAgreementsProps(tokens.slice(1));
   }
 
   if (tokens[0] === "workroom" && tokens[1] === "status") {
-    await executeWorkroomStatusKernel();
-    return true;
+    return fetchWorkroomStatusProps();
   }
 
   if (tokens[0] === "subscription") {
-    await executeSubscriptionKernel(tokens.slice(1));
-    return true;
+    return fetchSubscriptionProps(tokens.slice(1));
   }
 
   if (tokens[0] === "subscribe") {
-    await executeSubscribeInspectKernel(tokens.slice(1));
-    return true;
+    return fetchSubscribeInspectProps(tokens.slice(1));
   }
 
   if (tokens[0] === "arena" && tokens[1] === "rounds") {
-    await executeArenaRoundsKernel(tokens.slice(2));
-    return true;
+    return fetchArenaRoundsProps(tokens.slice(2));
   }
 
   if (tokens[0] === "arena" && tokens[1] === "squad" && tokens[2] === "list") {
-    await executeArenaSquadListKernel(tokens.slice(3));
-    return true;
+    return fetchArenaSquadListProps(tokens.slice(3));
   }
 
   if (tokens[0] === "arena" && tokens[1] === "squad" && tokens[2] === "info" && tokens[3]) {
-    await executeArenaSquadInfoKernel(tokens[3]);
-    return true;
+    return fetchArenaSquadInfoProps(tokens[3]);
   }
 
-  return false;
+  return null;
 }
 
-async function executeStatusKernel(args: string[]): Promise<void> {
+export async function executeTuiKernel(input: string): Promise<boolean> {
+  const payload = await executeKernelForPayload(input);
+  if (payload === null) return false;
+  await renderKernelPayload(payload);
+  return true;
+}
+
+async function fetchStatusProps(args: string[]): Promise<KernelPayload> {
   const daemonUrlIndex = args.indexOf("--daemon-url");
   const baseUrl = daemonUrlIndex >= 0 ? args[daemonUrlIndex + 1] : undefined;
   const target = resolveChatDaemonTarget({ explicitBaseUrl: baseUrl });
@@ -274,16 +316,18 @@ async function executeStatusKernel(args: string[]): Promise<void> {
     }).length;
     const disputed = agreements.agreements.filter((agreement) => String((agreement.status ?? agreement.state ?? "")).toLowerCase().includes("disput")).length;
 
-    await printStatusCard({
-      wallet: wallet.wallet,
-      network: `chain ${wallet.chainId}`,
-      balance: target.mode === "local" ? target.baseUrl : `${target.mode} · ${target.baseUrl}`,
-      endpoint: wallet.rpcUrl,
-      agreements: { active, pendingVerification, disputed },
-      workroom: { status: workroom.status },
-      status: { label: health.ok ? "online" : "offline", tone: health.ok ? "success" : "danger" },
-    });
-    return;
+    return {
+      type: "status",
+      props: {
+        wallet: wallet.wallet,
+        network: `chain ${wallet.chainId}`,
+        balance: target.mode === "local" ? target.baseUrl : `${target.mode} · ${target.baseUrl}`,
+        endpoint: wallet.rpcUrl,
+        agreements: { active, pendingVerification, disputed },
+        workroom: { status: workroom.status },
+        status: { label: health.ok ? "online" : "offline", tone: health.ok ? "success" : "danger" },
+      },
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const fallbackWallet = readConfiguredWallet();
@@ -293,23 +337,22 @@ async function executeStatusKernel(args: string[]): Promise<void> {
         : "not configured on this machine"
       : "remote node unreachable";
 
-    await printStatusCard({
-      wallet: fallbackWallet ?? "not configured",
-      network: `${target.mode} node`,
-      balance: target.baseUrl,
-      endpoint: message,
-      workroom: { status: "waiting for daemon context" },
-      status: { label: daemonState, tone: "warning" },
-    });
-
-    for (const line of renderDaemonGuidance(target)) {
-      const { writeTuiLine } = await import("./render-inline");
-      writeTuiLine(line);
-    }
+    return {
+      type: "status",
+      props: {
+        wallet: fallbackWallet ?? "not configured",
+        network: `${target.mode} node`,
+        balance: target.baseUrl,
+        endpoint: message,
+        workroom: { status: "waiting for daemon context" },
+        status: { label: daemonState, tone: "warning" },
+      },
+      guidance: renderDaemonGuidance(target),
+    };
   }
 }
 
-async function executeDiscoverKernel(args: string[]): Promise<void> {
+async function fetchDiscoverProps(args: string[]): Promise<KernelPayload> {
   const config = loadConfig();
   if (!config.agentRegistryAddress) throw new Error("agentRegistryAddress missing in config");
   const { provider } = await getClient(config);
@@ -458,24 +501,28 @@ async function executeDiscoverKernel(args: string[]): Promise<void> {
   if (opts.online) withStatus = withStatus.filter((a) => a.endpointStatus === "online");
 
   const onlineCount = withStatus.filter((a) => a.endpointStatus === "online").length;
-  await printDiscoverList({
-    summary: `${withStatus.length} agent${withStatus.length === 1 ? "" : "s"} · ${onlineCount} online`,
-    status: { label: effectiveSort, tone: "info" },
-    agents: withStatus.map((agent) => ({
-      rank: agent.rank,
-      name: agent.name,
-      wallet: agent.wallet,
-      serviceType: agent.serviceType,
-      trustScore: agent.trustScore,
-      compositeScore: agent.compositeScore,
-      endpointStatus: agent.endpointStatus,
-      capabilitySummary: (agent.canonicalCapabilities.length ? agent.canonicalCapabilities : agent.capabilities).slice(0, 3).join(", ") || "none",
-      priceLabel: agent.priceUsd === null ? undefined : `$${agent.priceUsd}`,
-    })),
-  });
+
+  return {
+    type: "discover",
+    props: {
+      summary: `${withStatus.length} agent${withStatus.length === 1 ? "" : "s"} · ${onlineCount} online`,
+      status: { label: effectiveSort, tone: "info" },
+      agents: withStatus.map((agent) => ({
+        rank: agent.rank,
+        name: agent.name,
+        wallet: agent.wallet,
+        serviceType: agent.serviceType,
+        trustScore: agent.trustScore,
+        compositeScore: agent.compositeScore,
+        endpointStatus: agent.endpointStatus,
+        capabilitySummary: (agent.canonicalCapabilities.length ? agent.canonicalCapabilities : agent.capabilities).slice(0, 3).join(", ") || "none",
+        priceLabel: agent.priceUsd === null ? undefined : `$${agent.priceUsd}`,
+      })),
+    },
+  };
 }
 
-async function executeAgreementsKernel(args: string[]): Promise<void> {
+async function fetchAgreementsProps(args: string[]): Promise<KernelPayload> {
   const asIndex = args.indexOf("--as");
   const role = asIndex >= 0 ? (args[asIndex + 1] ?? "client") : "client";
   const config = loadConfig();
@@ -488,95 +535,110 @@ async function executeAgreementsKernel(args: string[]): Promise<void> {
     : await client.getClientAgreements(address);
 
   const totalEscrowWei = agreements.reduce((sum, agreement) => sum + BigInt(agreement.price ?? 0n), 0n);
-  await printAgreementList({
-    roleLabel: role === "provider" ? "Provider Agreements" : "Client Agreements",
-    totalEscrowLabel: `${totalEscrowWei.toString()} wei escrowed`,
-    status: { label: `${agreements.length} total`, tone: "info" },
-    agreements: agreements.map((agreement) => ({
-      id: agreement.id.toString(),
-      counterparty: role === "provider" ? agreement.client : agreement.provider,
-      serviceType: agreement.serviceType,
-      status: agreementStatusLabel(agreement.status),
-      deadlineMinutes: Math.max(0, Math.round((Number(agreement.deadline) - Math.floor(Date.now() / 1000)) / 60)),
-      price: `${BigInt(agreement.price ?? 0n).toString()} wei`,
-    })),
-  });
+
+  return {
+    type: "agreements",
+    props: {
+      roleLabel: role === "provider" ? "Provider Agreements" : "Client Agreements",
+      totalEscrowLabel: `${totalEscrowWei.toString()} wei escrowed`,
+      status: { label: `${agreements.length} total`, tone: "info" },
+      agreements: agreements.map((agreement) => ({
+        id: agreement.id.toString(),
+        counterparty: role === "provider" ? agreement.client : agreement.provider,
+        serviceType: agreement.serviceType,
+        status: agreementStatusLabel(agreement.status),
+        deadlineMinutes: Math.max(0, Math.round((Number(agreement.deadline) - Math.floor(Date.now() / 1000)) / 60)),
+        price: `${BigInt(agreement.price ?? 0n).toString()} wei`,
+      })),
+    },
+  };
 }
 
-async function executeWorkroomStatusKernel(): Promise<void> {
+async function fetchWorkroomStatusProps(): Promise<KernelPayload> {
   const snapshot = readWorkroomStatusSnapshot();
-  await printWorkroomCard(snapshot);
+  return { type: "workroom", props: snapshot };
 }
 
-async function executeSubscriptionKernel(args: string[]): Promise<void> {
+async function fetchSubscriptionProps(args: string[]): Promise<KernelPayload> {
   const sub = args[0] ?? "status";
   const id = args[1];
   const months = Number.parseInt(readFlag(args, "--months") ?? "1", 10);
 
   if (sub === "status") {
-    await printSubscribeCard({
-      provider: `subscription ${id ?? "unknown"}`,
-      planId: "status",
-      rateLabel: "pending query binding",
-      accessSummary: ["Contract/subgraph lookup pending"],
-      status: { label: "scaffold", tone: "warning" },
-    });
-    return;
+    return {
+      type: "subscribe",
+      props: {
+        provider: `subscription ${id ?? "unknown"}`,
+        planId: "status",
+        rateLabel: "pending query binding",
+        accessSummary: ["Contract/subgraph lookup pending"],
+        status: { label: "scaffold", tone: "warning" },
+      },
+    };
   }
 
   if (sub === "list") {
-    await printSubscribeCard({
-      provider: "subscriptions",
-      planId: "list",
-      rateLabel: "query source pending",
-      accessSummary: ["List query scaffolding only"],
-      status: { label: "scaffold", tone: "warning" },
-    });
-    return;
+    return {
+      type: "subscribe",
+      props: {
+        provider: "subscriptions",
+        planId: "list",
+        rateLabel: "query source pending",
+        accessSummary: ["List query scaffolding only"],
+        status: { label: "scaffold", tone: "warning" },
+      },
+    };
   }
 
   if (sub === "cancel") {
-    await printSubscribeCard({
-      provider: `subscription ${id ?? "unknown"}`,
-      planId: "cancel",
-      rateLabel: "write path deferred",
-      accessSummary: ["Cancellation intentionally not wired in this phase"],
-      status: { label: "deferred", tone: "warning" },
-    });
-    return;
+    return {
+      type: "subscribe",
+      props: {
+        provider: `subscription ${id ?? "unknown"}`,
+        planId: "cancel",
+        rateLabel: "write path deferred",
+        accessSummary: ["Cancellation intentionally not wired in this phase"],
+        status: { label: "deferred", tone: "warning" },
+      },
+    };
   }
 
   if (sub === "topup") {
-    await printSubscribeCard({
-      provider: `subscription ${id ?? "unknown"}`,
-      planId: "topup",
-      rateLabel: `+${months} months`,
-      months,
-      accessSummary: ["Top-up command shape is staged"],
-      status: { label: "scaffold", tone: "warning" },
-    });
-    return;
+    return {
+      type: "subscribe",
+      props: {
+        provider: `subscription ${id ?? "unknown"}`,
+        planId: "topup",
+        rateLabel: `+${months} months`,
+        months,
+        accessSummary: ["Top-up command shape is staged"],
+        status: { label: "scaffold", tone: "warning" },
+      },
+    };
   }
 
   throw new Error(`Unsupported subscription subcommand: ${sub}`);
 }
 
-async function executeSubscribeInspectKernel(args: string[]): Promise<void> {
+async function fetchSubscribeInspectProps(args: string[]): Promise<KernelPayload> {
   const endpoint = args[0];
   if (!endpoint) throw new Error("subscribe requires an endpoint");
   const inspection = await inspectCommerceEndpoint(endpoint);
   const months = Number.parseInt(readFlag(args, "--months") ?? "1", 10);
   const plan = readFlag(args, "--plan") ?? inspection.subscription?.plan ?? "unspecified";
 
-  await printSubscribeCard({
-    provider: endpoint,
-    planId: plan,
-    rateLabel: inspection.subscription?.rate ?? inspection.x402?.amount ?? "n/a",
-    months,
-    paymentOptions: inspection.paymentOptions,
-    accessSummary: [inspection.subscription?.endpoint ?? endpoint, inspection.x402?.description ?? "read-only scaffold"],
-    status: { label: inspection.paymentRequired ? "payment required" : "inspect", tone: inspection.paymentRequired ? "warning" : "info" },
-  });
+  return {
+    type: "subscribe",
+    props: {
+      provider: endpoint,
+      planId: plan,
+      rateLabel: inspection.subscription?.rate ?? inspection.x402?.amount ?? "n/a",
+      months,
+      paymentOptions: inspection.paymentOptions,
+      accessSummary: [inspection.subscription?.endpoint ?? endpoint, inspection.x402?.description ?? "read-only scaffold"],
+      status: { label: inspection.paymentRequired ? "payment required" : "inspect", tone: inspection.paymentRequired ? "warning" : "info" },
+    },
+  };
 }
 
 const ARENA_SUBGRAPH_URL = "https://api.studio.thegraph.com/query/1744310/arc-402/v0.3.0";
@@ -624,7 +686,7 @@ function formatElapsed(ts: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-async function executeArenaRoundsKernel(args: string[]): Promise<void> {
+async function fetchArenaRoundsProps(args: string[]): Promise<KernelPayload> {
   const limit = Number.parseInt(readFlag(args, "--limit") ?? "10", 10);
   const data = await arenaGql(`{
     arenaRounds(first: ${Math.max(1, Math.min(limit, 50))}, orderBy: createdAt, orderDirection: desc) {
@@ -657,14 +719,17 @@ async function executeArenaRoundsKernel(args: string[]): Promise<void> {
     };
   });
 
-  await printRoundsList({
-    title: "Arena Rounds",
-    status: { label: "subgraph", tone: "info" },
-    rounds,
-  });
+  return {
+    type: "rounds",
+    props: {
+      title: "Arena Rounds",
+      status: { label: "subgraph", tone: "info" },
+      rounds,
+    },
+  };
 }
 
-async function executeArenaSquadListKernel(args: string[]): Promise<void> {
+async function fetchArenaSquadListProps(args: string[]): Promise<KernelPayload> {
   const domain = readFlag(args, "--domain");
   const domainFilter = domain ? `where: { domainTag: "${domain}" }` : "";
   const data = await arenaGql(`{
@@ -674,18 +739,14 @@ async function executeArenaSquadListKernel(args: string[]): Promise<void> {
   }`);
 
   const squads = (data["researchSquads"] as unknown[]) ?? [];
-  const { writeTuiLine } = await import("./render-inline");
 
   if (squads.length === 0) {
-    writeTuiLine("◈ Research Squads");
-    writeTuiLine(separator());
-    writeTuiLine("  No squads found.");
-    return;
+    return { type: "not_found", message: "No squads found." };
   }
 
-  for (const s of squads) {
+  const cards = squads.map((s) => {
     const sq = s as Record<string, unknown>;
-    await printSquadCard({
+    return {
       id: formatSquadId(BigInt(String(sq["id"]))),
       name: String(sq["name"]),
       domainTag: String(sq["domainTag"]),
@@ -694,15 +755,14 @@ async function executeArenaSquadListKernel(args: string[]): Promise<void> {
       memberCount: Number(sq["memberCount"]),
       inviteOnly: Boolean(sq["inviteOnly"]),
       briefings: [{ preview: formatElapsed(Number(sq["createdAt"])), publishedLabel: "created" }],
-    });
-    writeTuiLine("");
-  }
+    };
+  });
+
+  return { type: "squads", cards };
 }
 
-async function executeArenaSquadInfoKernel(squadIdArg: string): Promise<void> {
+async function fetchArenaSquadInfoProps(squadIdArg: string): Promise<KernelPayload> {
   const rawId = parseSquadId(squadIdArg).toString();
-  // Subgraph stores squad IDs as the raw decimal integer from the contract event.
-  // Try the raw integer first, then the hex form used in formatSquadId if not found.
   let data = await arenaGql(`{
     researchSquad(id: "${rawId}") {
       id name domainTag creator status inviteOnly memberCount
@@ -715,19 +775,15 @@ async function executeArenaSquadInfoKernel(squadIdArg: string): Promise<void> {
     }
   }`);
 
-  let squad = data["researchSquad"] as Record<string, unknown> | null;
+  const squad = data["researchSquad"] as Record<string, unknown> | null;
 
-  // Subgraph may not have indexed this squad yet or ID form may differ
   if (!squad) {
-    const { writeTuiLine } = await import("./render-inline");
-    writeTuiLine("◈ Squad");
-    writeTuiLine(separator());
-    writeTuiLine(`  Squad not found: ${squadIdArg}`);
-    writeTuiLine("  The subgraph may not have indexed this squad yet.");
-    return;
+    return {
+      type: "not_found",
+      message: `Squad not found: ${squadIdArg}\n  The subgraph may not have indexed this squad yet.`,
+    };
   }
 
-  // Unique authors as member proxies (contributions schema)
   const allContribs = ((data["squadMembers"] as unknown[]) ?? []);
   const seenAuthors = new Set<string>();
   const members = allContribs
@@ -750,17 +806,20 @@ async function executeArenaSquadInfoKernel(squadIdArg: string): Promise<void> {
     };
   });
 
-  await printSquadCard({
-    id: formatSquadId(BigInt(String(squad["id"]))),
-    name: String(squad["name"]),
-    domainTag: String(squad["domainTag"]),
-    statusLabel: squadStatusLabel(Number(squad["status"])),
-    creator: truncateAddr(String(squad["creator"])),
-    memberCount: Number(squad["memberCount"]),
-    inviteOnly: Boolean(squad["inviteOnly"]),
-    members,
-    briefings,
-  });
+  return {
+    type: "squad",
+    props: {
+      id: formatSquadId(BigInt(String(squad["id"]))),
+      name: String(squad["name"]),
+      domainTag: String(squad["domainTag"]),
+      statusLabel: squadStatusLabel(Number(squad["status"])),
+      creator: truncateAddr(String(squad["creator"])),
+      memberCount: Number(squad["memberCount"]),
+      inviteOnly: Boolean(squad["inviteOnly"]),
+      members,
+      briefings,
+    },
+  };
 }
 
 function readFlag(args: string[], flag: string): string | undefined {

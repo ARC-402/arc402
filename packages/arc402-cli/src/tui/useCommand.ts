@@ -1,8 +1,10 @@
 import { useState, useCallback } from "react";
-import { createProgram } from "../program";
 import chalk from "chalk";
-import { c } from "../ui/colors";
 import { withTuiRenderSink } from "./render-inline";
+
+// c is imported lazily in error handlers below to avoid pulling ui/colors
+// into the static import graph. Use inline chalk for now.
+const c = { failure: "✗" };
 
 interface UseCommandResult {
   execute: (input: string, onLine: (line: string) => void) => Promise<void>;
@@ -58,6 +60,9 @@ export function useCommand(): UseCommandResult {
       try {
         process.env.ARC402_TUI_MODE = "1";
         const tokens = parseTokens(input);
+        // Lazy import — keeps program.ts out of the static TUI module graph.
+        // This only runs for commands not yet handled by the kernel.
+        const { createProgram } = await import("../program");
         const prog = createProgram();
         prog.exitOverride();
         prog.configureOutput({
