@@ -39,6 +39,8 @@ import { DeliveryClient } from "./delivery-client";
 import { COMPUTE_AGREEMENT_ABI, SERVICE_AGREEMENT_ABI } from "./abis";
 import { HandshakeWatcher } from "./handshake-watcher.js";
 import { WorkerExecutor } from "./worker-executor.js";
+import { issueAuthChallenge, consumeAuthChallenge, type AuthServerConfig } from "./auth-server.js";
+import { SessionManager } from "./session-manager.js";
 import { EndpointPolicy, hasExplicitCommerceDelegation, resolveJobId } from "./endpoint-policy";
 import { guardTaskContent } from "./prompt-guard";
 
@@ -899,13 +901,26 @@ export async function runDaemon(foreground = false): Promise<void> {
     });
   }
 
-  const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status", "/events"]);
+  const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status", "/events", "/auth/challenge", "/auth/status"]);
 
+  const authCfg: AuthServerConfig = {
+    daemonId: config.wallet.contract_address,
+    rpcUrl: config.network.rpc_url,
+    chainId: config.network.chain_id,
+    walletAddress: config.wallet.contract_address,
+  };
+  const authDb = new Database(DAEMON_DB);
+  authDb.pragma("journal_mode = WAL");
+  const authSessions = new SessionManager(authDb);
+
+  // Auth endpoints — open (challenge-response flow; no daemon token required).
   // Protocol POST endpoints — open to external agents (no daemon token required).
   // These are inbound P2P messages: hire proposals, handshakes, delivery notifications, etc.
   // EIP-191 signature in the request body is the trust mechanism, not the daemon bearer token.
   // The bearer token is for operator/admin actions only (approve, reject, status).
   const PUBLIC_POST_PATHS = new Set([
+    "/auth/session",
+    "/auth/revoke",
     "/hire",
     "/hire/accepted",
     "/handshake",
@@ -1003,6 +1018,65 @@ export async function runDaemon(foreground = false): Promise<void> {
         bundlerMode: config.bundler.mode,
         relay: config.relay.enabled,
       }));
+      return;
+    }
+
+    // ── Auth routes (Spec 46 §11) ─────────────────────────────────────────────
+    if (pathname === "/auth/challenge" && req.method === "GET") {
+      const walletQ = url.searchParams.get("wallet") ?? config.wallet.contract_address;
+      const scopeQ = url.searchParams.get("scope") ?? "operator";
+      const challenge = issueAuthChallenge(authSessions, authCfg, walletQ, scopeQ);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(challenge));
+      return;
+    }
+
+    if (pathname === "/auth/session" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const { challengeId, signature } = JSON.parse(body) as { challengeId?: string; signature?: string };
+        if (!challengeId || !signature) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "challengeId and signature required" }));
+          return;
+        }
+        const result = await consumeAuthChallenge(authSessions, authCfg, {}, provider, challengeId, signature);
+        if (!result.ok) {
+          res.writeHead(result.status, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: result.error }));
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_json" }));
+      }
+      return;
+    }
+
+    if (pathname === "/auth/status" && req.method === "GET") {
+      const authHeader = (req.headers["authorization"] ?? "") as string;
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      if (!token) { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ authenticated: false })); return; }
+      const session = authSessions.validateSession(token);
+      if (!session) { res.writeHead(200, { "Content-Type": "application/json" }); res.end(JSON.stringify({ authenticated: false })); return; }
+      const expiresIn = Math.floor((session.expiresAt - Date.now()) / 1000);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ authenticated: true, walletAddress: session.wallet, scope: session.scope, expiresIn }));
+      return;
+    }
+
+    if (pathname === "/auth/revoke" && req.method === "POST") {
+      const authHeader = (req.headers["authorization"] ?? "") as string;
+      const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+      if (!token) { res.writeHead(401, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "no_session" })); return; }
+      const session = authSessions.validateSession(token);
+      if (!session) { res.writeHead(401, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: "invalid_session" })); return; }
+      authSessions.revokeByWallet(session.wallet);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, revoked: session.wallet }));
       return;
     }
 
