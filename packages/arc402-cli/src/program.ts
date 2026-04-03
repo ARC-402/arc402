@@ -41,6 +41,7 @@ import { registerHermesInitCommand } from "./commands/hermes-init";
 import { registerIndexCommands } from "./commands/index";
 import { registerSubscriptionCommands } from "./commands/subscription";
 import { registerStatusCommand } from "./commands/status";
+import { registerLifecycleCommand } from "./commands/lifecycle";
 import reputation from "./commands/reputation.js";
 import policy from "./commands/policy.js";
 
@@ -55,6 +56,7 @@ export function createProgram(): Command {
     .version((require("../package.json") as { version: string }).version);
 
   registerStatusCommand(program);
+  registerLifecycleCommand(program);
   registerConfigCommands(program);
   registerHandshakeCommand(program);
   registerAgentCommands(program);
