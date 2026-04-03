@@ -1,5 +1,8 @@
 import { ethers } from "ethers";
 
+const POLICY_ENGINE_FAIL_MODE: "closed" | "open" =
+  (process.env.ARC402_POLICY_FAIL_MODE as "closed" | "open") ?? "closed";
+
 const POLICY_ENGINE_VALIDATE_ABI = [
   "function validateSpend(address wallet, string category, uint256 amount, bytes32 contextId) external view returns (bool, string)",
 ] as const;
@@ -114,11 +117,27 @@ export async function checkPermissions(
       spendAccumulator.set(jobKey, projectedSpend);
     }
   } catch (error) {
-    decision = {
-      granted: false,
-      reason: `policy_validation_rpc_error: ${formatRpcError(error)}`,
-      estimatedSpend: projectedSpend,
-    };
+    if (POLICY_ENGINE_FAIL_MODE === "closed") {
+      decision = {
+        granted: false,
+        reason: "PolicyEngine unreachable — writes blocked (fail-closed)",
+        estimatedSpend: projectedSpend,
+      };
+    } else {
+      // fail-open: use last-known cache or deny
+      const lastCached = Array.from(decisionCache.values()).find(
+        (e) => e.decision.granted && e.expiresAt > 0
+      );
+      if (lastCached) {
+        decision = { granted: true, estimatedSpend: projectedSpend };
+      } else {
+        decision = {
+          granted: false,
+          reason: "PolicyEngine unreachable and no cached policy",
+          estimatedSpend: projectedSpend,
+        };
+      }
+    }
   }
 
   decisionCache.set(cacheKey, { decision, expiresAt: now + CACHE_TTL_MS });

@@ -356,37 +356,71 @@ export function registerComputeCommands(program: Command): void {
         return;
       }
 
-      const result = await daemonRequest("GET", `/compute/session/${sessionId}`, undefined, port);
-      if (!result.ok) {
-        console.error(c.red("Session not found:"), result.data);
-        process.exit(1);
-      }
-      const { session, current } = result.data as { session: Record<string, unknown>; current: Record<string, unknown> | null };
-      if (isTuiRenderMode()) {
+      const fetchAndPrint = async (): Promise<boolean> => {
+        const result = await daemonRequest("GET", `/compute/session/${sessionId}`, undefined, port);
+        if (!result.ok) {
+          console.error(c.red("Session not found:"), result.data);
+          return false;
+        }
+        const { session, current } = result.data as { session: Record<string, unknown>; current: Record<string, unknown> | null };
         const proposal = (session.proposal ?? {}) as Record<string, unknown>;
         const consumedMinutes = Number(session.consumedMinutes ?? current?.consumedMinutes ?? 0);
         const maxHours = Number(proposal.maxHours ?? 0);
         const ratePerHourWei = String(proposal.ratePerHourWei ?? "0");
         const totalBudgetWei = maxHours > 0 ? BigInt(ratePerHourWei) * BigInt(maxHours) : 0n;
         const costWei = current?.costWei ? BigInt(String(current.costWei)) : (BigInt(ratePerHourWei) * BigInt(consumedMinutes)) / 60n;
-        await printComputeCard({
-          sessionId,
-          provider: String(proposal.clientAddress ?? "unknown"),
-          gpuSpec: String(proposal.gpuSpecHash ?? "gpu session"),
-          rateLabel: `${ratePerHourWei} wei/hr`,
-          consumedLabel: `${consumedMinutes} minutes`,
-          costLabel: `${costWei.toString()} wei`,
-          remainingLabel: totalBudgetWei > 0n ? `${(totalBudgetWei - costWei > 0n ? totalBudgetWei - costWei : 0n).toString()} wei` : undefined,
-          utilizationPercent: totalBudgetWei > 0n ? Number((costWei * 10000n) / totalBudgetWei) / 100 : undefined,
-          status: { label: String(session.status ?? "unknown"), tone: "info" },
-        });
-        return;
-      }
-      console.log(bold(`Session: ${sessionId}`));
-      console.log(JSON.stringify(session, null, 2));
-      if (current) {
-        console.log(bold("Current metrics:"));
-        console.log(JSON.stringify(current, null, 2));
+        const remainingWei = totalBudgetWei > 0n ? (totalBudgetWei - costWei > 0n ? totalBudgetWei - costWei : 0n) : 0n;
+        const pct = totalBudgetWei > 0n ? Number((costWei * 10000n) / totalBudgetWei) / 100 : 0;
+
+        if (isTuiRenderMode()) {
+          await printComputeCard({
+            sessionId,
+            provider: String(proposal.clientAddress ?? "unknown"),
+            gpuSpec: String(proposal.gpuSpecHash ?? "gpu session"),
+            rateLabel: `${ratePerHourWei} wei/hr`,
+            consumedLabel: `${consumedMinutes} minutes`,
+            costLabel: `${costWei.toString()} wei`,
+            remainingLabel: totalBudgetWei > 0n ? `${remainingWei.toString()} wei` : undefined,
+            utilizationPercent: totalBudgetWei > 0n ? pct : undefined,
+            status: { label: String(session.status ?? "unknown"), tone: "info" },
+          });
+          return true;
+        }
+
+        // Non-TUI plain text format
+        const barFilled = Math.round(pct / 100 * 12);
+        const bar = "\u2588".repeat(barFilled) + "\u2591".repeat(12 - barFilled);
+        const costEth = (Number(costWei) / 1e18).toFixed(6);
+        const rateEth = (Number(ratePerHourWei) / 1e18).toFixed(6);
+        const remainEth = (Number(remainingWei) / 1e18).toFixed(6);
+        console.log(bold("\u25C8 Compute Session \u2500".padEnd(47, "\u2500")));
+        console.log(`  Session     ${sessionId}`);
+        console.log(`  Provider    ${String(proposal.clientAddress ?? "unknown")}`);
+        console.log(`  Rate        ${rateEth} ETH/hr`);
+        console.log(`  Consumed    ${consumedMinutes} minutes`);
+        console.log(`  Cost        ${costEth} ETH`);
+        if (totalBudgetWei > 0n) {
+          console.log(`  Remaining   ${remainEth} ETH`);
+          console.log(`  Utilization ${bar}  ${pct.toFixed(1)}%`);
+        }
+        console.log("");
+        console.log(c.dim("  [auto-refreshing every 30s \u00B7 Ctrl+C to exit]"));
+        console.log("");
+        return true;
+      };
+
+      const ok = await fetchAndPrint();
+      if (!ok) process.exit(1);
+
+      if (!isTuiRenderMode()) {
+        // Auto-refresh loop (non-TUI only)
+        let running = true;
+        process.on("SIGINT", () => { running = false; process.exit(0); });
+        while (running) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 30_000));
+          if (!running) break;
+          await fetchAndPrint();
+        }
       }
     });
 

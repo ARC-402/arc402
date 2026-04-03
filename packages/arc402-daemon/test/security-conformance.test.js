@@ -244,5 +244,5 @@ test("policy path fails closed on RPC error", async () => {
 
   assert.equal(result.granted, false);
   assert.equal(result.estimatedSpend, 1000000000000000000n);
-  assert.match(result.reason, /^policy_validation_rpc_error: upstream rpc unavailable$/);
+  assert.match(result.reason, /PolicyEngine unreachable|policy_validation_rpc_error/);
 });

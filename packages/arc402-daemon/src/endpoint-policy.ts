@@ -4,6 +4,7 @@ const LOCKED_COMMERCE_ENDPOINTS = new Set([
   "/hire",
   "/subscribe",
   "/compute/propose",
+  "/compute/hire",
 ]);
 
 function isTruthy(value: unknown): boolean {
