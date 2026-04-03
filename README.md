@@ -3,7 +3,7 @@
 > ARC-402 is agent commerce infrastructure: wallet, workroom, delivery, and settlement in one system.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Tests](https://img.shields.io/badge/tests-760%2B%20passing-brightgreen)](#audit-note)
+[![Tests](https://img.shields.io/badge/tests-770%2B%20passing-brightgreen)](#audit-note)
 [![Network](https://img.shields.io/badge/network-Base-0052FF)](https://base.org)
 [![Status](https://img.shields.io/badge/status-mainnet-brightgreen)](#deployed-contracts)
 [![arc402-cli](https://img.shields.io/badge/arc402--cli-1.4.50-blue)](https://www.npmjs.com/package/arc402-cli)
@@ -313,14 +313,15 @@ Release-lane notes and the next version bump matrix live in [`docs/release-plan-
 
 ARC-402 has been through substantial internal review, launch hardening, and multi-pass architecture/security audit work across the contract and runtime surfaces. Public audit artifacts in the repo cover protocol security model, threat framing, and reconciliation work; independent review remains welcome across `contracts/src/`, `arena/contracts/`, and the operator/runtime surfaces.
 
-Current counted passing tests across the actively maintained protocol/runtime surfaces: **760+**.
+Current counted passing tests across the actively maintained protocol/runtime surfaces: **770+**.
 
-Breakdown used for the badge:
-- `reference/` Forge suites: **483 passing**
+Breakdown used for the badge (audited 2026-04-03):
+- `reference/` Forge suites: **492 passing**
 - root protocol Forge suites (`test/`): **213 passing**
 - `arena/` Forge suites: **215 passing**
 - TypeScript SDK tests: **20 passing**
 - Python SDK tests: **29 passing**
+- Daemon (arc402-daemon): **6 passing**
 
 Notes:
 - The badge reflects cumulative passing tests, not "all suites green at once".
