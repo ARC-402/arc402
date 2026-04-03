@@ -14,6 +14,7 @@ import { formatAddress } from '../ui/format';
 import { resolveAgentEndpoint } from "../endpoint-notify";
 import { isTuiRenderMode } from "../tui/render-inline";
 import { printHireCard } from "../tui/command-renderers";
+import { interactiveHireTui } from "../tui/hire-interactive";
 
 const DEFAULT_REGISTRY_ADDRESS = "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865";
 
@@ -81,6 +82,12 @@ export function registerHireCommand(program: Command): void {
     .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
     .option("--json")
     .action(async (providerArg: string | undefined, opts) => {
+      // Interactive TUI hire flow when no provider given in TUI mode
+      if (isTuiRenderMode() && !providerArg && !opts.agent) {
+        await interactiveHireTui();
+        return;
+      }
+
       const config = loadConfig();
       if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
       const { signer, address } = await requireSigner(config);
