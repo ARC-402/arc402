@@ -27,29 +27,41 @@ readonly ARENA_DEFAULT="/workroom/defaults/arena-policy.yaml"
 # never the host mount which carries macOS/Windows binaries.
 GLOBAL_NPM_ROOT=$(npm root -g 2>/dev/null || echo "")
 GLOBAL_CLI_ROOT="${GLOBAL_NPM_ROOT}/arc402-cli"
-GLOBAL_DAEMON="${GLOBAL_CLI_ROOT}/dist/daemon/index.js"
+# Split daemon package (@arc402/daemon, Spec 46) — new production path
+GLOBAL_DAEMON_ROOT="${GLOBAL_NPM_ROOT}/@arc402/daemon"
+GLOBAL_DAEMON_NEW="${GLOBAL_DAEMON_ROOT}/dist/index.js"
+# Legacy monolith path — kept as backwards-compat fallback
+GLOBAL_DAEMON_LEGACY="${GLOBAL_CLI_ROOT}/dist/daemon/index.js"
 log "Global npm root: ${GLOBAL_NPM_ROOT:-not found}"
 log "Global cli root: ${GLOBAL_CLI_ROOT}"
+log "Global daemon root: ${GLOBAL_DAEMON_ROOT}"
 
 # NODE_PATH: if a host dist/ is mounted (--dev mode), require() calls from it
 # must still resolve native addons from the Linux global install.
-# Set unconditionally — harmless if the mount doesn't exist.
-if [ -d "${GLOBAL_CLI_ROOT}/node_modules" ]; then
-  export NODE_PATH="${GLOBAL_CLI_ROOT}/node_modules${NODE_PATH:+:$NODE_PATH}"
-  log "NODE_PATH → ${GLOBAL_CLI_ROOT}/node_modules (Linux-native addons)"
+# Include both arc402-cli and @arc402/daemon node_modules so either package's
+# native addons are available regardless of which daemon path is in use.
+if [ -d "${GLOBAL_CLI_ROOT}/node_modules" ] || [ -d "${GLOBAL_DAEMON_ROOT}/node_modules" ]; then
+  EXTRA_NODE_PATH=""
+  [ -d "${GLOBAL_CLI_ROOT}/node_modules" ]    && EXTRA_NODE_PATH="${GLOBAL_CLI_ROOT}/node_modules"
+  [ -d "${GLOBAL_DAEMON_ROOT}/node_modules" ] && EXTRA_NODE_PATH="${EXTRA_NODE_PATH:+${EXTRA_NODE_PATH}:}${GLOBAL_DAEMON_ROOT}/node_modules"
+  export NODE_PATH="${EXTRA_NODE_PATH}${NODE_PATH:+:$NODE_PATH}"
+  log "NODE_PATH → ${EXTRA_NODE_PATH} (Linux-native addons)"
 fi
 
 # ─── Resolve daemon entry point ───────────────────────────────────────────────
-# Production (no --dev mount): /workroom/runtime/dist/daemon/index.js won't exist.
-#   → use global install directly.
-# Dev (--dev mount): mounted dist/ exists, global node_modules via NODE_PATH.
-#   → use mounted dist so JS changes propagate without rebuild.
+# Priority:
+#   1. /workroom/runtime/dist/daemon/index.js  — host dev mount (JS changes w/o rebuild)
+#   2. @arc402/daemon dist/index.js            — new split package (production)
+#   3. arc402-cli dist/daemon/index.js         — legacy monolith (backwards compat)
 if [ -f "/workroom/runtime/dist/daemon/index.js" ]; then
   DAEMON_ENTRY="/workroom/runtime/dist/daemon/index.js"
   log "Daemon: host dist/ mount (dev mode)"
-elif [ -f "${GLOBAL_DAEMON}" ]; then
-  DAEMON_ENTRY="${GLOBAL_DAEMON}"
-  log "Daemon: global install (production)"
+elif [ -f "${GLOBAL_DAEMON_NEW}" ]; then
+  DAEMON_ENTRY="${GLOBAL_DAEMON_NEW}"
+  log "Daemon: @arc402/daemon global install (production)"
+elif [ -f "${GLOBAL_DAEMON_LEGACY}" ]; then
+  DAEMON_ENTRY="${GLOBAL_DAEMON_LEGACY}"
+  log "Daemon: arc402-cli monolith fallback (legacy)"
 else
   DAEMON_ENTRY=""
 fi
@@ -181,7 +193,8 @@ log "DNS refresh daemon started (PID: $local_dns_pid, interval: ${ARC402_DNS_REF
 if [ -z "$DAEMON_ENTRY" ] || [ ! -f "$DAEMON_ENTRY" ]; then
   log "ERROR: Daemon entry point not found."
   log "Tried: /workroom/runtime/dist/daemon/index.js (host --dev mount)"
-  log "Tried: ${GLOBAL_DAEMON} (global npm install inside image)"
+  log "Tried: ${GLOBAL_DAEMON_NEW} (@arc402/daemon global install)"
+  log "Tried: ${GLOBAL_DAEMON_LEGACY} (arc402-cli monolith fallback)"
   log "Rebuild the workroom image: arc402 workroom init"
   exit 1
 fi
