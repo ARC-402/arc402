@@ -190,6 +190,17 @@ function loadApiToken(): string | null {
   }
 }
 
+// ─── SSE event bus ──────────────────────────────────────────────────────────────
+
+const sseClients = new Set<http.ServerResponse>();
+
+export function emitDaemonEvent(type: string, data: Record<string, unknown>): void {
+  const payload = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    try { client.write(payload); } catch { sseClients.delete(client); }
+  }
+}
+
 // ─── Rate limiter ─────────────────────────────────────────────────────────────
 
 interface RateBucket { count: number; resetTime: number }
@@ -630,6 +641,7 @@ export async function runDaemon(foreground = false): Promise<void> {
   workerExecutor.onJobCompleted = (agreementId, rootHash) => {
     endpointPolicy.releaseJob(agreementId);
     log({ event: "worker_job_completed", agreement_id: agreementId, root_hash: rootHash });
+    emitDaemonEvent("job_completed", { id: agreementId });
     const hire = db.getHireRequestByAgreementId(agreementId);
     if (!hire) {
       log({ event: "worker_complete_no_hire", agreement_id: agreementId });
@@ -650,6 +662,7 @@ export async function runDaemon(foreground = false): Promise<void> {
       userOps.submit(callData, config.wallet.contract_address)
         .then((hash) => {
           log({ event: "fulfill_userop_submitted", agreement_id: agreementId, userop_hash: hash, root_hash: rootHash });
+          emitDaemonEvent("deliverable_committed", { id: agreementId, hash: rootHash });
           // Generate receipt + extract learnings
           const now = new Date().toISOString();
           const startedAt = new Date(hire.created_at).toISOString();
@@ -687,6 +700,7 @@ export async function runDaemon(foreground = false): Promise<void> {
   workerExecutor.onJobFailed = (agreementId, error) => {
     endpointPolicy.releaseJob(agreementId);
     log({ event: "worker_job_failed", agreement_id: agreementId, error });
+    emitDaemonEvent("job_failed", { id: agreementId, reason: error });
     const hire = db.getHireRequestByAgreementId(agreementId);
     if (hire) {
       db.updateHireRequestStatus(hire.id, "rejected", `worker_failed: ${error}`);
@@ -750,6 +764,7 @@ export async function runDaemon(foreground = false): Promise<void> {
     });
     endpointPolicy.lockForJob(hire.agreement_id);
     log({ event: "job_enqueued", id: hireId, agreement_id: hire.agreement_id, capability: hire.capability });
+    emitDaemonEvent("job_started", { id: hire.agreement_id, harness: "worker" });
 
     // Seed staged deliverables if configured for this capability
     const stagedDir = config.delivery.staged_dir;
@@ -884,7 +899,7 @@ export async function runDaemon(foreground = false): Promise<void> {
     });
   }
 
-  const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status"]);
+  const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status", "/events"]);
 
   // Protocol POST endpoints — open to external agents (no daemon token required).
   // These are inbound P2P messages: hire proposals, handshakes, delivery notifications, etc.
@@ -947,6 +962,19 @@ export async function runDaemon(foreground = false): Promise<void> {
         res.end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
+    }
+
+    // SSE live event stream
+    if (pathname === "/events" && req.method === "GET") {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1");
+      res.flushHeaders();
+      res.write("data: connected\n\n");
+      sseClients.add(res);
+      req.on("close", () => sseClients.delete(res));
+      return;
     }
 
     // Health / info
@@ -1096,6 +1124,7 @@ export async function runDaemon(foreground = false): Promise<void> {
           });
 
           log({ event: "http_hire_received", id: proposal.messageId, hirer: proposal.hirerAddress, status });
+          emitDaemonEvent("hire_proposed", { id: proposal.messageId, from: proposal.hirerAddress, amount: proposal.priceEth, capability: proposal.capability });
 
           if (config.notifications.notify_on_hire_request) {
             await notifier.notifyHireRequest(proposal.messageId, proposal.hirerAddress, proposal.priceEth, proposal.capability);
@@ -1143,6 +1172,7 @@ export async function runDaemon(foreground = false): Promise<void> {
                   );
                   const hash = await userOps.submit(callData, config.wallet.contract_address);
                   log({ event: "http_accept_userop_submitted", id: proposal.messageId, hash });
+                  emitDaemonEvent("agreement_accepted", { id: proposal.agreementId, provider: config.wallet.contract_address });
                   if (config.notifications.notify_on_hire_accepted) {
                     await notifier.notifyHireAccepted(proposal.messageId, proposal.agreementId!);
                   }

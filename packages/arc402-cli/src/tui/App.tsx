@@ -6,6 +6,9 @@ import { Footer } from "./Footer";
 import { InputLine } from "./InputLine";
 import { useCommand } from "./useCommand";
 import { useChat } from "./useChat";
+import { useNotifications } from "./useNotifications";
+import { useDaemonEvents } from "./useDaemonEvents";
+import { Toast } from "./components/Toast";
 import { useScroll } from "./useScroll";
 import { useTerminalSize } from "./useTerminalSize";
 import { getBannerLines } from "../ui/banner";
@@ -53,6 +56,31 @@ export function App({ version, network, wallet, balance }: AppProps) {
     useScroll(viewportHeight);
 
   const [topCmds] = useState<string[]>(() => getTuiTopLevelCommands());
+
+  const { toasts, push: pushToast, dismiss } = useNotifications();
+
+  useDaemonEvents((type, data) => {
+    switch (type) {
+      case "hire_proposed":
+        pushToast(`◈ Hire received — ${String(data.from ?? "agent")} · ${String(data.amount ?? "?")} ETH`, "info");
+        appendLine(chalk.cyanBright(`  ◈ Hire received — Agreement #${String(data.id ?? "?")}`));
+        break;
+      case "agreement_accepted":
+        pushToast(`✓ Agreement #${String(data.id)} accepted`, "success");
+        break;
+      case "job_completed":
+        pushToast(`✓ Job complete — Agreement #${String(data.id)}`, "success");
+        appendLine(chalk.green(`  ✓ Job complete — Agreement #${String(data.id ?? "?")}`));
+        break;
+      case "job_failed":
+        pushToast(`✗ Job failed — Agreement #${String(data.id)} · ${String(data.reason ?? "unknown")}`, "error");
+        appendLine(chalk.red(`  ✗ Job failed — Agreement #${String(data.id ?? "?")}: ${String(data.reason ?? "")}`));
+        break;
+      case "security_threat":
+        pushToast(`✗ Security: ${String(data.category ?? "threat")} detected — Agreement #${String(data.agreementId)}`, "error");
+        break;
+    }
+  });
 
   const appendLine = useCallback((line: string) => {
     setOutputBuffer((prev) => [...prev, line]);
@@ -184,6 +212,15 @@ export function App({ version, network, wallet, balance }: AppProps) {
         isAutoScroll={isAutoScroll}
         viewportHeight={viewportHeight}
       />
+
+      {/* TOAST BAR — live daemon events */}
+      {toasts.length > 0 && (
+        <Box flexDirection="column">
+          {toasts.map((t) => (
+            <Toast key={t.id} toast={t} onDismiss={dismiss} />
+          ))}
+        </Box>
+      )}
 
       {/* FOOTER — fixed, input pinned */}
       <Footer>
