@@ -471,6 +471,203 @@ async function dispatchCliCommand(line: string): Promise<void> {
   }
 }
 
+async function buildSystemContext(options: DaemonCommerceClientOptions): Promise<string> {
+  let walletAddress = "unknown";
+  let trustScore = "unknown";
+  let agreementCount = 0;
+  let workroomStatus = "unknown";
+
+  try {
+    const wallet = await fetchDaemonWalletStatus(options);
+    walletAddress = wallet.wallet ?? "unknown";
+    const walletAny = wallet as unknown as Record<string, unknown>;
+    trustScore = String(walletAny["trustScore"] ?? walletAny["trust_score"] ?? "unknown");
+  } catch {
+    // ignore
+  }
+
+  try {
+    const workroom = await fetchDaemonWorkroomStatus(options);
+    workroomStatus = workroom.status ?? "unknown";
+  } catch {
+    // ignore
+  }
+
+  try {
+    const agr = await fetchDaemonAgreements(options);
+    agreementCount = agr.agreements.length;
+  } catch {
+    // ignore
+  }
+
+  return [
+    "You are operating as the ARC-402 Commerce Shell agent.",
+    `Wallet: ${walletAddress}`,
+    "Network: Base Mainnet",
+    `Active agreements: ${agreementCount}`,
+    `Workroom: ${workroomStatus}`,
+    `Trust score: ${trustScore}`,
+    "",
+    "You have access to these ARC-402 CLI tools via shell commands:",
+    "- arc402 hire <endpoint> --task \"<desc>\" --service-type <type> --max <price> --deadline <duration>",
+    "- arc402 accept <id>",
+    "- arc402 deliver <id>",
+    "- arc402 verify <id>",
+    "- arc402 discover [--capability <cap>] [--limit N]",
+    "- arc402 agreements [--as client|provider]",
+    "- arc402 workroom status",
+    "- arc402 compute hire <provider> --hours <n> --rate <wei>",
+    "- arc402 arena rounds --limit N",
+    "- arc402 arena squad list",
+    "",
+    "When asked to hire, discover, or check status — use these tools directly by outputting shell commands in a code block, then explaining what you did.",
+  ].join("\n");
+}
+
+async function executeDetectedToolCalls(output: string): Promise<void> {
+  // Find fenced code blocks containing arc402 commands
+  const fencePattern = /```(?:sh|bash|shell)?\n([\s\S]*?)```/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = fencePattern.exec(output)) !== null) {
+    const block = match[1];
+    const lines = block.split("\n").map((l) => l.trim()).filter((l) => l.startsWith("arc402 "));
+    for (const cmdLine of lines) {
+      // strip leading "arc402 " and dispatch
+      const sub = cmdLine.replace(/^arc402\s+/, "");
+      console.log(chalk.dim(`  > arc402 ${sub}`));
+      try {
+        await dispatchCliCommand(sub);
+      } catch (err) {
+        console.log(chalk.red(`  Error: ${err instanceof Error ? err.message : String(err)}`));
+      }
+    }
+  }
+}
+
+async function dispatchToHarness(
+  input: string,
+  context: string,
+  config: ChatRuntimeConfig,
+  _clientOptions: DaemonCommerceClientOptions
+): Promise<void> {
+  const harness = config.harness;
+
+  if (harness === "openclaw" || harness === "hermes") {
+    // Determine endpoint
+    let endpoint: string;
+    if (harness === "openclaw") {
+      // Try reading gateway URL from openclaw config
+      try {
+        const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, "utf8");
+        const ocConfig = JSON.parse(raw) as Record<string, unknown>;
+        const gatewayUrl =
+          (ocConfig["gateway"] as Record<string, unknown> | undefined)?.["url"] ??
+          ocConfig["gatewayUrl"] ??
+          ocConfig["baseUrl"];
+        endpoint = gatewayUrl ? String(gatewayUrl).replace(/\/$/, "") + "/v1/chat/completions" : `${config.daemonUrl}/v1/chat/completions`;
+      } catch {
+        endpoint = `${config.daemonUrl}/v1/chat/completions`;
+      }
+    } else {
+      endpoint = `${config.daemonUrl}/v1/chat/completions`;
+    }
+
+    const body = {
+      model: config.model ?? "claude-3-5-sonnet-latest",
+      stream: false,
+      messages: [
+        { role: "system", content: context },
+        { role: "user", content: input },
+      ],
+    };
+
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.log(chalk.yellow(`  Harness responded with HTTP ${res.status}: ${text || "(no body)"}`));
+        console.log(chalk.dim(`  Endpoint: ${endpoint}`));
+        return;
+      }
+
+      const json = await res.json() as Record<string, unknown>;
+      const content =
+        ((json["choices"] as Array<Record<string, unknown>> | undefined)?.[0]?.["message"] as Record<string, unknown> | undefined)?.["content"] ??
+        (json["content"] as string | undefined) ??
+        JSON.stringify(json);
+
+      console.log("\n" + String(content));
+      await executeDetectedToolCalls(String(content));
+    } catch (err) {
+      console.log(chalk.yellow(`  Could not reach ${harness} endpoint (${endpoint}).`));
+      console.log(chalk.dim(`  ${err instanceof Error ? err.message : String(err)}`));
+      if (harness === "openclaw") {
+        console.log(chalk.dim("  Hint: make sure OpenClaw gateway is running (openclaw gateway start)."));
+      }
+    }
+    return;
+  }
+
+  if (harness === "claude-code") {
+    if (!commandExists("claude")) {
+      console.log(chalk.yellow("  claude CLI not found. Install Claude Code to use this harness."));
+      return;
+    }
+    const prompt = `${context}\n\nUser request: ${input}`;
+    const tmpFile = path.join(os.tmpdir(), `arc402-chat-${Date.now()}.txt`);
+    try {
+      fs.writeFileSync(tmpFile, prompt, "utf8");
+      // Unset ANTHROPIC_API_KEY so OAuth (Max subscription) is used
+      const env = { ...process.env };
+      delete env["ANTHROPIC_API_KEY"];
+      const result = spawnSync(
+        "claude",
+        ["--print", "--permission-mode", "bypassPermissions"],
+        { input: prompt, encoding: "utf8", env, timeout: 120_000 }
+      );
+      const output = result.stdout ?? "";
+      const errOut = result.stderr ?? "";
+      if (output) {
+        console.log("\n" + output);
+        await executeDetectedToolCalls(output);
+      }
+      if (!output && errOut) {
+        console.log(chalk.yellow(`  claude stderr: ${errOut}`));
+      }
+    } finally {
+      try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+    }
+    return;
+  }
+
+  if (harness === "codex") {
+    if (!commandExists("codex")) {
+      console.log(chalk.yellow("  codex CLI not found. Install Codex CLI to use this harness."));
+      return;
+    }
+    const prompt = `${context}\n\nUser request: ${input}`;
+    const result = spawnSync("codex", ["exec", prompt], { encoding: "utf8", timeout: 120_000 });
+    const output = result.stdout ?? "";
+    const errOut = result.stderr ?? "";
+    if (output) {
+      console.log("\n" + output);
+      await executeDetectedToolCalls(output);
+    }
+    if (!output && errOut) {
+      console.log(chalk.yellow(`  codex stderr: ${errOut}`));
+    }
+    return;
+  }
+
+  console.log(chalk.yellow(`  Unknown harness: ${harness}. Run \`arc402 chat --setup\` to reconfigure.`));
+}
+
 function inferIntent(input: string): "status" | "agreements" | "workroom" | "setup" | "help" | "unknown" {
   const normalized = input.trim().toLowerCase();
   if (normalized === "help") return "help";
@@ -593,10 +790,19 @@ export function registerChatCommand(program: Command): void {
             case "workroom":
               await renderWorkroom(clientOptions);
               break;
-            default:
-              console.log(`  Chat is connected to a ${activeConfig.nodeMode} node and expects ${getHarnessLabel(activeConfig.harness)}.`);
-              console.log("  Use `status`, `agreements`, `workroom`, `setup`, or `/...` for direct CLI commands.");
+            default: {
+              // Natural language — dispatch to configured harness
+              const readiness = getHarnessReadiness(activeConfig.harness);
+              if (!readiness.ready) {
+                console.log(chalk.yellow(`  ${getHarnessLabel(activeConfig.harness)} harness is not ready: ${readiness.summary}`));
+                if (readiness.nextStep) console.log(chalk.dim(`  ${readiness.nextStep}`));
+                console.log(chalk.dim("  Use `setup` to reconfigure the harness, or `/...` for direct CLI commands."));
+              } else {
+                const context = await buildSystemContext(clientOptions);
+                await dispatchToHarness(trimmed, context, activeConfig, clientOptions);
+              }
               break;
+            }
           }
         } catch (err) {
           console.log(`  ${chalk.red(err instanceof Error ? err.message : String(err))}`);
