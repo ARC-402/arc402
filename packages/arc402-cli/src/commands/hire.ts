@@ -11,10 +11,8 @@ import { c } from '../ui/colors';
 import { startSpinner } from '../ui/spinner';
 import { renderTree, TreeItem } from '../ui/tree';
 import { formatAddress } from '../ui/format';
-import { resolveAgentEndpoint } from "../endpoint-notify";
 import { isTuiRenderMode } from "../tui/render-inline";
 import { printHireCard } from "../tui/command-renderers";
-import { interactiveHireTui } from "../tui/hire-interactive";
 
 const DEFAULT_REGISTRY_ADDRESS = "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865";
 
@@ -82,10 +80,8 @@ export function registerHireCommand(program: Command): void {
     .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
     .option("--json")
     .action(async (providerArg: string | undefined, opts) => {
-      // Interactive TUI hire flow when no provider given in TUI mode
       if (isTuiRenderMode() && !providerArg && !opts.agent) {
-        await interactiveHireTui();
-        return;
+        throw new Error("Interactive hire must be started from the TUI shell with `hire`.");
       }
 
       const config = loadConfig();
@@ -98,9 +94,9 @@ export function registerHireCommand(program: Command): void {
       const rpcProvider = new ethers.JsonRpcProvider(config.rpcUrl);
       const registryAddr = config.agentRegistryAddress ?? DEFAULT_REGISTRY_ADDRESS;
       const resolving = startSpinner(`Resolving provider: ${rawProvider}`);
-      opts.agent = await resolveProviderAddress(rawProvider, registryAddr, rpcProvider).catch(e => {
+      opts.agent = await resolveProviderAddress(rawProvider, registryAddr, rpcProvider).catch((e: Error) => {
         resolving.fail(`Could not resolve provider: ${e.message}`);
-        process.exit(1);
+        throw e;
       });
       resolving.succeed(`Provider: ${opts.agent}`);
       const client = new ServiceAgreementClient(config.serviceAgreementAddress, signer);
@@ -140,8 +136,7 @@ export function registerHireCommand(program: Command): void {
 
       // Pre-flight: check client !== provider (J2-03)
       if (address.toLowerCase() === opts.agent.toLowerCase()) {
-        console.error("Cannot hire yourself: client and provider addresses are the same.");
-        process.exit(1);
+        throw new Error("Cannot hire yourself: client and provider addresses are the same.");
       }
 
       // Pre-flight: check provider is registered in AgentRegistry (J2-02)
@@ -158,9 +153,7 @@ export function registerHireCommand(program: Command): void {
           isRegistered = await arCheck.isRegistered(opts.agent);
         } catch { /* assume registered if read fails */ }
         if (!isRegistered) {
-          console.error(`Provider ${opts.agent} is not registered in AgentRegistry.`);
-          console.error(`Verify the agent address is correct, or check the registry at ${agentRegistryAddress}.`);
-          process.exit(1);
+          throw new Error(`Provider ${opts.agent} is not registered in AgentRegistry. Verify the agent address or check ${agentRegistryAddress}.`);
         }
       }
 
@@ -177,11 +170,7 @@ export function registerHireCommand(program: Command): void {
           isAllowed = await saCheck.allowedTokens(token);
         } catch { isAllowed = true; /* assume allowed if read fails */ }
         if (!isAllowed) {
-          console.error(`Token ${token} is not allowed on this ServiceAgreement.`);
-          console.error(`Only the SA owner can allowlist tokens via:`);
-          console.error(`  cast send ${config.serviceAgreementAddress} "allowToken(address)" ${token}`);
-          console.error(`For ETH payments, use --token eth`);
-          process.exit(1);
+          throw new Error(`Token ${token} is not allowed on this ServiceAgreement. Allowlist it on ${config.serviceAgreementAddress} or use --token eth.`);
         }
       }
 
