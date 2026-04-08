@@ -1,5 +1,5 @@
 import React from "react";
-import { render } from "ink";
+import { render } from "../renderer/ink.js";
 import { ScreenManager } from "../renderer/index.js";
 import { App } from "./App";
 import fs from "fs";
