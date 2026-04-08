@@ -1,8 +1,6 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
 import prompts from "prompts";
 import readline from "readline";
 import { spawnSync } from "child_process";
@@ -11,16 +9,24 @@ import {
   fetchDaemonHealth,
   fetchDaemonWalletStatus,
   fetchDaemonWorkroomStatus,
-  inferDaemonNodeMode,
-  resolveChatDaemonTarget,
   resolveDaemonApiBaseUrl,
   type DaemonCommerceClientOptions,
   type DaemonNodeMode,
 } from "../commerce-client";
 import { configExists, loadConfig, saveConfig, type Arc402Config } from "../config";
-import { DAEMON_TOML, loadDaemonConfig } from "../daemon/config";
-
-type SupportedHarness = "openclaw" | "claude-code" | "codex" | "hermes";
+import { DAEMON_TOML } from "../daemon/config";
+import {
+  SUPPORTED_HARNESSES,
+  dispatchHarnessChat,
+  getHarnessLabel,
+  getHarnessReadiness,
+  loadDaemonHarnessDefault,
+  normalizeHarness,
+  resolveInitialChatRuntime,
+  type ChatRuntimeConfig,
+  type HarnessReadiness,
+  type SupportedHarness,
+} from "../chat/harness";
 
 type ChatOptions = {
   daemonUrl?: string;
@@ -32,22 +38,7 @@ type ChatOptions = {
 };
 
 type SavedChatConfig = NonNullable<Arc402Config["chat"]>;
-
-type ChatRuntimeConfig = {
-  daemonUrl: string;
-  nodeMode: DaemonNodeMode;
-  harness: SupportedHarness;
-  model?: string;
-};
-
-type HarnessReadiness = {
-  ready: boolean;
-  summary: string;
-  nextStep?: string;
-};
-
-const OPENCLAW_CONFIG_PATH = process.env.OPENCLAW_CONFIG || path.join(os.homedir(), ".openclaw", "openclaw.json");
-const SUPPORTED_HARNESSES: SupportedHarness[] = ["openclaw", "claude-code", "codex", "hermes"];
+type ResolvedChatRuntimeConfig = ChatRuntimeConfig & { harness: SupportedHarness };
 
 function parseTokens(input: string): string[] {
   const tokens: string[] = [];
@@ -103,62 +94,12 @@ function formatAgreementStatus(value: unknown): string {
   return raw.toUpperCase();
 }
 
-function normalizeHarness(value?: string): SupportedHarness | undefined {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized) return undefined;
-  if (normalized === "openclaw") return "openclaw";
-  if (normalized === "claude" || normalized === "claude-code") return "claude-code";
-  if (normalized === "codex") return "codex";
-  if (normalized === "hermes") return "hermes";
-  return undefined;
-}
-
-function getHarnessLabel(harness: SupportedHarness): string {
-  switch (harness) {
-    case "openclaw":
-      return "OpenClaw";
-    case "claude-code":
-      return "Claude Code";
-    case "codex":
-      return "Codex";
-    case "hermes":
-      return "Hermes";
-  }
-}
 
 function commandExists(command: string): boolean {
   const result = spawnSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" });
   return result.status === 0;
 }
 
-function getHarnessReadiness(harness: SupportedHarness): HarnessReadiness {
-  switch (harness) {
-    case "openclaw":
-      if (fs.existsSync(OPENCLAW_CONFIG_PATH)) {
-        return {
-          ready: true,
-          summary: `gateway config found at ${OPENCLAW_CONFIG_PATH}`,
-        };
-      }
-      return {
-        ready: false,
-        summary: `missing ${OPENCLAW_CONFIG_PATH}`,
-        nextStep: "Run OpenClaw locally or create ~/.openclaw/openclaw.json before relying on OpenClaw-backed execution.",
-      };
-    case "claude-code":
-      return commandExists("claude")
-        ? { ready: true, summary: "claude CLI found on PATH" }
-        : { ready: false, summary: "claude CLI not found on PATH", nextStep: "Install Claude Code or pick a different harness." };
-    case "codex":
-      return commandExists("codex")
-        ? { ready: true, summary: "codex CLI found on PATH" }
-        : { ready: false, summary: "codex CLI not found on PATH", nextStep: "Install Codex CLI or pick a different harness." };
-    case "hermes":
-      return commandExists("hermes")
-        ? { ready: true, summary: "hermes CLI found on PATH" }
-        : { ready: false, summary: "hermes CLI not found on PATH", nextStep: "Run `arc402 hermes init` or install Hermes before using this harness." };
-  }
-}
 
 async function testDaemonConnection(options: DaemonCommerceClientOptions): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
@@ -177,46 +118,18 @@ function loadSavedChatConfig(): SavedChatConfig | undefined {
   return loadConfig().chat;
 }
 
-function loadDaemonHarnessDefault(): SupportedHarness | undefined {
-  if (!fs.existsSync(DAEMON_TOML)) return undefined;
-  try {
-    return normalizeHarness(loadDaemonConfig().worker?.agent_type);
-  } catch {
-    return undefined;
-  }
-}
-
 function resolveInitialRuntimeConfig(opts: ChatOptions): {
-  config?: ChatRuntimeConfig;
+  config?: ResolvedChatRuntimeConfig;
   missingHarness: boolean;
 } {
-  const saved = loadSavedChatConfig();
-  const daemonHarness = loadDaemonHarnessDefault();
-  const explicitNodeMode = opts.local ? "local" : opts.remote ? "remote" : undefined;
-  const target = resolveChatDaemonTarget({
-    explicitBaseUrl: opts.daemonUrl,
-    explicitNodeMode,
-  });
-  const harness = normalizeHarness(opts.harness) ?? normalizeHarness(saved?.harness) ?? daemonHarness;
-  const model = opts.model?.trim() || saved?.model?.trim() || undefined;
-  const nodeMode = explicitNodeMode ?? saved?.nodeMode ?? target.mode ?? inferDaemonNodeMode(target.baseUrl);
-
-  if (!harness) {
-    return { missingHarness: true };
-  }
-
+  const resolved = resolveInitialChatRuntime(opts);
   return {
-    missingHarness: false,
-    config: {
-      daemonUrl: target.baseUrl,
-      nodeMode,
-      harness,
-      model,
-    },
+    missingHarness: resolved.missingHarness,
+    config: resolved.config.harness ? (resolved.config as ResolvedChatRuntimeConfig) : undefined,
   };
 }
 
-async function runGuidedSetup(seed?: Partial<ChatRuntimeConfig>): Promise<ChatRuntimeConfig | null> {
+async function runGuidedSetup(seed?: Partial<ResolvedChatRuntimeConfig>): Promise<ResolvedChatRuntimeConfig | null> {
   const saved = loadSavedChatConfig();
   const daemonHarness = loadDaemonHarnessDefault();
   const recommendedLocalUrl = resolveDaemonApiBaseUrl();
@@ -289,7 +202,7 @@ async function runGuidedSetup(seed?: Partial<ChatRuntimeConfig>): Promise<ChatRu
     return null;
   }
 
-  const runtime: ChatRuntimeConfig = {
+  const runtime: ResolvedChatRuntimeConfig = {
     nodeMode: setup.nodeMode,
     daemonUrl: String(setup.daemonUrl).trim().replace(/\/$/, ""),
     harness,
@@ -339,14 +252,14 @@ async function runGuidedSetup(seed?: Partial<ChatRuntimeConfig>): Promise<ChatRu
   return runtime;
 }
 
-function describeNodeMode(config: ChatRuntimeConfig): string {
+function describeNodeMode(config: ResolvedChatRuntimeConfig): string {
   if (config.nodeMode === "local") {
     return `Local node: chat will read daemon state from ${config.daemonUrl} on this machine.`;
   }
   return `Remote node: chat will read daemon state from ${config.daemonUrl} over HTTP instead of assuming a local daemon.`;
 }
 
-function printBanner(config: ChatRuntimeConfig): void {
+function printBanner(config: ResolvedChatRuntimeConfig): void {
   console.log(chalk.cyanBright("◈"), chalk.bold("ARC-402 Commerce Shell"));
   console.log(chalk.dim(`Node: ${config.nodeMode}  Endpoint: ${config.daemonUrl}`));
   console.log(
@@ -548,130 +461,26 @@ async function executeDetectedToolCalls(output: string): Promise<void> {
 async function dispatchToHarness(
   input: string,
   context: string,
-  config: ChatRuntimeConfig,
+  config: ResolvedChatRuntimeConfig,
   _clientOptions: DaemonCommerceClientOptions
 ): Promise<void> {
-  const harness = config.harness;
-
-  if (harness === "openclaw" || harness === "hermes") {
-    // Determine endpoint
-    let endpoint: string;
-    if (harness === "openclaw") {
-      // Resolve openclaw gateway endpoint
-      try {
-        const raw = fs.readFileSync(OPENCLAW_CONFIG_PATH, "utf8");
-        const ocConfig = JSON.parse(raw) as Record<string, unknown>;
-        const gatewayConfig = ocConfig["gateway"] as Record<string, unknown> | undefined;
-        
-        // Resolve gateway URL: prioritize explicit url, fall back to localhost + port
-        let gatewayUrl = gatewayConfig?.["url"] as string | undefined;
-        if (!gatewayUrl || gatewayUrl === "lan" || gatewayUrl === "local") {
-          // Use localhost + port from config
-          const port = gatewayConfig?.["port"] ?? 18789;
-          gatewayUrl = `http://127.0.0.1:${port}`;
-        }
-        endpoint = gatewayUrl.replace(/\/$/, "") + "/v1/chat/completions";
-      } catch {
-        // Fallback: try default localhost:18789
-        endpoint = "http://127.0.0.1:18789/v1/chat/completions";
-      }
-    } else {
-      endpoint = `${config.daemonUrl}/v1/chat/completions`;
+  try {
+    const output = await dispatchHarnessChat({
+      harness: config.harness,
+      message: input,
+      model: config.model,
+      systemPrompt: context,
+      daemonUrl: config.daemonUrl,
+    });
+    if (!output.trim()) return;
+    console.log("\n" + output);
+    await executeDetectedToolCalls(output);
+  } catch (err) {
+    console.log(chalk.yellow(`  ${err instanceof Error ? err.message : String(err)}`));
+    if (config.harness === "openclaw") {
+      console.log(chalk.dim("  Hint: make sure OpenClaw gateway is running (openclaw gateway start)."));
     }
-
-    const body = {
-      model: config.model ?? "claude-3-5-sonnet-latest",
-      stream: false,
-      messages: [
-        { role: "system", content: context },
-        { role: "user", content: input },
-      ],
-    };
-
-    try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        console.log(chalk.yellow(`  Harness responded with HTTP ${res.status}: ${text || "(no body)"}`));
-        console.log(chalk.dim(`  Endpoint: ${endpoint}`));
-        return;
-      }
-
-      const json = await res.json() as Record<string, unknown>;
-      const content =
-        ((json["choices"] as Array<Record<string, unknown>> | undefined)?.[0]?.["message"] as Record<string, unknown> | undefined)?.["content"] ??
-        (json["content"] as string | undefined) ??
-        JSON.stringify(json);
-
-      console.log("\n" + String(content));
-      await executeDetectedToolCalls(String(content));
-    } catch (err) {
-      console.log(chalk.yellow(`  Could not reach ${harness} endpoint (${endpoint}).`));
-      console.log(chalk.dim(`  ${err instanceof Error ? err.message : String(err)}`));
-      if (harness === "openclaw") {
-        console.log(chalk.dim("  Hint: make sure OpenClaw gateway is running (openclaw gateway start)."));
-      }
-    }
-    return;
   }
-
-  if (harness === "claude-code") {
-    if (!commandExists("claude")) {
-      console.log(chalk.yellow("  claude CLI not found. Install Claude Code to use this harness."));
-      return;
-    }
-    const prompt = `${context}\n\nUser request: ${input}`;
-    const tmpFile = path.join(os.tmpdir(), `arc402-chat-${Date.now()}.txt`);
-    try {
-      fs.writeFileSync(tmpFile, prompt, "utf8");
-      // Unset ANTHROPIC_API_KEY so OAuth (Max subscription) is used
-      const env = { ...process.env };
-      delete env["ANTHROPIC_API_KEY"];
-      const result = spawnSync(
-        "claude",
-        ["--print", "--permission-mode", "bypassPermissions"],
-        { input: prompt, encoding: "utf8", env, timeout: 120_000 }
-      );
-      const output = result.stdout ?? "";
-      const errOut = result.stderr ?? "";
-      if (output) {
-        console.log("\n" + output);
-        await executeDetectedToolCalls(output);
-      }
-      if (!output && errOut) {
-        console.log(chalk.yellow(`  claude stderr: ${errOut}`));
-      }
-    } finally {
-      try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-    }
-    return;
-  }
-
-  if (harness === "codex") {
-    if (!commandExists("codex")) {
-      console.log(chalk.yellow("  codex CLI not found. Install Codex CLI to use this harness."));
-      return;
-    }
-    const prompt = `${context}\n\nUser request: ${input}`;
-    const result = spawnSync("codex", ["exec", prompt], { encoding: "utf8", timeout: 120_000 });
-    const output = result.stdout ?? "";
-    const errOut = result.stderr ?? "";
-    if (output) {
-      console.log("\n" + output);
-      await executeDetectedToolCalls(output);
-    }
-    if (!output && errOut) {
-      console.log(chalk.yellow(`  codex stderr: ${errOut}`));
-    }
-    return;
-  }
-
-  console.log(chalk.yellow(`  Unknown harness: ${harness}. Run \`arc402 chat --setup\` to reconfigure.`));
 }
 
 function inferIntent(input: string): "status" | "agreements" | "workroom" | "setup" | "help" | "unknown" {
@@ -703,7 +512,7 @@ export function registerChatCommand(program: Command): void {
       }
 
       let state = resolveInitialRuntimeConfig(opts);
-      let runtimeConfig: ChatRuntimeConfig | null | undefined = state.config;
+      let runtimeConfig: ResolvedChatRuntimeConfig | null | undefined = state.config;
 
       if (opts.setup || state.missingHarness) {
         if (state.missingHarness) {
@@ -721,7 +530,7 @@ export function registerChatCommand(program: Command): void {
         throw new Error("Chat setup is incomplete. Run `arc402 chat --setup`.");
       }
 
-      let activeConfig: ChatRuntimeConfig = runtimeConfig;
+      let activeConfig: ResolvedChatRuntimeConfig = runtimeConfig;
       const clientOptions: DaemonCommerceClientOptions = { baseUrl: activeConfig.daemonUrl };
 
       if (activeConfig.nodeMode === "local" && !fs.existsSync(DAEMON_TOML)) {

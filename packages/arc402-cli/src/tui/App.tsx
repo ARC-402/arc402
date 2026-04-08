@@ -9,6 +9,7 @@ import { useChat } from "./useChat";
 import { useNotifications } from "./useNotifications";
 import { useDaemonEvents } from "./useDaemonEvents";
 import { Toast } from "./components/Toast";
+import { ChatHarnessSelector } from "./components/ChatHarnessSelector";
 import { useScroll } from "./useScroll";
 import { getBannerLines } from "../ui/banner";
 import { executeKernelForPayload, getTuiTopLevelCommands } from "./kernel";
@@ -40,7 +41,19 @@ export function App({ version, network, wallet, balance }: AppProps) {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const { execute, isRunning } = useCommand();
-  const { send, isSending } = useChat();
+  const {
+    send,
+    isSending,
+    isChatMode,
+    activeHarnessLabel,
+    harnessChoices,
+    selectedHarnessIndex,
+    selectorVisible,
+    beginChat,
+    cancelSelector,
+    moveSelection,
+    confirmSelection,
+  } = useChat();
 
   // Measure viewport height from actual terminal size and real header line count.
   // The separator Box rendered between Header and Viewport adds 1 row.
@@ -144,10 +157,13 @@ export function App({ version, network, wallet, balance }: AppProps) {
         }
         lines.push(chalk.cyanBright("Chat"));
         lines.push(
-          "  " + chalk.white("/chat <message>".padEnd(28)) + chalk.dim("Route message to OpenClaw gateway")
+          "  " + chalk.white("/chat <message>".padEnd(28)) + chalk.dim("Route message through selected/default harness")
         );
         lines.push(
-          "  " + chalk.white("chat".padEnd(28)) + chalk.dim("Open Commerce REPL")
+          "  " + chalk.white("/chat <harness> <message>".padEnd(28)) + chalk.dim("Override harness for one message")
+        );
+        lines.push(
+          "  " + chalk.white("chat".padEnd(28)) + chalk.dim("Enter Commerce Shell chat mode")
         );
         lines.push("");
         for (const l of lines) appendLine(l);
@@ -155,15 +171,30 @@ export function App({ version, network, wallet, balance }: AppProps) {
         return;
       }
 
-      // ── /chat prefix or unknown command → chat ─────────────────────────────
-      const isExplicitChat = input.startsWith("/chat ");
-      const isChatInput =
-        isExplicitChat || (!allKnown.includes(firstWord) && firstWord !== "");
+      // ── chat mode / harness-aware shell ───────────────────────────────────
+      if (input === "chat") {
+        beginChat(appendLine);
+        appendLine("");
+        setIsProcessing(false);
+        return;
+      }
+
+      const isExplicitChat = input.startsWith("/chat");
+      const isChatInput = isExplicitChat || (isChatMode && !allKnown.includes(firstWord));
 
       if (isChatInput) {
-        const msg = isExplicitChat ? input.slice(6).trim() : input;
-        if (msg) {
-          await send(msg, appendLine);
+        const parts = input.split(/\s+/);
+        const maybeHarness = isExplicitChat ? parts[1] : undefined;
+        const harnessOverride = isExplicitChat && ["openclaw", "claude-code", "claude", "codex", "hermes"].includes(maybeHarness ?? "")
+          ? maybeHarness
+          : undefined;
+        const msg = isExplicitChat
+          ? input.slice(harnessOverride ? `/chat ${maybeHarness}`.length : 5).trim()
+          : input;
+        if (!msg && selectorVisible) {
+          appendLine(chalk.yellow("  ⚠ Choose a harness first, then send a message."));
+        } else if (msg) {
+          await send(msg, appendLine, harnessOverride);
         }
         appendLine("");
         setIsProcessing(false);
@@ -223,7 +254,21 @@ export function App({ version, network, wallet, balance }: AppProps) {
 
       {/* FOOTER — fixed, input pinned */}
       <Footer>
-        <InputLine onSubmit={handleCommand} isDisabled={isDisabled} />
+        {selectorVisible && (
+          <ChatHarnessSelector
+            choices={harnessChoices}
+            selectedIndex={selectedHarnessIndex}
+            onMove={moveSelection}
+            onConfirm={() => confirmSelection(appendLine)}
+            onCancel={cancelSelector}
+          />
+        )}
+        {isChatMode && (
+          <Box marginLeft={2}>
+            <Text dimColor>{`chat mode${activeHarnessLabel ? ` · harness: ${activeHarnessLabel}` : " · harness: choose one"}`}</Text>
+          </Box>
+        )}
+        <InputLine onSubmit={handleCommand} isDisabled={isDisabled || selectorVisible} />
       </Footer>
     </Box>
   );

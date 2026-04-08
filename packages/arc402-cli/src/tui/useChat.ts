@@ -1,131 +1,145 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import chalk from "chalk";
-import fs from "fs";
-import path from "path";
-import os from "os";
-
-const c = { failure: "✗" };
-
-function resolveGatewayEndpoint(): { url: string; token?: string } {
-  try {
-    const configPath = path.join(os.homedir(), ".openclaw", "openclaw.json");
-    const raw = fs.readFileSync(configPath, "utf-8");
-    const config = JSON.parse(raw) as Record<string, unknown>;
-    const gateway = config["gateway"] as Record<string, unknown> | undefined;
-    const port = (gateway?.["port"] as number | undefined) ?? 18789;
-    const token = (gateway?.["auth"] as Record<string, unknown> | undefined)?.["token"] as string | undefined;
-    return {
-      url: `http://127.0.0.1:${port}/v1/chat/completions`,
-      token,
-    };
-  } catch {
-    return { url: "http://127.0.0.1:18789/v1/chat/completions" };
-  }
-}
+import {
+  dispatchHarnessChat,
+  getHarnessChoices,
+  getHarnessLabel,
+  normalizeHarness,
+  persistChatHarnessSelection,
+  resolveInitialChatRuntime,
+  type ChatRuntimeConfig,
+  type HarnessChoice,
+  type SupportedHarness,
+} from "../chat/harness.js";
 
 interface UseChatResult {
-  send: (message: string, onLine: (line: string) => void) => Promise<void>;
   isSending: boolean;
+  isChatMode: boolean;
+  activeHarnessLabel?: string;
+  harnessChoices: HarnessChoice[];
+  selectedHarnessIndex: number;
+  selectorVisible: boolean;
+  beginChat: (onLine: (line: string) => void, requestedHarness?: string) => void;
+  cancelSelector: () => void;
+  moveSelection: (delta: number) => void;
+  confirmSelection: (onLine: (line: string) => void) => void;
+  send: (message: string, onLine: (line: string) => void, harnessOverride?: string) => Promise<void>;
 }
 
-/**
- * Sends messages to the OpenClaw gateway and streams responses
- * line-by-line into the viewport buffer via onLine callback.
- */
 export function useChat(): UseChatResult {
+  const initial = useMemo(() => resolveInitialChatRuntime(), []);
+  const [runtime, setRuntime] = useState<ChatRuntimeConfig>(initial.config);
   const [isSending, setIsSending] = useState(false);
+  const [isChatMode, setIsChatMode] = useState(false);
+  const [selectorVisible, setSelectorVisible] = useState<boolean>(initial.missingHarness || !initial.config.harness);
+  const [selectionIndex, setSelectionIndex] = useState(0);
+  const [pendingHarness, setPendingHarness] = useState<SupportedHarness | undefined>(undefined);
 
-  const send = useCallback(
-    async (message: string, onLine: (line: string) => void): Promise<void> => {
-      setIsSending(true);
-      const trimmed = message.trim().slice(0, 10000);
+  const harnessChoices = useMemo(() => getHarnessChoices(), []);
 
-      // Show thinking placeholder
-      onLine(chalk.dim(" ◈ ") + chalk.dim("thinking..."));
+  const activateHarness = useCallback((harness: SupportedHarness, onLine: (line: string) => void) => {
+    const nextRuntime = { ...runtime, harness };
+    setRuntime(nextRuntime);
+    persistChatHarnessSelection(nextRuntime);
+    setSelectorVisible(false);
+    setPendingHarness(undefined);
+    setIsChatMode(true);
+    onLine(chalk.cyanBright(`  ◈ Commerce Shell ready · Harness: ${getHarnessLabel(harness)}`));
+  }, [runtime]);
 
-      const { url: gatewayUrl, token: gatewayToken } = resolveGatewayEndpoint();
-      let res: Response;
-      try {
-        const headers: Record<string, string> = { "Content-Type": "application/json" };
-        if (gatewayToken) headers["Authorization"] = `Bearer ${gatewayToken}`;
-        res = await fetch(gatewayUrl, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            model: "claude-sonnet-4-6",
-            stream: true,
-            messages: [{ role: "user", content: trimmed }],
-          }),
-          signal: AbortSignal.timeout(30000),
-        });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        const isDown =
-          msg.includes("ECONNREFUSED") ||
-          msg.includes("fetch failed") ||
-          msg.includes("ENOTFOUND") ||
-          msg.includes("UND_ERR_SOCKET");
-        if (isDown) {
-          onLine(
-            " " +
-              chalk.yellow("⚠") +
-              " " +
-              chalk.dim("OpenClaw gateway not running. Start with: ") +
-              chalk.white("openclaw gateway start")
-          );
-        } else {
-          onLine(` ${c.failure} ${chalk.red(msg)}`);
-        }
-        setIsSending(false);
-        return;
+  const beginChat = useCallback((onLine: (line: string) => void, requestedHarness?: string) => {
+    const explicit = normalizeHarness(requestedHarness);
+    if (explicit) {
+      activateHarness(explicit, onLine);
+      return;
+    }
+    setIsChatMode(true);
+    if (runtime.harness) {
+      onLine(chalk.cyanBright(`  ◈ Commerce Shell ready · Harness: ${getHarnessLabel(runtime.harness)}`));
+      return;
+    }
+    setSelectorVisible(true);
+    onLine(chalk.yellow("  ⚠ No chat harness selected yet. Choose one below."));
+  }, [activateHarness, runtime.harness]);
+
+  const cancelSelector = useCallback(() => {
+    setSelectorVisible(false);
+    setPendingHarness(undefined);
+  }, []);
+
+  const moveSelection = useCallback((delta: number) => {
+    setSelectionIndex((current) => {
+      const next = current + delta;
+      return Math.max(0, Math.min(harnessChoices.length - 1, next));
+    });
+  }, [harnessChoices.length]);
+
+  const confirmSelection = useCallback((onLine: (line: string) => void) => {
+    const chosen = pendingHarness ?? harnessChoices[selectionIndex]?.harness;
+    if (!chosen) return;
+    activateHarness(chosen, onLine);
+  }, [activateHarness, harnessChoices, pendingHarness, selectionIndex]);
+
+  const send = useCallback(async (message: string, onLine: (line: string) => void, harnessOverride?: string) => {
+    const trimmed = message.trim().slice(0, 10000);
+    if (!trimmed) return;
+
+    const explicit = normalizeHarness(harnessOverride);
+    if (explicit) {
+      setPendingHarness(undefined);
+      const nextRuntime = { ...runtime, harness: explicit };
+      setRuntime(nextRuntime);
+      persistChatHarnessSelection(nextRuntime);
+    }
+    const harness = explicit ?? runtime.harness;
+    if (!harness) {
+      setIsChatMode(true);
+      setSelectorVisible(true);
+      onLine(chalk.yellow("  ⚠ Choose a harness before sending chat."));
+      return;
+    }
+
+    setIsSending(true);
+    setIsChatMode(true);
+    onLine(chalk.dim(`  ◈ ${getHarnessLabel(harness)} thinking...`));
+
+    try {
+      const output = await dispatchHarnessChat({
+        harness,
+        message: trimmed,
+        model: runtime.model,
+        daemonUrl: runtime.daemonUrl,
+      });
+      for (const line of output.split(/\r?\n/)) {
+        if (line.trim()) onLine(chalk.white(`  ◈ ${line}`));
       }
-
-      if (!res.body) {
-        onLine(chalk.dim(" ◈ ") + chalk.white("(empty response)"));
-        setIsSending(false);
-        return;
+      const nextRuntime = explicit ? { ...runtime, harness: explicit } : runtime;
+      if (explicit) {
+        persistChatHarnessSelection(nextRuntime);
       }
-
-      const flushLine = (line: string): void => {
-        // Unwrap SSE data lines
-        if (line.startsWith("data: ")) {
-          line = line.slice(6);
-          if (line === "[DONE]") return;
-          try {
-            const j = JSON.parse(line) as {
-              text?: string;
-              content?: string;
-              delta?: { text?: string };
-            };
-            line = j.text ?? j.content ?? j.delta?.text ?? line;
-          } catch {
-            /* use raw */
-          }
-        }
-        if (line.trim()) {
-          onLine(chalk.dim(" ◈ ") + chalk.white(line));
-        }
-      };
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) flushLine(line);
+      setRuntime(nextRuntime);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onLine(chalk.red(`  ✗ ${msg}`));
+      if (harness === "openclaw") {
+        onLine(chalk.dim("  Hint: make sure OpenClaw gateway is running (openclaw gateway start)."));
       }
-
-      if (buffer.trim()) flushLine(buffer);
-
+    } finally {
       setIsSending(false);
-    },
-    []
-  );
+    }
+  }, [runtime]);
 
-  return { send, isSending };
+  return {
+    isSending,
+    isChatMode,
+    activeHarnessLabel: runtime.harness ? getHarnessLabel(runtime.harness) : undefined,
+    harnessChoices,
+    selectedHarnessIndex: selectionIndex,
+    selectorVisible,
+    beginChat,
+    cancelSelector,
+    moveSelection,
+    confirmSelection,
+    send,
+  };
 }
