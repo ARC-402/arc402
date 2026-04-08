@@ -3,6 +3,10 @@ import { Box, Text } from "../renderer/index.js";
 import type { KernelPayload } from "./kernel-payload";
 import { KernelPayloadRenderer } from "./KernelPayloadRenderer";
 
+function stripAnsi(text: string): string {
+  return text.replace(/\u001B\[[0-9;]*m/g, "");
+}
+
 export type ViewportEntry = string | KernelPayload;
 
 interface ViewportProps {
@@ -39,30 +43,29 @@ export function Viewport({ lines, scrollOffset, isAutoScroll, viewportHeight }: 
   }
 
   const visibleEntries = lines.slice(startIdx, endIdx);
-
-  // Pad with empty strings if fewer than viewportHeight string entries
-  const stringCount = visibleEntries.filter((e) => typeof e === "string").length;
-  const padCount = Math.max(0, viewportHeight - stringCount - (visibleEntries.length - stringCount));
+  const padCount = Math.max(0, viewportHeight - visibleEntries.length);
   const paddedEntries: ViewportEntry[] = [
-    ...Array<string>(padCount).fill(""),
+    ...Array<ViewportEntry>(padCount).fill(""),
     ...visibleEntries,
   ];
 
   const canScrollDown = scrollOffset > 0;
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
         {paddedEntries.map((entry, i) =>
           typeof entry === "string" ? (
-            <Text key={i}>{entry}</Text>
+            <Text key={i}>{stripAnsi(entry)}</Text>
           ) : (
-            <KernelPayloadRenderer key={i} payload={entry} />
+            <Box key={i} flexDirection="column" marginBottom={1}>
+              <KernelPayloadRenderer payload={entry} />
+            </Box>
           )
         )}
       </Box>
       {canScrollDown && !isAutoScroll && (
-        <Box justifyContent="flex-end">
+        <Box justifyContent="flex-end" flexShrink={0}>
           <Text dimColor>↓ more</Text>
         </Box>
       )}

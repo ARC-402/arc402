@@ -12,8 +12,8 @@ interface ChatHarnessSelectorProps {
 
 export function ChatHarnessSelector({ choices, selectedIndex, onMove, onConfirm, onCancel }: ChatHarnessSelectorProps) {
   useInput((event) => {
-    if (event.key === "up") onMove(-1);
-    else if (event.key === "down") onMove(1);
+    if (event.key === "up" || event.key === "shift-tab") onMove(-1);
+    else if (event.key === "down" || event.key === "tab") onMove(1);
     else if (event.key === "enter") onConfirm();
     else if (event.key === "escape") onCancel();
   });
@@ -31,7 +31,7 @@ export function ChatHarnessSelector({ choices, selectedIndex, onMove, onConfirm,
           </Text>
         );
       })}
-      <Text dimColor>  ↑↓ select, Enter confirm, Esc cancel</Text>
+      <Text dimColor>  ↑↓ or Tab select, Enter confirm, Esc cancel</Text>
     </Box>
   );
 }

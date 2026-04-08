@@ -1,5 +1,4 @@
 import { useState, useCallback, useMemo } from "react";
-import chalk from "chalk";
 import {
   dispatchHarnessChat,
   getHarnessChoices,
@@ -44,7 +43,7 @@ export function useChat(): UseChatResult {
     setSelectorVisible(false);
     setPendingHarness(undefined);
     setIsChatMode(true);
-    onLine(chalk.cyanBright(`  ◈ Commerce Shell ready · Harness: ${getHarnessLabel(harness)}`));
+    onLine(`  ◈ Commerce Shell ready · Harness: ${getHarnessLabel(harness)}`);
   }, [runtime]);
 
   const beginChat = useCallback((onLine: (line: string) => void, requestedHarness?: string) => {
@@ -55,11 +54,11 @@ export function useChat(): UseChatResult {
     }
     setIsChatMode(true);
     if (runtime.harness) {
-      onLine(chalk.cyanBright(`  ◈ Commerce Shell ready · Harness: ${getHarnessLabel(runtime.harness)}`));
+      onLine(`  ◈ Commerce Shell ready · Harness: ${getHarnessLabel(runtime.harness)}`);
       return;
     }
     setSelectorVisible(true);
-    onLine(chalk.yellow("  ⚠ No chat harness selected yet. Choose one below."));
+    onLine("  ⚠ No chat harness selected yet. Choose one below.");
   }, [activateHarness, runtime.harness]);
 
   const cancelSelector = useCallback(() => {
@@ -95,13 +94,13 @@ export function useChat(): UseChatResult {
     if (!harness) {
       setIsChatMode(true);
       setSelectorVisible(true);
-      onLine(chalk.yellow("  ⚠ Choose a harness before sending chat."));
+      onLine("  ⚠ Choose a harness before sending chat.");
       return;
     }
 
     setIsSending(true);
     setIsChatMode(true);
-    onLine(chalk.dim(`  ◈ ${getHarnessLabel(harness)} thinking...`));
+    onLine(`  ◈ ${getHarnessLabel(harness)} thinking...`);
 
     try {
       const output = await dispatchHarnessChat({
@@ -111,7 +110,7 @@ export function useChat(): UseChatResult {
         daemonUrl: runtime.daemonUrl,
       });
       for (const line of output.split(/\r?\n/)) {
-        if (line.trim()) onLine(chalk.white(`  ◈ ${line}`));
+        if (line.trim()) onLine(`  ◈ ${line}`);
       }
       const nextRuntime = explicit ? { ...runtime, harness: explicit } : runtime;
       if (explicit) {
@@ -120,9 +119,12 @@ export function useChat(): UseChatResult {
       setRuntime(nextRuntime);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      onLine(chalk.red(`  ✗ ${msg}`));
+      onLine(`  ✗ ${msg}`);
       if (harness === "openclaw") {
-        onLine(chalk.dim("  Hint: make sure OpenClaw gateway is running (openclaw gateway start)."));
+        onLine("  Hint: make sure OpenClaw gateway is running (openclaw gateway start).");
+      }
+      if (harness === "hermes") {
+        onLine(`  Hint: make sure the ARC-402 daemon is reachable at ${runtime.daemonUrl}.`);
       }
     } finally {
       setIsSending(false);
