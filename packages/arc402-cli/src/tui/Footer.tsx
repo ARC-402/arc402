@@ -11,7 +11,7 @@ interface FooterProps {
  */
 export function Footer({ children }: FooterProps) {
   return (
-    <Box flexShrink={0}>
+    <Box flexDirection="column" flexShrink={0}>
       {children}
     </Box>
   );

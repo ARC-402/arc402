@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { Box, Text, useApp, useTerminalSize } from "../renderer/index.js";
+import { Box, Text, useApp, useInput, useTerminalSize } from "../renderer/index.js";
 import { Header } from "./Header";
 import { Viewport } from "./Viewport";
 import { Footer } from "./Footer";
@@ -217,6 +217,17 @@ export function App({ version, network, wallet, balance }: AppProps) {
     },
     [appendLine, appendEntry, execute, send, snapToBottom, topCmds, network, wallet, balance, exit]
   );
+
+  useInput((event) => {
+    if (selectorVisible) return;
+    if (event.key === "pgup") {
+      scrollUp(viewportHeight);
+    } else if (event.key === "pgdn") {
+      scrollDown(viewportHeight);
+    } else if (event.key === "ctrl-c") {
+      exit();
+    }
+  });
 
   const isDisabled = isProcessing || isRunning || isSending;
 

@@ -1,5 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
-import { InputSystem } from "../renderer/index.js";
+import { useState, useCallback } from "react";
 
 interface UseScrollResult {
   scrollOffset: number;
@@ -44,20 +43,6 @@ export function useScroll(viewportHeight: number): UseScrollResult {
   const snapToBottom = useCallback(() => {
     setScrollOffsetState(0);
   }, []);
-
-  // Wire page up/down to InputSystem
-  useEffect(() => {
-    const inputSystem = new InputSystem();
-    inputSystem.on('key', (event) => {
-      if (event.key === 'pgup') {
-        scrollUp(viewportHeight);
-      } else if (event.key === 'pgdn') {
-        scrollDown(viewportHeight);
-      }
-    });
-    inputSystem.start();
-    return () => inputSystem.stop();
-  }, [viewportHeight, scrollUp, scrollDown]);
 
   return {
     scrollOffset,

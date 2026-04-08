@@ -27,13 +27,22 @@ export interface RenderInstance {
 
 export function render(node: React.ReactElement, options: RenderOptions = {}): RenderInstance {
   const stdout = options.stdout ?? process.stdout;
-  const rows = options.rows ?? (stdout as NodeJS.WriteStream & { rows?: number }).rows ?? 24;
-  const cols = options.cols ?? (stdout as NodeJS.WriteStream & { columns?: number }).columns ?? 80;
 
-  let frontFrame: Frame = createFrame(rows, cols);
+  const getRows = () => options.rows ?? (stdout as NodeJS.WriteStream & { rows?: number }).rows ?? 24;
+  const getCols = () => options.cols ?? (stdout as NodeJS.WriteStream & { columns?: number }).columns ?? 80;
+
+  let frontFrame: Frame = createFrame(getRows(), getCols());
   const container: DOMNode = createNode('root');
 
   const { schedule } = createRenderLoop(() => {
+    const rows = getRows();
+    const cols = getCols();
+
+    if (frontFrame.length !== rows || (frontFrame[0]?.length ?? 0) !== cols) {
+      stdout.write('\x1b[2J\x1b[H');
+      frontFrame = createFrame(rows, cols);
+    }
+
     // 1. Build layout tree from DOM
     const layoutRoot = buildLayoutTree(container);
     // 2. Calculate Yoga layout

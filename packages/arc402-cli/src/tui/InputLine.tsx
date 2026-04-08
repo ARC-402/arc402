@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from "react";
-import { Box, Text, useInput } from "../renderer/index.js";
+import { Box, Text, useApp, useInput } from "../renderer/index.js";
 import { BUILTIN_CMDS, TUI_SUBCOMMANDS, TUI_TOP_LEVEL_COMMANDS } from "./command-catalog.js";
 import { CompletionDropdown } from "./components/CompletionDropdown.js";
 
@@ -19,6 +19,7 @@ const SUB_MAP = new Map(Object.entries(TUI_SUBCOMMANDS));
  * - Driven by renderer runtime input, so arrow keys and completion stay coherent
  */
 export function InputLine({ onSubmit, isDisabled = false }: InputLineProps) {
+  const { exit } = useApp();
   const [value, setValue] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
   const [history, setHistory] = useState<string[]>([]);
@@ -145,30 +146,33 @@ export function InputLine({ onSubmit, isDisabled = false }: InputLineProps) {
 
     if (event.key === 'tab') {
       if (completions.length === 0) return;
-      if (completions.length === 1) {
-        handleChange(completions[0] + ' ');
+      if (!dropdownVisible) {
+        setDropdownVisible(true);
         return;
       }
-      if (dropdownVisible) {
+      const nextIdx = completionIdx + 1 >= completions.length ? 0 : completionIdx + 1;
+      setCompletionIdx(nextIdx);
+      return;
+    }
+
+    if (event.key === 'enter') {
+      if (dropdownVisible && completions.length > 0) {
         const selected = completions[completionIdx];
         if (selected) {
           handleChange(selected + ' ');
         }
         return;
       }
-      setDropdownVisible(true);
-      return;
-    }
-
-    if (event.key === 'enter') {
       handleSubmit(value);
       return;
     }
 
     if (event.key === 'backspace') {
+      if (cursorPos === 0) return;
       setValue((prev) => {
-        const newVal = prev.slice(0, -1);
-        setCursorPos(newVal.length);
+        const newVal = prev.slice(0, cursorPos - 1) + prev.slice(cursorPos);
+        const nextPos = cursorPos - 1;
+        setCursorPos(nextPos);
         const candidates = computeCompletions(newVal);
         setCompletions(candidates);
         setCompletionIdx(0);
@@ -178,12 +182,32 @@ export function InputLine({ onSubmit, isDisabled = false }: InputLineProps) {
       return;
     }
 
+    if (event.key === 'left') {
+      setCursorPos((prev) => Math.max(0, prev - 1));
+      return;
+    }
+
+    if (event.key === 'right') {
+      setCursorPos((prev) => Math.min(value.length, prev + 1));
+      return;
+    }
+
+    if (event.key === 'home' || event.key === 'ctrl-a') {
+      setCursorPos(0);
+      return;
+    }
+
+    if (event.key === 'end' || event.key === 'ctrl-e') {
+      setCursorPos(value.length);
+      return;
+    }
+
     if (event.key === 'delete') {
       return;
     }
 
     if (event.key === 'ctrl-c') {
-      process.exit(0);
+      exit();
       return;
     }
 
@@ -194,10 +218,10 @@ export function InputLine({ onSubmit, isDisabled = false }: InputLineProps) {
 
     if (event.key === 'ctrl-w') {
       setValue((prev) => {
-        const parts = prev.trimEnd().split(' ');
-        parts.pop();
-        const newVal = parts.join(' ') + (parts.length ? ' ' : '');
-        setCursorPos(newVal.length);
+        const left = prev.slice(0, cursorPos).replace(/\s+$/, '');
+        const cutTo = left.lastIndexOf(' ') + 1;
+        const newVal = prev.slice(0, cutTo) + prev.slice(cursorPos);
+        setCursorPos(cutTo);
         const candidates = computeCompletions(newVal);
         setCompletions(candidates);
         setCompletionIdx(0);
@@ -208,9 +232,11 @@ export function InputLine({ onSubmit, isDisabled = false }: InputLineProps) {
     }
 
     if (event.key === 'char' && event.char) {
+      const char = event.char;
       setValue((prev) => {
-        const newVal = prev + event.char;
-        setCursorPos(newVal.length);
+        const newVal = prev.slice(0, cursorPos) + char + prev.slice(cursorPos);
+        const nextPos = cursorPos + char.length;
+        setCursorPos(nextPos);
         const candidates = computeCompletions(newVal);
         setCompletions(candidates);
         setCompletionIdx(0);

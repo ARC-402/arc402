@@ -3,13 +3,15 @@ const ReactReconciler = require('react-reconciler');
 import { DOMNode, createNode, appendChild, removeChild, insertBefore } from './dom.js';
 import type { BoxStyle } from './layout.js';
 import type { Color } from './cell.js';
+import { COLORS } from './cell.js';
 
 // Props types
 interface BoxProps { style?: BoxStyle; children?: unknown; }
 interface TextProps {
-  color?: Color;
+  color?: Color | keyof typeof COLORS | string;
   bold?: boolean;
   dim?: boolean;
+  inverse?: boolean;
   italic?: boolean;
   underline?: boolean;
   children?: unknown;
@@ -22,6 +24,14 @@ export function setOnCommit(fn: () => void): void {
   onCommit = fn;
 }
 
+function resolveColor(color?: Color | keyof typeof COLORS | string): Color | null {
+  if (!color) return null;
+  if (typeof color === 'string') {
+    return COLORS[color as keyof typeof COLORS] ?? null;
+  }
+  return color;
+}
+
 function applyProps(node: DOMNode, props: Props): void {
   if (node.type === 'box') {
     const boxProps = props as BoxProps;
@@ -30,8 +40,10 @@ function applyProps(node: DOMNode, props: Props): void {
     }
   } else if (node.type === 'text') {
     const textProps = props as TextProps;
+    const fg = resolveColor(textProps.color);
     node.textStyle = {
-      fg: textProps.color ?? null,
+      fg: textProps.inverse ? null : fg,
+      bg: textProps.inverse ? (fg ?? COLORS.white) : null,
       bold: textProps.bold,
       dim: textProps.dim,
       italic: textProps.italic,

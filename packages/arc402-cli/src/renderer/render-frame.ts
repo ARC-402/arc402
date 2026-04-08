@@ -31,12 +31,13 @@ export function buildLayoutTree(dom: DOMNode): LayoutNode {
     return layout;
   }
 
-  // Text node: width = text length, height = 1
+  // Text node: preserve explicit newlines in intrinsic size.
   const flatText = flattenText(dom);
-  const textLen = flatText.length;
+  const textLines = flatText.split('\n');
+  const textWidth = textLines.reduce((max, line) => Math.max(max, line.length), 0);
   return createLayoutNode({
-    width: textLen || 1,
-    height: textLen > 0 ? 1 : 0,
+    width: textWidth || 1,
+    height: flatText.length > 0 ? Math.max(1, textLines.length) : 0,
   });
 }
 
@@ -68,6 +69,12 @@ function renderNode(dom: DOMNode, layout: LayoutNode, frame: Frame, inherited: T
   const chars = collectStyledChars(dom, inherited);
   let cx = 0, cy = 0;
   for (const { char, style } of chars) {
+    if (char === '\n') {
+      cx = 0;
+      cy++;
+      if (cy >= height) break;
+      continue;
+    }
     if (cx >= width) { cx = 0; cy++; }
     if (cy >= height) break;
     const row = Math.floor(y + cy);
