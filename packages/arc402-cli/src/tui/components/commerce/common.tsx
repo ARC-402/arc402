@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Text } from "../../../renderer/index.js";
+import { Box, Text, useTerminalSize } from "../../../renderer/index.js";
 
 export type CommerceTone = "neutral" | "info" | "success" | "warning" | "danger" | "muted";
 
@@ -51,6 +51,9 @@ export interface CommerceCardProps {
  * - muted metadata, white primary values, deliberate spacing between blocks
  */
 export function CommerceCard({ eyebrow, title, subtitle, status, footer, children }: CommerceCardProps) {
+  const { columns } = useTerminalSize();
+  const ruleWidth = Math.max(16, Math.min(60, columns - 4));
+
   return (
     <Box flexDirection="column">
       {eyebrow ? (
@@ -64,7 +67,7 @@ export function CommerceCard({ eyebrow, title, subtitle, status, footer, childre
         {status ? <StatusPill {...status} /> : null}
       </Text>
       {subtitle ? <Text dimColor>{subtitle}</Text> : null}
-      <Text dimColor>{"─".repeat(60)}</Text>
+      <Text dimColor>{"─".repeat(ruleWidth)}</Text>
       <Box flexDirection="column" marginTop={1}>
         {children}
       </Box>
@@ -84,12 +87,15 @@ export interface DetailRowProps {
 }
 
 export function DetailRow({ label, value, tone = "neutral" }: DetailRowProps) {
+  const { columns } = useTerminalSize();
+  const labelWidth = columns < 72 ? 12 : 16;
+
   return (
     <Box>
-      <Box width={16}>
+      <Box width={labelWidth} flexShrink={0}>
         <Text dimColor>{label}</Text>
       </Box>
-      <Box flexGrow={1}>
+      <Box flexGrow={1} flexShrink={1}>
         {typeof value === "string" ? <Text color={TONE_COLOR[tone]}>{value}</Text> : value}
       </Box>
     </Box>

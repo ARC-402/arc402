@@ -1,5 +1,5 @@
 import React from "react";
-import { Box, Text } from "../renderer/index.js";
+import { Box, Text, useTerminalSize } from "../renderer/index.js";
 import { getBannerLines } from "../ui/banner";
 
 interface HeaderProps {
@@ -18,10 +18,11 @@ export const Header = React.memo(function Header({
   wallet,
   balance,
 }: HeaderProps) {
-  const bannerLines = getBannerLines({ network, wallet, balance });
+  const { columns } = useTerminalSize();
+  const bannerLines = getBannerLines({ network, wallet, balance, width: columns });
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" flexShrink={0}>
       {bannerLines.map((line, i) => (
         <Text key={i}>{line}</Text>
       ))}

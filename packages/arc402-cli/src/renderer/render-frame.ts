@@ -1,6 +1,6 @@
 import { DOMNode } from './dom.js';
-import { LayoutNode, createLayoutNode, calculateLayout, freeLayoutNode, BoxStyle } from './layout.js';
-import { Frame, Cell, Color } from './cell.js';
+import { LayoutNode, createLayoutNode } from './layout.js';
+import { Frame, Color } from './cell.js';
 
 interface TextStyle {
   fg: Color | null;
@@ -20,6 +20,12 @@ interface StyledChar {
   style: TextStyle;
 }
 
+const ANSI_ESCAPE_REGEX = /\u001B\[[0-9;]*[A-Za-z]/g;
+
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_ESCAPE_REGEX, '');
+}
+
 /** Build a LayoutNode tree mirroring the DOMNode tree */
 export function buildLayoutTree(dom: DOMNode): LayoutNode {
   if (dom.type === 'root' || dom.type === 'box') {
@@ -31,7 +37,6 @@ export function buildLayoutTree(dom: DOMNode): LayoutNode {
     return layout;
   }
 
-  // Text node: preserve explicit newlines in intrinsic size.
   const flatText = flattenText(dom);
   const textLines = flatText.split('\n');
   const textWidth = textLines.reduce((max, line) => Math.max(max, line.length), 0);
@@ -42,7 +47,7 @@ export function buildLayoutTree(dom: DOMNode): LayoutNode {
 }
 
 function flattenText(dom: DOMNode): string {
-  if (dom.text !== undefined) return dom.text;
+  if (dom.text !== undefined) return stripAnsi(dom.text);
   return dom.children.map(flattenText).join('');
 }
 
@@ -65,18 +70,24 @@ function renderNode(dom: DOMNode, layout: LayoutNode, frame: Frame, inherited: T
     return;
   }
 
-  // Text node
   const chars = collectStyledChars(dom, inherited);
-  let cx = 0, cy = 0;
+  const renderWidth = Math.max(1, Math.min(width || cols, Math.max(1, cols - Math.floor(x))));
+  const renderHeight = Math.max(0, Math.min(height || rows, Math.max(0, rows - Math.floor(y))));
+  let cx = 0;
+  let cy = 0;
+
   for (const { char, style } of chars) {
     if (char === '\n') {
       cx = 0;
       cy++;
-      if (cy >= height) break;
+      if (cy >= renderHeight) break;
       continue;
     }
-    if (cx >= width) { cx = 0; cy++; }
-    if (cy >= height) break;
+    if (cx >= renderWidth) {
+      cx = 0;
+      cy++;
+    }
+    if (cy >= renderHeight) break;
     const row = Math.floor(y + cy);
     const col = Math.floor(x + cx);
     if (row >= 0 && row < rows && col >= 0 && col < cols) {
@@ -96,7 +107,7 @@ function renderNode(dom: DOMNode, layout: LayoutNode, frame: Frame, inherited: T
 function collectStyledChars(dom: DOMNode, inherited: TextStyle): StyledChar[] {
   const merged = mergeStyle(inherited, dom.textStyle);
   if (dom.text !== undefined) {
-    return [...dom.text].map(ch => ({ char: ch, style: merged }));
+    return [...stripAnsi(dom.text)].map(ch => ({ char: ch, style: merged }));
   }
   const result: StyledChar[] = [];
   for (const child of dom.children) {
@@ -108,11 +119,11 @@ function collectStyledChars(dom: DOMNode, inherited: TextStyle): StyledChar[] {
 function mergeStyle(parent: TextStyle, child?: DOMNode['textStyle']): TextStyle {
   if (!child) return parent;
   return {
-    fg:        child.fg !== undefined ? child.fg : parent.fg,
-    bg:        child.bg !== undefined ? child.bg : parent.bg,
-    bold:      child.bold !== undefined ? child.bold : parent.bold,
-    dim:       child.dim !== undefined ? child.dim : parent.dim,
-    italic:    child.italic !== undefined ? child.italic : parent.italic,
+    fg: child.fg !== undefined ? child.fg : parent.fg,
+    bg: child.bg !== undefined ? child.bg : parent.bg,
+    bold: child.bold !== undefined ? child.bold : parent.bold,
+    dim: child.dim !== undefined ? child.dim : parent.dim,
+    italic: child.italic !== undefined ? child.italic : parent.italic,
     underline: child.underline !== undefined ? child.underline : parent.underline,
   };
 }

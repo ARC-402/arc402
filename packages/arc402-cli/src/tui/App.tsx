@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { Box, Text, useApp, useInput, useTerminalSize } from "../renderer/index.js";
 import { Header } from "./Header";
 import { Viewport } from "./Viewport";
@@ -15,10 +15,8 @@ import { getBannerLines } from "../ui/banner";
 import { executeKernelForPayload, getTuiTopLevelCommands } from "./kernel";
 import { TUI_HELP_SECTIONS } from "./command-catalog";
 import type { ViewportEntry } from "./Viewport";
+import { HireFlow } from "./components/commerce/HireFlow";
 import chalk from "chalk";
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const pkg = require("../../package.json") as { version: string };
 
 const BUILTIN_CMDS = ["help", "exit", "quit", "clear", "status"];
 
@@ -39,6 +37,7 @@ export function App({ version, network, wallet, balance }: AppProps) {
     "",
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [hireFlowOpen, setHireFlowOpen] = useState(false);
 
   const { execute, isRunning } = useCommand();
   const {
@@ -55,21 +54,22 @@ export function App({ version, network, wallet, balance }: AppProps) {
     confirmSelection,
   } = useChat();
 
-  // Measure viewport height from actual terminal size and real header line count.
-  // The separator Box rendered between Header and Viewport adds 1 row.
-  // Footer (InputLine) is 1 row.
-  const { rows } = useTerminalSize();
-  const headerLineCount = getBannerLines({ network, wallet, balance }).length;
-  const SEPARATOR_ROWS = 1;
-  const FOOTER_ROWS = 1;
-  const viewportHeight = Math.max(1, rows - headerLineCount - SEPARATOR_ROWS - FOOTER_ROWS);
+  const { toasts, push: pushToast, dismiss } = useNotifications();
+
+  const { rows, columns } = useTerminalSize();
+  const headerLineCount = getBannerLines({ network, wallet, balance, width: columns }).length;
+  const separatorRows = 1;
+  const selectorRows = selectorVisible ? harnessChoices.length + 2 : 0;
+  const chatStatusRows = isChatMode ? 1 : 0;
+  const hireFlowRows = hireFlowOpen ? 18 : 0;
+  const toastRows = toasts.length;
+  const footerRows = 1 + selectorRows + chatStatusRows + hireFlowRows;
+  const viewportHeight = Math.max(1, rows - headerLineCount - separatorRows - footerRows - toastRows);
 
   const { scrollOffset, isAutoScroll, scrollUp, scrollDown, snapToBottom } =
     useScroll(viewportHeight);
 
   const [topCmds] = useState<string[]>(() => getTuiTopLevelCommands());
-
-  const { toasts, push: pushToast, dismiss } = useNotifications();
 
   useDaemonEvents((type, data) => {
     switch (type) {
@@ -102,9 +102,23 @@ export function App({ version, network, wallet, balance }: AppProps) {
     setOutputBuffer((prev) => [...prev, entry]);
   }, []);
 
+  const buildHireCommand = useCallback((agentWallet: string, task: string, price: string, serviceType: string): string => {
+    return [
+      "hire",
+      agentWallet,
+      "--task",
+      task,
+      "--service-type",
+      serviceType,
+      "--max",
+      price,
+      "--deadline",
+      "24h",
+    ].map((token) => JSON.stringify(token)).join(" ");
+  }, []);
+
   const handleCommand = useCallback(
     async (input: string): Promise<void> => {
-      // Echo command to viewport
       appendLine(
         chalk.cyanBright("◈") +
           " " +
@@ -115,31 +129,25 @@ export function App({ version, network, wallet, balance }: AppProps) {
           chalk.white(input)
       );
 
-      // Snap to bottom on new command
       snapToBottom();
       setIsProcessing(true);
 
       const firstWord = input.split(/\s+/)[0];
       const allKnown = [...BUILTIN_CMDS, ...topCmds];
 
-      // ── Built-in: exit/quit ────────────────────────────────────────────────
       if (input === "exit" || input === "quit") {
-        appendLine(
-          " " + chalk.cyanBright("◈") + chalk.dim(" goodbye")
-        );
+        appendLine(" " + chalk.cyanBright("◈") + chalk.dim(" goodbye"));
         setIsProcessing(false);
         setTimeout(() => exit(), 100);
         return;
       }
 
-      // ── Built-in: clear ────────────────────────────────────────────────────
       if (input === "clear") {
         setOutputBuffer([]);
         setIsProcessing(false);
         return;
       }
 
-      // ── Built-in: help ─────────────────────────────────────────────────────
       if (input === "help" || input === "/help") {
         const lines: string[] = [
           chalk.cyanBright("◈ ARC-402 TUI"),
@@ -149,9 +157,7 @@ export function App({ version, network, wallet, balance }: AppProps) {
         for (const section of TUI_HELP_SECTIONS) {
           lines.push(chalk.bold.white(section.label));
           for (const { cmd, desc } of section.commands) {
-            lines.push(
-              "  " + chalk.white(cmd.padEnd(28)) + chalk.dim(desc)
-            );
+            lines.push("  " + chalk.white(cmd.padEnd(28)) + chalk.dim(desc));
           }
           lines.push("");
         }
@@ -171,7 +177,14 @@ export function App({ version, network, wallet, balance }: AppProps) {
         return;
       }
 
-      // ── chat mode / harness-aware shell ───────────────────────────────────
+      if (input === "hire") {
+        setHireFlowOpen(true);
+        appendLine(chalk.dim("  Opening interactive hire flow…"));
+        appendLine("");
+        setIsProcessing(false);
+        return;
+      }
+
       if (input === "chat") {
         beginChat(appendLine);
         appendLine("");
@@ -201,7 +214,6 @@ export function App({ version, network, wallet, balance }: AppProps) {
         return;
       }
 
-      // ── TUI kernel — returns typed payload → rendered as Phase 2 Ink component ──
       const kernelPayload = await executeKernelForPayload(input);
       if (kernelPayload !== null) {
         appendEntry(kernelPayload);
@@ -210,12 +222,11 @@ export function App({ version, network, wallet, balance }: AppProps) {
         return;
       }
 
-      // ── Dispatch to commander ──────────────────────────────────────────────
       await execute(input, appendLine);
       appendLine("");
       setIsProcessing(false);
     },
-    [appendLine, appendEntry, execute, send, snapToBottom, topCmds, network, wallet, balance, exit]
+    [appendLine, appendEntry, execute, send, snapToBottom, topCmds, exit, beginChat, isChatMode, selectorVisible]
   );
 
   useInput((event) => {
@@ -229,11 +240,11 @@ export function App({ version, network, wallet, balance }: AppProps) {
     }
   });
 
-  const isDisabled = isProcessing || isRunning || isSending;
+  const isDisabled = isProcessing || isRunning || isSending || hireFlowOpen;
+  const separatorWidth = Math.max(8, columns - 2);
 
   return (
     <Box flexDirection="column" height="100%">
-      {/* HEADER — fixed, never scrolls */}
       <Header
         version={version}
         network={network}
@@ -241,12 +252,10 @@ export function App({ version, network, wallet, balance }: AppProps) {
         balance={balance}
       />
 
-      {/* Separator */}
-      <Box>
-        <Text dimColor>{"─".repeat(60)}</Text>
+      <Box flexShrink={0}>
+        <Text dimColor>{"─".repeat(separatorWidth)}</Text>
       </Box>
 
-      {/* VIEWPORT — fills remaining space, renders strings + Phase 2 Ink components */}
       <Viewport
         lines={outputBuffer}
         scrollOffset={scrollOffset}
@@ -254,16 +263,14 @@ export function App({ version, network, wallet, balance }: AppProps) {
         viewportHeight={viewportHeight}
       />
 
-      {/* TOAST BAR — live daemon events */}
       {toasts.length > 0 && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" flexShrink={0}>
           {toasts.map((t) => (
             <Toast key={t.id} toast={t} onDismiss={dismiss} />
           ))}
         </Box>
       )}
 
-      {/* FOOTER — fixed, input pinned */}
       <Footer>
         {selectorVisible && (
           <ChatHarnessSelector
@@ -275,9 +282,19 @@ export function App({ version, network, wallet, balance }: AppProps) {
           />
         )}
         {isChatMode && (
-          <Box marginLeft={2}>
+          <Box marginLeft={2} flexShrink={0}>
             <Text dimColor>{`chat mode${activeHarnessLabel ? ` · harness: ${activeHarnessLabel}` : " · harness: choose one"}`}</Text>
           </Box>
+        )}
+        {hireFlowOpen && (
+          <HireFlow
+            onCancel={() => setHireFlowOpen(false)}
+            onSubmit={async ({ agent, task, price }) => {
+              await execute(buildHireCommand(agent.wallet, task, price, agent.serviceType || "ai.assistant"), appendLine);
+              appendLine("");
+              setHireFlowOpen(false);
+            }}
+          />
         )}
         <InputLine onSubmit={handleCommand} isDisabled={isDisabled || selectorVisible} />
       </Footer>
