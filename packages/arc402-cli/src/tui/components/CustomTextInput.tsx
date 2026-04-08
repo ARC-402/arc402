@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Text } from "../../renderer/index.js";
-import { useInput } from "ink";
+import { Text, useInput } from "../../renderer/index.js";
 
 interface CustomTextInputProps {
   value: string;
@@ -13,7 +12,7 @@ interface CustomTextInputProps {
 
 /**
  * Minimal text input that does NOT intercept Tab, Up, Down, Escape, or Ctrl+C,
- * allowing parent useInput handlers to receive those keys.
+ * allowing parent renderer input handlers to receive those keys.
  */
 export function CustomTextInput({
   value,
@@ -40,22 +39,19 @@ export function CustomTextInput({
   }, [focus]);
 
   useInput(
-    (input, key) => {
-      // Keys we explicitly do NOT handle — let parent see them:
-      // Tab, Up, Down, Escape, Ctrl+C
-      if (key.tab || key.upArrow || key.downArrow || key.escape) return;
-      if (input === "\x03") return; // Ctrl+C
+    (event) => {
+      if (event.key === "tab" || event.key === "up" || event.key === "down" || event.key === "escape" || event.key === "ctrl-c") {
+        return;
+      }
 
-      // Enter/Return — submit (unless suppressed for dropdown selection)
-      if (key.return) {
+      if (event.key === "enter") {
         if (!suppressEnter) {
           onSubmit?.(value);
         }
         return;
       }
 
-      // Backspace
-      if (key.backspace || key.delete) {
+      if (event.key === "backspace" || event.key === "delete") {
         if (cursorPos > 0) {
           const next = value.slice(0, cursorPos - 1) + value.slice(cursorPos);
           setCursorPos(cursorPos - 1);
@@ -64,51 +60,40 @@ export function CustomTextInput({
         return;
       }
 
-      // Left arrow
-      if (key.leftArrow) {
+      if (event.key === "left") {
         setCursorPos((p) => Math.max(0, p - 1));
         return;
       }
 
-      // Right arrow
-      if (key.rightArrow) {
+      if (event.key === "right") {
         setCursorPos((p) => Math.min(value.length, p + 1));
         return;
       }
 
-      // Home (Ctrl+A)
-      if (input === "\x01") {
+      if (event.key === "ctrl-a" || event.key === "home") {
         setCursorPos(0);
         return;
       }
 
-      // End (Ctrl+E)
-      if (input === "\x05") {
+      if (event.key === "ctrl-e" || event.key === "end") {
         setCursorPos(value.length);
         return;
       }
 
-      // Ctrl+U — clear line
-      if (input === "\x15") {
+      if (event.key === "ctrl-u") {
         setCursorPos(0);
         onChange("");
         return;
       }
 
-      // Ctrl+K — kill to end of line
-      if (input === "\x0B") {
+      if (event.key === "ctrl-k") {
         onChange(value.slice(0, cursorPos));
         return;
       }
 
-      // Ignore other control characters
-      if (input.length > 0 && input.charCodeAt(0) < 32) return;
-
-      // Regular character input (including paste)
-      if (input.length > 0) {
-        const next =
-          value.slice(0, cursorPos) + input + value.slice(cursorPos);
-        setCursorPos(cursorPos + input.length);
+      if (event.key === "char" && event.char) {
+        const next = value.slice(0, cursorPos) + event.char + value.slice(cursorPos);
+        setCursorPos(cursorPos + event.char.length);
         onChange(next);
       }
     },

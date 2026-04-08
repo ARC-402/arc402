@@ -1,8 +1,8 @@
 import React from 'react';
-import * as inkPkg from 'ink';
 import { reconciler, setOnCommit } from './reconciler.js';
 import { DOMNode, createNode } from './dom.js';
 import { Frame, createFrame } from './cell.js';
+import { RuntimeProvider } from './runtime.js';
 import { diff } from './diff.js';
 import { writePatches } from './terminal.js';
 import { createRenderLoop } from './loop.js';
@@ -11,11 +11,7 @@ import type { Color } from './cell.js';
 import { buildLayoutTree, renderToFrame } from './render-frame.js';
 import { calculateLayout, freeLayoutNode } from './layout.js';
 
-// useApp is safe to re-export (no problematic internal types)
-export const useApp = inkPkg.useApp;
-// Note: useInput, useFocus, useFocusManager, useStdout must be imported
-// directly from 'ink' in components that need them — ink@3 type exports
-// are incomplete and cause TS4023 errors when re-exported.
+// Runtime hooks live in runtime.tsx. ink remains here only for compat primitives.
 
 export interface RenderOptions {
   stdout?: NodeJS.WriteStream;
@@ -58,14 +54,18 @@ export function render(node: React.ReactElement, options: RenderOptions = {}): R
   // react-reconciler v0.26 createContainer(containerInfo, tag, hydrate, hydrationCallbacks)
   const fiberRoot = reconciler.createContainer(container, 0, false, null);
 
-  reconciler.updateContainer(node, fiberRoot, null, null);
-
   let exitResolve!: () => void;
   const exitPromise = new Promise<void>(resolve => { exitResolve = resolve; });
 
-  return {
+  const wrapNode = (element: React.ReactElement) => (
+    React.createElement(RuntimeProvider, { exit: () => instance.unmount() }, element)
+  );
+
+  reconciler.updateContainer(wrapNode(node), fiberRoot, null, null);
+
+  const instance: RenderInstance = {
     update(newNode: React.ReactElement) {
-      reconciler.updateContainer(newNode, fiberRoot, null, null);
+      reconciler.updateContainer(wrapNode(newNode), fiberRoot, null, null);
     },
     unmount() {
       reconciler.updateContainer(null, fiberRoot, null, null);
@@ -75,6 +75,8 @@ export function render(node: React.ReactElement, options: RenderOptions = {}): R
       return exitPromise;
     },
   };
+
+  return instance;
 }
 
 // Box props — accepts both a style object and flat ink-style layout props

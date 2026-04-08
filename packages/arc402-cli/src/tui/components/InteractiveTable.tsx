@@ -1,6 +1,5 @@
 import React, { useState } from "react";
-import { Box, Text } from "../../renderer/index.js";
-import { useInput } from "ink";
+import { Box, Text, useInput } from "../../renderer/index.js";
 
 export interface Column {
   header: string;
@@ -27,14 +26,14 @@ export function InteractiveTable({
   const [internalIdx, setInternalIdx] = useState(0);
   const selectedIndex = controlledIdx ?? internalIdx;
 
-  useInput((_input, key) => {
-    if (key.upArrow) {
+  useInput((event) => {
+    if (event.key === "up") {
       setInternalIdx((i) => Math.max(0, i - 1));
     }
-    if (key.downArrow) {
+    if (event.key === "down") {
       setInternalIdx((i) => Math.min(rows.length - 1, i + 1));
     }
-    if (key.return && onSelect && rows[selectedIndex]) {
+    if (event.key === "enter" && onSelect && rows[selectedIndex]) {
       onSelect(rows[selectedIndex], selectedIndex);
     }
   });

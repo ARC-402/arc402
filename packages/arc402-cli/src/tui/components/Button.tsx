@@ -1,6 +1,5 @@
 import React from "react";
-import { Box, Text } from "../../renderer/index.js";
-import { useFocus, useInput } from "ink";
+import { Box, Text, useFocus, useInput } from "../../renderer/index.js";
 
 export interface ButtonProps {
   label: string;
@@ -18,8 +17,8 @@ export function Button({ label, onPress, variant = "primary" }: ButtonProps) {
   const { isFocused } = useFocus();
 
   useInput(
-    (_input, key) => {
-      if (key.return) {
+    (event) => {
+      if (event.key === "enter") {
         onPress();
       }
     },

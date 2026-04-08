@@ -10,4 +10,5 @@ export * from './layout.js';
 export * from './dom.js';
 export * from './reconciler.js';
 export * from './ink.js';
+export * from './runtime.js';
 export * from './render-frame.js';

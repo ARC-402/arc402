@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { Text } from "../../../renderer/index.js";
-import { useInput } from "ink";
+import React, { useState } from "react";
+import { Text, useInput } from "../../../renderer/index.js";
 import type { DiscoverAgent } from "./DiscoverList";
 
 export interface AgentPickerProps {
@@ -11,14 +10,14 @@ export interface AgentPickerProps {
 export function AgentPicker({ agents, onSelect }: AgentPickerProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  useInput((input, key) => {
-    if (key.upArrow) {
+  useInput((event) => {
+    if (event.key === "up") {
       setSelectedIndex((i) => Math.max(0, i - 1));
-    } else if (key.downArrow) {
+    } else if (event.key === "down") {
       setSelectedIndex((i) => Math.min(agents.length - 1, i + 1));
-    } else if (key.return) {
+    } else if (event.key === "enter") {
       onSelect(agents[selectedIndex] ?? null);
-    } else if (key.escape || input === "q") {
+    } else if (event.key === "escape" || (event.key === "char" && event.char === "q")) {
       onSelect(null);
     }
   });

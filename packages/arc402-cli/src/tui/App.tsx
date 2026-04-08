@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { Box, Text } from "../renderer/index.js";
-import { useApp } from "ink";
+import { Box, Text, useApp, useTerminalSize } from "../renderer/index.js";
 import { Header } from "./Header";
 import { Viewport } from "./Viewport";
 import { Footer } from "./Footer";
@@ -11,7 +10,6 @@ import { useNotifications } from "./useNotifications";
 import { useDaemonEvents } from "./useDaemonEvents";
 import { Toast } from "./components/Toast";
 import { useScroll } from "./useScroll";
-import { useTerminalSize } from "./useTerminalSize";
 import { getBannerLines } from "../ui/banner";
 import { executeKernelForPayload, getTuiTopLevelCommands } from "./kernel";
 import { TUI_HELP_SECTIONS } from "./command-catalog";
