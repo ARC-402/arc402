@@ -29,11 +29,12 @@ export type WCCallbacks = {
 type SignClientT = Awaited<ReturnType<typeof SignClient.init>>;
 type WCSession = ReturnType<SignClientT["session"]["get"]>;
 
-async function makeSignClient(projectId: string): Promise<SignClientT> {
+async function makeSignClient(projectId: string, opts?: { quiet?: boolean }): Promise<SignClientT> {
   const storageDir = path.join(os.homedir(), ".arc402");
   const storagePath = path.join(storageDir, "wc-storage.json");
   return SignClient.init({
     projectId,
+    logger: opts?.quiet ? "fatal" : undefined,
     metadata: {
       name: "ARC-402 CLI",
       description: "ARC-402 Protocol CLI",
@@ -42,6 +43,49 @@ async function makeSignClient(projectId: string): Promise<SignClientT> {
     },
     storage: new KeyValueStorage({ database: storagePath }),
   });
+}
+
+async function withSuppressedWalletConnectConsole<T>(fn: () => Promise<T>): Promise<T> {
+  const originalConsole = {
+    log: console.log,
+    info: console.info,
+    warn: console.warn,
+    error: console.error,
+    debug: console.debug,
+    trace: console.trace,
+  };
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  const originalDisableGlobalCore = process.env.DISABLE_GLOBAL_CORE;
+  const swallow = () => {};
+
+  console.log = swallow;
+  console.info = swallow;
+  console.warn = swallow;
+  console.error = swallow;
+  console.debug = swallow;
+  console.trace = swallow;
+  process.stdout.write = (() => true) as typeof process.stdout.write;
+  process.stderr.write = (() => true) as typeof process.stderr.write;
+  process.env.DISABLE_GLOBAL_CORE = "true";
+
+  try {
+    return await fn();
+  } finally {
+    console.log = originalConsole.log;
+    console.info = originalConsole.info;
+    console.warn = originalConsole.warn;
+    console.error = originalConsole.error;
+    console.debug = originalConsole.debug;
+    console.trace = originalConsole.trace;
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
+    if (typeof originalDisableGlobalCore === "undefined") {
+      delete process.env.DISABLE_GLOBAL_CORE;
+    } else {
+      process.env.DISABLE_GLOBAL_CORE = originalDisableGlobalCore;
+    }
+  }
 }
 
 function walletLinks(encodedUri: string) {
@@ -63,152 +107,182 @@ export async function connectPhoneWallet(
   projectId: string,
   chainId: number,
   config: Arc402Config,
-  opts?: { telegramOpts?: TelegramOpts; prompt?: string; hardware?: boolean }
+  opts?: { telegramOpts?: TelegramOpts; prompt?: string; hardware?: boolean; callbacks?: WCCallbacks }
 ): Promise<{ client: SignClientT; session: WCSession; account: string }> {
-  const client = await makeSignClient(projectId);
+  const callbacks = opts?.callbacks;
+  const usingTuiCallbacks = Boolean(callbacks);
 
-  // Try to restore an existing valid session
-  const stored = loadWCSession(config, chainId);
-  if (stored) {
-    try {
-      const session = client.session.get(stored.topic);
-      // Verify the session is actually alive on the relay side (MetaMask may have
-      // killed it without notifying us). We do a lightweight ping; if it times out
-      // or throws the session is stale — fall through to fresh pairing.
-      await Promise.race([
-        client.ping({ topic: stored.topic }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("ping timeout")), 5000)),
-      ]);
-      return { client, session, account: stored.account };
-    } catch {
-      // Session stale or timed out — clear locally and do fresh pairing
-      clearWCSession(config);
+  const run = async (): Promise<{ client: SignClientT; session: WCSession; account: string }> => {
+    const client = await makeSignClient(projectId, { quiet: usingTuiCallbacks });
+
+    // Try to restore an existing valid session
+    const stored = loadWCSession(config, chainId);
+    if (stored) {
       try {
-        await client.disconnect({ topic: stored.topic, reason: { code: 6000, message: "session stale" } });
-      } catch { /* best-effort — may already be gone */ }
-    }
-  }
-
-  // Fresh pairing flow.
-  // Only require the target chain in requiredNamespaces — putting eip155:1 first
-  // caused MetaMask to default to Ethereum mainnet for the session, silently
-  // routing all txs to the wrong chain.
-  // eip155:1 is listed in optionalNamespaces so MetaMask can still include it
-  // (for chain-switch methods) without treating it as the primary chain.
-  const { uri, approval } = await client.connect({
-    requiredNamespaces: {
-      eip155: {
-        methods: ["eth_sendTransaction", "personal_sign", "wallet_switchEthereumChain", "wallet_addEthereumChain"],
-        chains: [`eip155:${chainId}`],
-        events: ["accountsChanged", "chainChanged"],
-      },
-    },
-    optionalNamespaces: {
-      eip155: {
-        methods: ["eth_sendTransaction", "personal_sign", "wallet_switchEthereumChain", "wallet_addEthereumChain"],
-        chains: ["eip155:1", "eip155:84532"],
-        events: ["accountsChanged", "chainChanged"],
-      },
-    },
-  });
-
-  if (!uri) throw new Error("Failed to create WalletConnect session");
-
-  const encodedUri = encodeURIComponent(uri);
-  const displayPrompt = opts?.prompt ?? "Connect your phone wallet";
-
-  if (opts?.hardware) {
-    console.log("\n─────────────────────────────────────────────────────");
-    console.log("Paste this URI into Ledger Live, Trezor Suite, or any WalletConnect-compatible signer:\n");
-    console.log(uri);
-    console.log("\n─────────────────────────────────────────────────────");
-    console.log("Waiting for connection...");
-  } else {
-    const links = walletLinks(encodedUri);
-    console.log(`\n${displayPrompt}`);
-    console.log("─────────────────────────────────────");
-    console.log("Tap the link for your wallet app (opens directly):\n");
-    for (const [name, link] of Object.entries(links)) {
-      console.log(`${name}:\n${link}\n`);
-    }
-    console.log("Or scan QR:");
-    qrcode.generate(uri, { small: true });
-    console.log("\nWaiting for approval...");
-  }
-
-  const telegramOpts = opts?.hardware ? undefined : opts?.telegramOpts;
-  if (telegramOpts) {
-    await sendWalletConnectApprovalButton({
-      botToken: telegramOpts.botToken,
-      chatId: telegramOpts.chatId,
-      threadId: telegramOpts.threadId,
-      prompt: displayPrompt,
-      walletLinks: [
-        { label: "🦊 MetaMask", url: `https://metamask.app.link/wc?uri=${encodedUri}` },
-        { label: "🌈 Rainbow", url: `https://rnbwapp.com/wc?uri=${encodedUri}` },
-        { label: "🔵 Trust Wallet", url: `https://link.trustwallet.com/wc?uri=${encodedUri}` },
-      ],
-    });
-    console.log("Approval request sent to Telegram ✓");
-  }
-
-  const session = await approval();
-  const account = session.namespaces.eip155.accounts[0].split(":")[2];
-
-  // Determine which chain the wallet actually connected on
-  const sessionChainStr = session.namespaces.eip155.accounts[0].split(":")[1];
-  const sessionChainId = parseInt(sessionChainStr, 10);
-
-  // Ensure wallet is on the correct chain before sending any tx
-  const hexChainId = `0x${chainId.toString(16)}`;
-  const networkName = chainId === 8453 ? "Base" : chainId === 84532 ? "Base Sepolia" : `chain ${chainId}`;
-
-  if (sessionChainId !== chainId) {
-    // First try adding the chain (using the chain the wallet is currently on)
-    if (chainId === 8453) {
-      try {
-        await client.request({
-          topic: session.topic,
-          chainId: `eip155:${sessionChainId}`,
-          request: {
-            method: "wallet_addEthereumChain",
-            params: [{ chainId: hexChainId, chainName: "Base", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://mainnet.base.org"], blockExplorerUrls: ["https://basescan.org"] }],
-          },
-        });
-      } catch { /* already added or unsupported */ }
-    }
-
-    // Then switch — retry up to 3 times, using sessionChainId as the request topic
-    let chainSwitched = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        await client.request({
-          topic: session.topic,
-          chainId: `eip155:${sessionChainId}`,
-          request: {
-            method: "wallet_switchEthereumChain",
-            params: [{ chainId: hexChainId }],
-          },
-        });
-        chainSwitched = true;
-        break;
+        const session = client.session.get(stored.topic);
+        // Verify the session is actually alive on the relay side (MetaMask may have
+        // killed it without notifying us). We do a lightweight ping; if it times out
+        // or throws the session is stale — fall through to fresh pairing.
+        await Promise.race([
+          client.ping({ topic: stored.topic }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("ping timeout")), 5000)),
+        ]);
+        callbacks?.onStatus("ready", stored.account);
+        return { client, session, account: stored.account };
       } catch {
-        await new Promise(r => setTimeout(r, 1500));
+        // Session stale or timed out — clear locally and do fresh pairing
+        clearWCSession(config);
+        try {
+          await client.disconnect({ topic: stored.topic, reason: { code: 6000, message: "session stale" } });
+        } catch { /* best-effort — may already be gone */ }
       }
     }
-    if (!chainSwitched) {
-      console.log(`\n⚠ Could not auto-switch to ${networkName}. IMPORTANT: Switch to ${networkName} in your wallet NOW before approving the next transaction.`);
-      console.log(`  Otherwise the transaction will go to Ethereum mainnet and fail.`);
-      // Give user 5 seconds to read the warning and switch
-      await new Promise(r => setTimeout(r, 5000));
+
+    // Fresh pairing flow.
+    // Only require the target chain in requiredNamespaces — putting eip155:1 first
+    // caused MetaMask to default to Ethereum mainnet for the session, silently
+    // routing all txs to the wrong chain.
+    // eip155:1 is listed in optionalNamespaces so MetaMask can still include it
+    // (for chain-switch methods) without treating it as the primary chain.
+    const { uri, approval } = await client.connect({
+      requiredNamespaces: {
+        eip155: {
+          methods: ["eth_sendTransaction", "personal_sign", "wallet_switchEthereumChain", "wallet_addEthereumChain"],
+          chains: [`eip155:${chainId}`],
+          events: ["accountsChanged", "chainChanged"],
+        },
+      },
+      optionalNamespaces: {
+        eip155: {
+          methods: ["eth_sendTransaction", "personal_sign", "wallet_switchEthereumChain", "wallet_addEthereumChain"],
+          chains: ["eip155:1", "eip155:84532"],
+          events: ["accountsChanged", "chainChanged"],
+        },
+      },
+    });
+
+    if (!uri) {
+      callbacks?.onStatus("error", "Failed to create WalletConnect session");
+      throw new Error("Failed to create WalletConnect session");
     }
-  }
 
-  // Persist session (WC sessions last 7 days by default)
-  const expiry = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
-  saveWCSession(config, { topic: session.topic, expiry, account, chainId });
+    const encodedUri = encodeURIComponent(uri);
+    const displayPrompt = opts?.prompt ?? "Connect your phone wallet";
+    const links = walletLinks(encodedUri);
 
-  return { client, session, account };
+    callbacks?.onUri(uri, links);
+    callbacks?.onStatus("connecting", displayPrompt);
+
+    if (opts?.hardware) {
+      if (!usingTuiCallbacks) {
+        console.log("\n─────────────────────────────────────────────────────");
+        console.log("Paste this URI into Ledger Live, Trezor Suite, or any WalletConnect-compatible signer:\n");
+        console.log(uri);
+        console.log("\n─────────────────────────────────────────────────────");
+        console.log("Waiting for connection...");
+      }
+    } else if (!usingTuiCallbacks) {
+      console.log(`\n${displayPrompt}`);
+      console.log("─────────────────────────────────────");
+      console.log("Tap the link for your wallet app (opens directly):\n");
+      for (const [name, link] of Object.entries(links)) {
+        console.log(`${name}:\n${link}\n`);
+      }
+      console.log("Or scan QR:");
+      qrcode.generate(uri, { small: true });
+      console.log("\nWaiting for approval...");
+    }
+
+    const telegramOpts = opts?.hardware ? undefined : opts?.telegramOpts;
+    if (telegramOpts) {
+      await sendWalletConnectApprovalButton({
+        botToken: telegramOpts.botToken,
+        chatId: telegramOpts.chatId,
+        threadId: telegramOpts.threadId,
+        prompt: displayPrompt,
+        walletLinks: [
+          { label: "🦊 MetaMask", url: `https://metamask.app.link/wc?uri=${encodedUri}` },
+          { label: "🌈 Rainbow", url: `https://rnbwapp.com/wc?uri=${encodedUri}` },
+          { label: "🔵 Trust Wallet", url: `https://link.trustwallet.com/wc?uri=${encodedUri}` },
+        ],
+      });
+      console.log("Approval request sent to Telegram ✓");
+    }
+
+    let session: WCSession;
+    try {
+      session = await approval();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      callbacks?.onStatus("error", message);
+      throw error;
+    }
+    const account = session.namespaces.eip155.accounts[0].split(":")[2];
+    callbacks?.onStatus("connected", account);
+
+    // Determine which chain the wallet actually connected on
+    const sessionChainStr = session.namespaces.eip155.accounts[0].split(":")[1];
+    const sessionChainId = parseInt(sessionChainStr, 10);
+
+    // Ensure wallet is on the correct chain before sending any tx
+    const hexChainId = `0x${chainId.toString(16)}`;
+    const networkName = chainId === 8453 ? "Base" : chainId === 84532 ? "Base Sepolia" : `chain ${chainId}`;
+
+    if (sessionChainId !== chainId) {
+      callbacks?.onStatus("chain-switching", networkName);
+      // First try adding the chain (using the chain the wallet is currently on)
+      if (chainId === 8453) {
+        try {
+          await client.request({
+            topic: session.topic,
+            chainId: `eip155:${sessionChainId}`,
+            request: {
+              method: "wallet_addEthereumChain",
+              params: [{ chainId: hexChainId, chainName: "Base", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://mainnet.base.org"], blockExplorerUrls: ["https://basescan.org"] }],
+            },
+          });
+        } catch { /* already added or unsupported */ }
+      }
+
+      // Then switch — retry up to 3 times, using sessionChainId as the request topic
+      let chainSwitched = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await client.request({
+            topic: session.topic,
+            chainId: `eip155:${sessionChainId}`,
+            request: {
+              method: "wallet_switchEthereumChain",
+              params: [{ chainId: hexChainId }],
+            },
+          });
+          chainSwitched = true;
+          break;
+        } catch {
+          await new Promise(r => setTimeout(r, 1500));
+        }
+      }
+      if (!chainSwitched) {
+        callbacks?.onStatus("error", `Could not auto-switch to ${networkName}`);
+        if (!usingTuiCallbacks) {
+          console.log(`\n⚠ Could not auto-switch to ${networkName}. IMPORTANT: Switch to ${networkName} in your wallet NOW before approving the next transaction.`);
+          console.log(`  Otherwise the transaction will go to Ethereum mainnet and fail.`);
+          // Give user 5 seconds to read the warning and switch
+          await new Promise(r => setTimeout(r, 5000));
+        }
+      }
+    }
+
+    callbacks?.onStatus("ready", account);
+
+    // Persist session (WC sessions last 7 days by default)
+    const expiry = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
+    saveWCSession(config, { topic: session.topic, expiry, account, chainId });
+
+    return { client, session, account };
+  };
+
+  return usingTuiCallbacks ? withSuppressedWalletConnectConsole(run) : run();
 }
 
 /**
