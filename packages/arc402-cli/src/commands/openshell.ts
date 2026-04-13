@@ -11,10 +11,12 @@ import {
   OPENSHELL_TOML,
   buildOpenShellSshConfig,
   detectDockerAccess,
+  getOpenShellSandboxPhase,
   provisionRuntimeToSandbox,
   readOpenShellConfig,
   resolveOpenShellSecrets,
   runCmd,
+  waitForOpenShellSandboxReady,
   writeOpenShellConfig,
 } from "../openshell-runtime";
 import { DAEMON_PID, DAEMON_LOG, DAEMON_TOML } from "../daemon/config";
@@ -582,7 +584,7 @@ export function registerOpenShellCommands(program: Command): void {
   openshell
     .command("init")
     .description("Initialize the launch runtime once: create the arc402-daemon sandbox, write the default policy, and hide OpenShell wiring behind ARC-402 commands.")
-    .action(() => {
+    .action(async () => {
       console.log("OpenShell Init");
       console.log("──────────────");
 
@@ -674,13 +676,23 @@ export function registerOpenShellCommands(program: Command): void {
           "--",
           "true",
         ], { timeout: 180000 });
-        if (!createSandbox.ok) {
+        const phaseAfterCreate = getOpenShellSandboxPhase(SANDBOX_NAME);
+        if (!createSandbox.ok && !phaseAfterCreate) {
           console.error(`Failed to create sandbox: ${createSandbox.stderr || createSandbox.stdout}`);
           process.exit(1);
         }
         console.log(`  Created: ${SANDBOX_NAME}`);
       } else {
         console.log(`  Reusing:  ${SANDBOX_NAME}`);
+      }
+
+      console.log("  Waiting for sandbox readiness...");
+      try {
+        await waitForOpenShellSandboxReady(SANDBOX_NAME, { timeoutMs: 300000, intervalMs: 2000 });
+        console.log(`  Ready:    ${SANDBOX_NAME}`);
+      } catch (err) {
+        console.error(`Sandbox did not become ready: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
       }
 
       console.log("\nProvisioning ARC-402 runtime bundle into the sandbox...");

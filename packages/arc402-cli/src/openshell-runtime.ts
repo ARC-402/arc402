@@ -6,10 +6,22 @@ import { parse as parseToml } from "smol-toml";
 import { loadConfig } from "./config";
 
 export const ARC402_DIR = path.join(os.homedir(), ".arc402");
+export const OPENSHELL_CONFIG_DIR = path.join(os.homedir(), ".config", "openshell");
 export const OPENSHELL_TOML = path.join(ARC402_DIR, "openshell.toml");
 export const OPENSHELL_RUNTIME_DIR = path.join(ARC402_DIR, "openshell-runtime");
 export const OPENSHELL_RUNTIME_TARBALL = path.join(OPENSHELL_RUNTIME_DIR, "arc402-cli-runtime.tgz");
 export const DEFAULT_RUNTIME_REMOTE_ROOT = "/sandbox/.arc402/runtime/arc402-cli";
+
+interface OpenShellGatewayMetadata {
+  name: string;
+  gateway_endpoint: string;
+  gateway_port?: number;
+  is_remote?: boolean;
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "");
+}
 
 export interface OpenShellConfig {
   sandbox: { name: string; policy?: string; providers?: string[] };
@@ -197,10 +209,72 @@ export function buildRuntimeTarball(): { cliRoot: string; tarballPath: string } 
   return { cliRoot, tarballPath: OPENSHELL_RUNTIME_TARBALL };
 }
 
+function readActiveOpenShellGatewayMetadata(): OpenShellGatewayMetadata | null {
+  try {
+    const activeGatewayPath = path.join(OPENSHELL_CONFIG_DIR, "active_gateway");
+    if (!fs.existsSync(activeGatewayPath)) return null;
+    const gatewayName = fs.readFileSync(activeGatewayPath, "utf-8").trim();
+    if (!gatewayName) return null;
+    const metadataPath = path.join(OPENSHELL_CONFIG_DIR, "gateways", gatewayName, "metadata.json");
+    if (!fs.existsSync(metadataPath)) return null;
+    const parsed = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as Partial<OpenShellGatewayMetadata>;
+    if (!parsed.gateway_endpoint || typeof parsed.gateway_endpoint !== "string") return null;
+    return {
+      name: typeof parsed.name === "string" ? parsed.name : gatewayName,
+      gateway_endpoint: parsed.gateway_endpoint,
+      gateway_port: typeof parsed.gateway_port === "number" ? parsed.gateway_port : undefined,
+      is_remote: typeof parsed.is_remote === "boolean" ? parsed.is_remote : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function diagnoseOpenShellGatewayCollision(): string | null {
+  const metadata = readActiveOpenShellGatewayMetadata();
+  if (!metadata?.gateway_endpoint) return null;
+
+  try {
+    const endpoint = new URL(metadata.gateway_endpoint);
+    if (endpoint.protocol !== "https:" || !["127.0.0.1", "localhost"].includes(endpoint.hostname)) {
+      return null;
+    }
+
+    const tlsProbe = runCmd("curl", ["-skI", "--max-time", "5", metadata.gateway_endpoint], { timeout: 8000 });
+    if (tlsProbe.ok) return null;
+
+    const plainHttpUrl = `http://${endpoint.host}/`;
+    const httpProbe = runCmd("curl", ["-sI", "--max-time", "5", plainHttpUrl], { timeout: 8000 });
+    const tlsDetail = `${tlsProbe.stderr}\n${tlsProbe.stdout}`.toLowerCase();
+    const serverHeader = httpProbe.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => /^server:/i.test(line));
+
+    if (httpProbe.ok || /wrong version number|invalidcontenttype|tls/.test(tlsDetail)) {
+      return [
+        `OpenShell gateway endpoint ${metadata.gateway_endpoint} is not serving the expected TLS gateway.`,
+        `Plain HTTP is responding on ${endpoint.host}${serverHeader ? ` (${serverHeader})` : ""}.`,
+        "Another local process is likely occupying the configured gateway port.",
+        "Fix: recreate OpenShell on a free port, for example `openshell gateway start --port 18081 --recreate`.",
+      ].join(" ");
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function augmentOpenShellError(message: string): string {
+  const diagnosis = diagnoseOpenShellGatewayCollision();
+  return diagnosis ? `${message}\n${diagnosis}` : message;
+}
+
 export function buildOpenShellSshConfig(sandboxName: string): { configPath: string; host: string } {
   const sshConfig = runCmd("openshell", ["sandbox", "ssh-config", sandboxName], { timeout: 120000 });
   if (!sshConfig.ok || !sshConfig.stdout.trim()) {
-    throw new Error(`Failed to get OpenShell SSH config for sandbox ${sandboxName}: ${sshConfig.stderr || sshConfig.stdout || "unknown error"}`);
+    throw new Error(augmentOpenShellError(`Failed to get OpenShell SSH config for sandbox ${sandboxName}: ${sshConfig.stderr || sshConfig.stdout || "unknown error"}`));
   }
   const hostMatch = sshConfig.stdout.match(/^Host\s+(\S+)/m);
   if (!hostMatch) {
@@ -222,7 +296,7 @@ export function provisionFileToSandbox(sandboxName: string, localPath: string, r
 
   const prep = runCmd("ssh", ["-F", configPath, host, `rm -rf ${shellEscape(uploadDir)} && mkdir -p ${shellEscape(uploadDir)} && mkdir -p ${shellEscape(remoteDir)}`], { timeout: 120000 });
   if (!prep.ok) {
-    throw new Error(`Failed to prepare remote upload directory: ${prep.stderr || prep.stdout}`);
+    throw new Error(augmentOpenShellError(`Failed to prepare remote upload directory: ${prep.stderr || prep.stdout}`));
   }
 
   const upload = runCmd("openshell", ["sandbox", "upload", sandboxName, localPath, uploadDir], { timeout: 300000 });
@@ -248,7 +322,7 @@ export function provisionRuntimeToSandbox(
 
   const prep = runCmd("ssh", ["-F", configPath, host, `rm -rf ${shellEscape(remoteUploadDir)} && mkdir -p ${shellEscape(remoteUploadDir)}`], { timeout: 120000 });
   if (!prep.ok) {
-    throw new Error(`Failed to prepare remote upload directory: ${prep.stderr || prep.stdout}`);
+    throw new Error(augmentOpenShellError(`Failed to prepare remote upload directory: ${prep.stderr || prep.stdout}`));
   }
 
   const upload = runCmd("openshell", ["sandbox", "upload", sandboxName, tarballPath, remoteUploadDir], { timeout: 300000 });
@@ -270,6 +344,32 @@ export function provisionRuntimeToSandbox(
   }
 
   return { tarballPath, remoteRoot };
+}
+
+export function getOpenShellSandboxPhase(sandboxName: string): string | null {
+  const result = runCmd("openshell", ["sandbox", "get", sandboxName], { timeout: 120000 });
+  if (!result.ok && !(result.stdout || result.stderr)) return null;
+  const plain = stripAnsi(`${result.stdout}\n${result.stderr}`);
+  const match = plain.match(/Phase:\s+([A-Za-z]+)/i);
+  return match ? match[1] : null;
+}
+
+export async function waitForOpenShellSandboxReady(
+  sandboxName: string,
+  opts: { timeoutMs?: number; intervalMs?: number } = {}
+): Promise<void> {
+  const timeoutMs = opts.timeoutMs ?? 300000;
+  const intervalMs = opts.intervalMs ?? 2000;
+  const startedAt = Date.now();
+  let lastPhase = getOpenShellSandboxPhase(sandboxName) ?? "unknown";
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (/ready|running/i.test(lastPhase)) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    lastPhase = getOpenShellSandboxPhase(sandboxName) ?? lastPhase;
+  }
+
+  throw new Error(`Sandbox ${sandboxName} is not ready yet (last phase: ${lastPhase}).`);
 }
 
 export function shellEscape(value: string): string {

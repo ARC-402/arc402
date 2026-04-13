@@ -31,6 +31,8 @@ import {
   provisionRuntimeToSandbox,
   readOpenShellConfig,
   runCmd,
+  shellEscape,
+  waitForOpenShellSandboxReady,
   writeOpenShellConfig,
 } from "../openshell-runtime";
 
@@ -280,7 +282,46 @@ async function readRemotePid(sandboxName: string): Promise<number | null> {
   ], { timeout: 20000 });
   if (!pidRead.ok || !pidRead.stdout.trim()) return null;
   const pid = parseInt(pidRead.stdout.trim(), 10);
-  return Number.isFinite(pid) ? pid : null;
+  if (!Number.isFinite(pid)) return null;
+
+  const aliveCheck = runCmd("ssh", [
+    "-F", configPath,
+    host,
+    `kill -0 ${pid} >/dev/null 2>&1 && echo alive || echo dead`,
+  ], { timeout: 20000 });
+
+  if (!aliveCheck.ok || !/alive/i.test(aliveCheck.stdout)) {
+    runCmd("ssh", [
+      "-F", configPath,
+      host,
+      `rm -f ${REMOTE_DAEMON_PID}`,
+    ], { timeout: 20000 });
+  } else {
+    return pid;
+  }
+
+  const processLookup = runCmd("ssh", [
+    "-F", configPath,
+    host,
+    String.raw`ps -eo pid=,comm=,args= | awk '$2 == "node" && $0 ~ /\/sandbox\/.arc402\/runtime\/arc402-cli\/dist\/daemon\/index\.js/ { print $1; exit }'`,
+  ], { timeout: 20000 });
+
+  if (!processLookup.ok || !processLookup.stdout.trim()) {
+    return null;
+  }
+
+  const livePid = parseInt(processLookup.stdout.trim(), 10);
+  if (!Number.isFinite(livePid)) {
+    return null;
+  }
+
+  runCmd("ssh", [
+    "-F", configPath,
+    host,
+    `printf '%s' ${shellEscape(String(livePid))} > ${REMOTE_DAEMON_PID}`,
+  ], { timeout: 20000 });
+
+  return livePid;
 }
 
 async function startDaemonBackground(sandboxName?: string, runtimeRemoteRoot?: string): Promise<void> {
@@ -343,8 +384,10 @@ async function startDaemonBackground(sandboxName?: string, runtimeRemoteRoot?: s
   }
   child.unref();
 
-  // Wait up to 8 seconds for PID file to appear
-  const deadline = Date.now() + 8000;
+  // Wait up to 30 seconds for PID file to appear.
+  // OpenShell sandbox starts are slower on first boot because the remote runtime
+  // still has to initialize DB/network/watchers after the container is already up.
+  const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 400));
     if (sandboxName) {
@@ -370,7 +413,7 @@ async function startDaemonBackground(sandboxName?: string, runtimeRemoteRoot?: s
     }
   }
 
-  console.error("Daemon did not start within 8 seconds.");
+  console.error("Daemon did not start within 30 seconds.");
   if (sandboxName) {
     console.error("Likely cause: the provisioned runtime booted, but the sandbox daemon config/state path is incomplete or the daemon exited early.");
     console.error(`Expected remote log: ${REMOTE_DAEMON_LOG}`);
@@ -556,6 +599,7 @@ export function registerDaemonCommands(program: Command): void {
 
       if (sandboxName) {
         try {
+          await waitForOpenShellSandboxReady(sandboxName, { timeoutMs: 300000, intervalMs: 2000 });
           const provisioned = provisionRuntimeToSandbox(sandboxName, runtimeRemoteRoot);
           runtimeRemoteRoot = provisioned.remoteRoot;
           writeOpenShellConfig({
@@ -605,14 +649,22 @@ export function registerDaemonCommands(program: Command): void {
       }
 
       // Check if already running
-      const existingPid = readPid();
-      if (existingPid && isProcessAlive(existingPid)) {
-        console.log(`Daemon is already running. PID: ${existingPid}`);
-        process.exit(0);
-      }
+      if (sandboxName) {
+        const remotePid = await readRemotePid(sandboxName);
+        if (remotePid) {
+          console.log(`Daemon is already running (OpenShell). PID: ${remotePid}`);
+          process.exit(0);
+        }
+      } else {
+        const existingPid = readPid();
+        if (existingPid && isProcessAlive(existingPid)) {
+          console.log(`Daemon is already running. PID: ${existingPid}`);
+          process.exit(0);
+        }
 
-      // Remove stale PID file if present
-      if (fs.existsSync(DAEMON_PID)) fs.unlinkSync(DAEMON_PID);
+        // Remove stale PID file if present
+        if (fs.existsSync(DAEMON_PID)) fs.unlinkSync(DAEMON_PID);
+      }
 
       if (sandboxName) {
         console.log(`Starting ARC-402 daemon inside OpenShell sandbox: ${sandboxName}`);
