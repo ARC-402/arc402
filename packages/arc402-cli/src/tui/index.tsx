@@ -1,6 +1,7 @@
 import React from "react";
 import { render } from "../renderer/ink.js";
 import { ScreenManager } from "../renderer/index.js";
+import { ThemeProvider } from "../renderer/ThemeProvider.js";
 import { App } from "./App";
 import fs from "fs";
 import path from "path";
@@ -15,6 +16,7 @@ interface Config {
   network?: string;
   walletContractAddress?: string;
   rpcUrl?: string;
+  walletConnectProjectId?: string;
 }
 
 async function loadConfig(): Promise<Config> {
@@ -81,13 +83,19 @@ export async function launchTUI(): Promise<void> {
   process.on('SIGINT', () => { screen.exit(); process.exit(0); });
   process.on('SIGTERM', () => { screen.exit(); process.exit(0); });
 
+  const chainId = config.network === "base-sepolia" ? 84532 : 8453;
+
   const { waitUntilExit } = render(
-    <App
-      version={pkg.version}
-      network={config.network}
-      wallet={walletDisplay}
-      balance={balance}
-    />
+    <ThemeProvider>
+      <App
+        version={pkg.version}
+        network={config.network}
+        wallet={walletDisplay}
+        balance={balance}
+        chainId={chainId}
+        walletConnectProjectId={config.walletConnectProjectId}
+      />
+    </ThemeProvider>
   );
 
   await waitUntilExit();

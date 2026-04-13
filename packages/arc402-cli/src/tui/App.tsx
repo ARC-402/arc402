@@ -12,10 +12,13 @@ import { Toast } from "./components/Toast";
 import { ChatHarnessSelector } from "./components/ChatHarnessSelector";
 import { useScroll } from "./useScroll";
 import { getBannerLines } from "../ui/banner";
-import { executeKernelForPayload, getTuiTopLevelCommands } from "./kernel";
-import { TUI_HELP_SECTIONS } from "./command-catalog";
+import { executeKernelForPayload } from "./kernel";
+import { TUI_HELP_SECTIONS, TUI_TOP_LEVEL_COMMANDS } from "./command-catalog";
 import type { ViewportEntry } from "./Viewport";
 import { HireFlow } from "./components/commerce/HireFlow";
+import { WalletConnectPairing } from "./WalletConnectPairing";
+import { loadConfig } from "../config";
+import { connectPhoneWallet, type WCCallbacks } from "../walletconnect";
 import chalk from "chalk";
 
 const BUILTIN_CMDS = ["help", "exit", "quit", "clear", "status"];
@@ -25,12 +28,14 @@ interface AppProps {
   network?: string;
   wallet?: string;
   balance?: string;
+  chainId: number;
+  walletConnectProjectId?: string;
 }
 
 /**
  * Root TUI component — fixed header/footer with scrollable viewport.
  */
-export function App({ version, network, wallet, balance }: AppProps) {
+export function App({ version, network, wallet, balance, chainId, walletConnectProjectId }: AppProps) {
   const { exit } = useApp();
   const [outputBuffer, setOutputBuffer] = useState<ViewportEntry[]>([
     chalk.dim("  Type 'help' to see available commands"),
@@ -38,6 +43,7 @@ export function App({ version, network, wallet, balance }: AppProps) {
   ]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [hireFlowOpen, setHireFlowOpen] = useState(false);
+  const [walletPairingOpen, setWalletPairingOpen] = useState(false);
 
   const { execute, isRunning } = useCommand();
   const {
@@ -62,14 +68,13 @@ export function App({ version, network, wallet, balance }: AppProps) {
   const selectorRows = selectorVisible ? harnessChoices.length + 2 : 0;
   const chatStatusRows = isChatMode ? 1 : 0;
   const hireFlowRows = hireFlowOpen ? 18 : 0;
+  const walletPairingRows = walletPairingOpen ? 26 : 0;
   const toastRows = toasts.length;
-  const footerRows = 1 + selectorRows + chatStatusRows + hireFlowRows;
+  const footerRows = 1 + selectorRows + chatStatusRows + hireFlowRows + walletPairingRows;
   const viewportHeight = Math.max(1, rows - headerLineCount - separatorRows - footerRows - toastRows);
 
   const { scrollOffset, isAutoScroll, scrollUp, scrollDown, snapToBottom } =
     useScroll(viewportHeight);
-
-  const [topCmds] = useState<string[]>(() => getTuiTopLevelCommands());
 
   useDaemonEvents((type, data) => {
     switch (type) {
@@ -117,6 +122,18 @@ export function App({ version, network, wallet, balance }: AppProps) {
     ].map((token) => JSON.stringify(token)).join(" ");
   }, []);
 
+  const connectWalletInTui = useCallback(async (callbacks: WCCallbacks) => {
+    const config = loadConfig();
+    if (!walletConnectProjectId) {
+      throw new Error("walletConnectProjectId not set. Run `arc402 config set walletConnectProjectId <id>`. ");
+    }
+    const result = await connectPhoneWallet(walletConnectProjectId, chainId, config, {
+      prompt: "Connect your owner wallet",
+      callbacks,
+    });
+    return { account: result.account };
+  }, [chainId, walletConnectProjectId]);
+
   const handleCommand = useCallback(
     async (input: string): Promise<void> => {
       appendLine(
@@ -133,7 +150,7 @@ export function App({ version, network, wallet, balance }: AppProps) {
       setIsProcessing(true);
 
       const firstWord = input.split(/\s+/)[0];
-      const allKnown = [...BUILTIN_CMDS, ...topCmds];
+      const allKnown = [...BUILTIN_CMDS, ...TUI_TOP_LEVEL_COMMANDS];
 
       if (input === "exit" || input === "quit") {
         appendLine(" " + chalk.cyanBright("◈") + chalk.dim(" goodbye"));
@@ -185,6 +202,14 @@ export function App({ version, network, wallet, balance }: AppProps) {
         return;
       }
 
+      if (input === "wallet connect") {
+        setWalletPairingOpen(true);
+        appendLine(chalk.dim("  Opening WalletConnect pairing…"));
+        appendLine("");
+        setIsProcessing(false);
+        return;
+      }
+
       if (input === "chat") {
         beginChat(appendLine);
         appendLine("");
@@ -226,10 +251,16 @@ export function App({ version, network, wallet, balance }: AppProps) {
       appendLine("");
       setIsProcessing(false);
     },
-    [appendLine, appendEntry, execute, send, snapToBottom, topCmds, exit, beginChat, isChatMode, selectorVisible]
+    [appendLine, appendEntry, execute, send, snapToBottom, exit, beginChat, isChatMode, selectorVisible]
   );
 
   useInput((event) => {
+    if (walletPairingOpen && event.key === "escape") {
+      setWalletPairingOpen(false);
+      pushToast("WalletConnect pairing cancelled", "info");
+      appendLine(chalk.dim("  WalletConnect pairing cancelled."));
+      return;
+    }
     if (selectorVisible) return;
     if (event.key === "pgup") {
       scrollUp(viewportHeight);
@@ -240,7 +271,7 @@ export function App({ version, network, wallet, balance }: AppProps) {
     }
   });
 
-  const isDisabled = isProcessing || isRunning || isSending || hireFlowOpen;
+  const isDisabled = isProcessing || isRunning || isSending || hireFlowOpen || walletPairingOpen;
   const separatorWidth = Math.max(8, columns - 2);
 
   return (
@@ -293,6 +324,25 @@ export function App({ version, network, wallet, balance }: AppProps) {
               await execute(buildHireCommand(agent.wallet, task, price, agent.serviceType || "ai.assistant"), appendLine);
               appendLine("");
               setHireFlowOpen(false);
+            }}
+          />
+        )}
+        {walletPairingOpen && walletConnectProjectId && (
+          <WalletConnectPairing
+            projectId={walletConnectProjectId}
+            chainId={chainId}
+            connect={connectWalletInTui}
+            onComplete={({ account }) => {
+              pushToast(`✓ Wallet connected — ${account}`, "success");
+              appendLine(chalk.green(`  ✓ Wallet connected — ${account}`));
+              appendLine("");
+              setWalletPairingOpen(false);
+            }}
+            onError={(err) => {
+              pushToast(`✗ WalletConnect failed — ${err}`, "error");
+              appendLine(chalk.red(`  ✗ WalletConnect failed — ${err}`));
+              appendLine("");
+              setWalletPairingOpen(false);
             }}
           />
         )}

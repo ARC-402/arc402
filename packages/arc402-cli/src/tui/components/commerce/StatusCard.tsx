@@ -1,5 +1,4 @@
 import React from "react";
-import { Text } from "../../../renderer/index.js";
 import { CommerceCard, DetailRow, Meter, Section, type StatusPillProps } from "./common";
 
 export interface StatusCardProps {
@@ -41,7 +40,6 @@ export function StatusCard({ wallet, network, balance, trustScore, endpoint, agr
           <DetailRow label="harness" value={workroom.harness ?? "n/a"} />
         </Section>
       ) : null}
-      <Text dimColor>Structured for inline TUI status rendering in Phase 3.</Text>
     </CommerceCard>
   );
 }

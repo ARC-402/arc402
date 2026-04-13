@@ -1,6 +1,7 @@
 import React from "react";
-import { Box, Text, useTerminalSize } from "../renderer/index.js";
+import { Box, useTerminalSize } from "../renderer/index.js";
 import { getBannerLines } from "../ui/banner";
+import { AnsiTextLine } from "./components/AnsiTextLine.js";
 
 interface HeaderProps {
   version: string;
@@ -24,7 +25,7 @@ export const Header = React.memo(function Header({
   return (
     <Box flexDirection="column" flexShrink={0}>
       {bannerLines.map((line, i) => (
-        <Text key={i}>{line}</Text>
+        <AnsiTextLine key={i} line={line} />
       ))}
     </Box>
   );

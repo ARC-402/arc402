@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from "react";
-import { Box, Text, useApp, useInput } from "../renderer/index.js";
+import { Box, useApp, useInput } from "../renderer/index.js";
+import { ThemedText } from "../renderer/ThemedText.js";
 import { BUILTIN_CMDS, TUI_SUBCOMMANDS, TUI_TOP_LEVEL_COMMANDS } from "./command-catalog.js";
 import { CompletionDropdown } from "./components/CompletionDropdown.js";
 
@@ -259,10 +260,10 @@ export function InputLine({ onSubmit, isDisabled = false }: InputLineProps) {
         />
       )}
       <Box>
-        <Text color="cyan">◈</Text>
-        <Text dimColor> arc402 </Text>
-        <Text color="white">{">"} </Text>
-        <Text color="white">{displayValue}</Text>
+        <ThemedText variant="prompt">◈</ThemedText>
+        <ThemedText themeColor="dim"> arc402 </ThemedText>
+        <ThemedText themeColor="white">{">"} </ThemedText>
+        <ThemedText themeColor="white">{displayValue}</ThemedText>
       </Box>
     </Box>
   );

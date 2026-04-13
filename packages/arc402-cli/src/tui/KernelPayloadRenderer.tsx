@@ -8,6 +8,11 @@ import { WorkroomCard } from "./components/commerce/WorkroomCard";
 import { SubscribeCard } from "./components/commerce/SubscribeCard";
 import { RoundsList } from "./components/commerce/RoundsList";
 import { SquadCard } from "./components/commerce/SquadCard";
+import { ComputeCard } from "./components/commerce/ComputeCard";
+import { FeedCard } from "./components/commerce/FeedCard";
+import { JobStatusCard } from "./components/commerce/JobStatusCard";
+import { ProfileCard } from "./components/commerce/ProfileCard";
+import { StandingsCard } from "./components/commerce/StandingsCard";
 
 interface KernelPayloadRendererProps {
   payload: KernelPayload;
@@ -58,6 +63,32 @@ export function KernelPayloadRenderer({ payload }: KernelPayloadRendererProps) {
           ))}
         </Box>
       );
+
+    case "compute":
+      return <ComputeCard {...payload.props} />;
+
+    case "computes":
+      return (
+        <Box flexDirection="column">
+          {payload.cards.map((card, i) => (
+            <Box key={i} flexDirection="column" marginBottom={1}>
+              <ComputeCard {...card} />
+            </Box>
+          ))}
+        </Box>
+      );
+
+    case "feed":
+      return <FeedCard {...payload.props} />;
+
+    case "job":
+      return <JobStatusCard {...payload.props} />;
+
+    case "profile":
+      return <ProfileCard {...payload.props} />;
+
+    case "standings":
+      return <StandingsCard {...payload.props} />;
 
     case "not_found":
     case "error":

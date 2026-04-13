@@ -1,5 +1,6 @@
 import React from "react";
-import { Box, Text } from "../../renderer/index.js";
+import { Box } from "../../renderer/index.js";
+import { ThemedText } from "../../renderer/ThemedText.js";
 import { Button } from "./Button.js";
 
 export interface ConfirmPromptProps {
@@ -20,16 +21,16 @@ export function ConfirmPrompt({
   return (
     <Box flexDirection="column">
       <Box marginBottom={1}>
-        <Text bold color="cyan">
+        <ThemedText variant="header">
           ◈ {message}
-        </Text>
+        </ThemedText>
       </Box>
       <Box>
         <Box marginRight={2}><Button label={confirmLabel} onPress={onConfirm} variant="primary" /></Box>
         <Button label={cancelLabel} onPress={onCancel} variant="dim" />
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>Tab to switch · Enter to select</Text>
+        <ThemedText themeColor="dim">Tab to switch · Enter to select</ThemedText>
       </Box>
     </Box>
   );

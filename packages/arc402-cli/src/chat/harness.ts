@@ -88,6 +88,26 @@ export function getHarnessChoices(): HarnessChoice[] {
   }));
 }
 
+export function normalizeOpenClawModel(value?: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed === "openclaw") return "openclaw";
+  if (trimmed.startsWith("openclaw/")) {
+    const agentId = trimmed.slice("openclaw/".length).trim();
+    return agentId ? `openclaw/${agentId}` : "openclaw";
+  }
+  if (trimmed.startsWith("openclaw:")) {
+    const agentId = trimmed.slice("openclaw:".length).trim();
+    return agentId ? `openclaw/${agentId}` : "openclaw";
+  }
+  return "openclaw";
+}
+
+function normalizeRuntimeModel(harness: SupportedHarness | undefined, model?: string): string | undefined {
+  const trimmed = model?.trim();
+  if (harness === "openclaw") return normalizeOpenClawModel(trimmed);
+  return trimmed || undefined;
+}
+
 function loadSavedChatConfig(): NonNullable<Arc402Config["chat"]> | undefined {
   if (!configExists()) return undefined;
   return loadConfig().chat;
@@ -114,7 +134,8 @@ export function resolveInitialChatRuntime(options: {
   const explicitNodeMode = options.local ? "local" : options.remote ? "remote" : undefined;
   const target = resolveChatDaemonTarget({ explicitBaseUrl: options.daemonUrl, explicitNodeMode });
   const harness = normalizeHarness(options.harness) ?? normalizeHarness(saved?.harness) ?? daemonHarness;
-  const model = options.model?.trim() || saved?.model?.trim() || undefined;
+  const rawModel = options.model?.trim() || saved?.model?.trim() || undefined;
+  const model = normalizeRuntimeModel(harness, rawModel);
   const nodeMode = explicitNodeMode ?? saved?.nodeMode ?? target.mode ?? inferDaemonNodeMode(target.baseUrl);
 
   return {
@@ -136,7 +157,7 @@ export function persistChatHarnessSelection(runtime: ChatRuntimeConfig): void {
       daemonUrl: runtime.daemonUrl,
       nodeMode: runtime.nodeMode,
       harness: runtime.harness,
-      model: runtime.model,
+      model: normalizeRuntimeModel(runtime.harness, runtime.model),
     },
   };
   saveConfig(nextConfig);
@@ -180,10 +201,14 @@ export async function dispatchHarnessChat(params: {
     if (systemPrompt?.trim()) messages.push({ role: "system", content: systemPrompt });
     messages.push({ role: "user", content: message });
 
+    const resolvedModel = harness === "openclaw"
+      ? normalizeOpenClawModel(model)
+      : model?.trim() || "claude-sonnet-4-6";
+
     const res = await fetch(endpoint, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model: model ?? "claude-sonnet-4-6", stream: false, messages }),
+      body: JSON.stringify({ model: resolvedModel, stream: false, messages }),
       signal: AbortSignal.timeout(120000),
     });
     if (!res.ok) {

@@ -646,11 +646,14 @@ Use this before declaring the lane complete.
 - [x] Phase 1 reviewed
 - [x] Phase 2 launched
 - [x] Phase 2 reviewed
-- [ ] Phase 3 launched
-- [ ] Phase 3 reviewed
-- [ ] Phase 4 launched
-- [ ] Phase 4 reviewed
-- [ ] Phase 5 launched
-- [ ] Phase 5 reviewed
-- [ ] Phase 6 launched
-- [ ] Final signoff complete
+- [x] Phase 3 launched (kernel extraction + TUI render sink, commit `d69fc7f` area)
+- [x] Phase 3 reviewed
+- [x] Phase 4 launched (commit `95c430c`)
+- [x] Phase 4 reviewed
+- [x] Phase 5 launched (pre-existing `arc402 watch`)
+- [x] Phase 5 reviewed
+
+## 2026-04-03
+- [x] Phase 6 launched (acceptance + refinement pass — all 9 commerce components, KernelPayloadRenderer, AgentPicker, typed payload system)
+- [x] Phase 6 reviewed by Forge — all spec-defined functionality implemented and committed
+- [ ] Final signoff — pending Lego's own terminal session

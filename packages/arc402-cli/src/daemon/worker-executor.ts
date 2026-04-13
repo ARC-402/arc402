@@ -63,6 +63,17 @@ function readDirMd(dirPath: string, maxBytes: number): string {
   return parts.join("\n\n");
 }
 
+function buildOpenClawModel(workerAgentId?: string): string {
+  const trimmed = workerAgentId?.trim();
+  if (!trimmed || trimmed === "openclaw") return "openclaw";
+  if (trimmed.startsWith("openclaw/")) return trimmed;
+  if (trimmed.startsWith("openclaw:")) {
+    const agentId = trimmed.slice("openclaw:".length).trim();
+    return agentId ? `openclaw/${agentId}` : "openclaw";
+  }
+  return `openclaw/${trimmed}`;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type WorkerStatus = "queued" | "running" | "completed" | "failed";
@@ -194,6 +205,10 @@ export class WorkerExecutor {
     return Array.from(this.jobs.values()).map(r => this.toPublic(r));
   }
 
+  getAgentType(): AgentType {
+    return this.agentType;
+  }
+
   /**
    * Read job log contents (for worker-logs IPC command).
    */
@@ -311,7 +326,7 @@ export class WorkerExecutor {
     logStream.write(`[worker-executor] Capability: ${rec.capability}\n\n`);
 
     const payload = JSON.stringify({
-      model: `openclaw:${workerAgentId}`,
+      model: buildOpenClawModel(workerAgentId),
       messages: [{ role: "user", content: taskText }],
       stream: false,
       metadata: {

@@ -27,7 +27,19 @@ export function setOnCommit(fn: () => void): void {
 function resolveColor(color?: Color | keyof typeof COLORS | string): Color | null {
   if (!color) return null;
   if (typeof color === 'string') {
-    return COLORS[color as keyof typeof COLORS] ?? null;
+    if (color in COLORS) {
+      return COLORS[color as keyof typeof COLORS] ?? null;
+    }
+    const hex = color.trim().match(/^#?([0-9a-fA-F]{6})$/);
+    if (hex) {
+      const value = hex[1];
+      return {
+        r: Number.parseInt(value.slice(0, 2), 16),
+        g: Number.parseInt(value.slice(2, 4), 16),
+        b: Number.parseInt(value.slice(4, 6), 16),
+      };
+    }
+    return null;
   }
   return color;
 }

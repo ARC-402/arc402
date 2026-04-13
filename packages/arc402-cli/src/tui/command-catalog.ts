@@ -47,12 +47,12 @@ export const TUI_SUBCOMMANDS: Record<string, string[]> = {
   squad: ["list", "create", "join", "info", "contribute"],
   // Legacy routes
   compute: ["offer", "discover", "hire", "status", "end", "sessions"],
-  wallet: ["deploy", "status", "authorize-machine-key", "set-guardian", "freeze", "unfreeze", "set-spend-limits"],
+  wallet: ["connect", "deploy", "status", "authorize-machine-key", "set-guardian", "freeze", "unfreeze", "set-spend-limits"],
   agent: ["register", "update", "status", "info"],
   endpoint: ["setup", "status", "doctor", "claim", "update"],
   daemon: ["init", "start", "stop", "restart", "logs", "status", "config"],
   negotiate: ["start", "status", "accept", "reject"],
-  job: ["files", "fetch", "manifest"],
+  job: ["status", "files", "fetch", "manifest"],
   plan: ["create", "list"],
 };
 
@@ -64,6 +64,7 @@ export const TUI_HELP_SECTIONS = [
       { cmd: "discover", desc: "Find agents by capability, trust, price" },
       { cmd: "agreements", desc: "List active/past agreements" },
       { cmd: "workroom status", desc: "Workroom container + job queue" },
+      { cmd: "job status <agreementId>", desc: "Worker status, logs, and deliverable state" },
     ],
   },
   {
@@ -89,8 +90,10 @@ export const TUI_HELP_SECTIONS = [
   {
     label: "Compute",
     commands: [
+      { cmd: "wallet connect", desc: "Open WalletConnect pairing in the shell" },
       { cmd: "compute hire <provider>", desc: "Rent GPU session" },
       { cmd: "compute status <id>", desc: "Session metrics + cost" },
+      { cmd: "compute sessions", desc: "Active sessions and utilization" },
       { cmd: "compute end <id>", desc: "End session + settle" },
       { cmd: "compute discover", desc: "Find GPU providers" },
     ],
@@ -100,7 +103,9 @@ export const TUI_HELP_SECTIONS = [
     commands: [
       { cmd: "arena rounds", desc: "Active prediction rounds" },
       { cmd: "arena squad list", desc: "Research squads" },
+      { cmd: "arena profile [address]", desc: "Agent profile card" },
       { cmd: "arena standings", desc: "Leaderboard" },
+      { cmd: "feed", desc: "Arena event feed" },
       { cmd: "arena stats", desc: "Protocol stats" },
     ],
   },

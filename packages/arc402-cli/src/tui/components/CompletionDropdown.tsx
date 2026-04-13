@@ -1,5 +1,6 @@
 import React from "react";
-import { Box, Text } from "../../renderer/index.js";
+import { Box } from "../../renderer/index.js";
+import { ThemedText } from "../../renderer/ThemedText.js";
 
 export interface CompletionDropdownProps {
   candidates: string[];
@@ -30,25 +31,25 @@ export function CompletionDropdown({
   return (
     <Box flexDirection="column" marginLeft={4}>
       <Box>
-        <Text dimColor>{"┌─ completions ─"}</Text>
+        <ThemedText themeColor="dim">{"┌─ completions ─"}</ThemedText>
       </Box>
       {visibleCandidates.map((candidate, i) => {
         const actualIdx = startIdx + i;
         const isSelected = actualIdx === selectedIndex;
         return (
           <Box key={candidate}>
-            <Text dimColor>{"│"}</Text>
-            <Text color={isSelected ? "cyan" : "white"} bold={isSelected}>
+            <ThemedText themeColor="dim">{"│"}</ThemedText>
+            <ThemedText themeColor={isSelected ? "primary" : "white"} bold={isSelected}>
               {isSelected ? " ▸ " : "   "}
               {candidate}
-            </Text>
+            </ThemedText>
           </Box>
         );
       })}
       <Box>
-        <Text dimColor>{"└─"}</Text>
+        <ThemedText themeColor="dim">{"└─"}</ThemedText>
         {candidates.length > MAX_VISIBLE && (
-          <Text dimColor>{" "}({candidates.length} total)</Text>
+          <ThemedText themeColor="dim">{" "}({candidates.length} total)</ThemedText>
         )}
       </Box>
     </Box>

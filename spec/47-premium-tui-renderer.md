@@ -1,5 +1,5 @@
 # Spec 47 — ARC-402 Premium TUI Renderer
-*Status: Specced — not yet built*
+*Status: Phases 1–5 COMPLETE — Phase 6 (ink migration) pending*
 *Date: 2026-04-03*
 *Owner: Forge (Engineering)*
 

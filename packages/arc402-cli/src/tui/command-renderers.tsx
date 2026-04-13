@@ -2,12 +2,16 @@ import type { ProfileCardProps } from "./components/commerce/ProfileCard";
 import type { AgreementListProps } from "./components/commerce/AgreementList";
 import type { ComputeCardProps } from "./components/commerce/ComputeCard";
 import type { DiscoverListProps } from "./components/commerce/DiscoverList";
+import type { FeedCardProps } from "./components/commerce/FeedCard";
 import type { HireCardProps } from "./components/commerce/HireCard";
+import type { JobStatusCardProps } from "./components/commerce/JobStatusCard";
 import type { RoundsListProps } from "./components/commerce/RoundsList";
 import type { SquadCardProps } from "./components/commerce/SquadCard";
+import type { StandingsCardProps, StandingsEntry } from "./components/commerce/StandingsCard";
 import type { StatusCardProps } from "./components/commerce/StatusCard";
 import type { SubscribeCardProps } from "./components/commerce/SubscribeCard";
 import type { WorkroomCardProps } from "./components/commerce/WorkroomCard";
+import type { KernelPayload } from "./kernel-payload";
 import { formatCountdown, formatPercent } from "./commerce-format";
 import { writeTuiLine } from "./render-inline";
 
@@ -39,8 +43,8 @@ function listItem(title: string, meta?: string, detailLine?: string, status?: st
   ];
 }
 
-export async function printStatusCard(props: StatusCardProps): Promise<void> {
-  emit([
+export function buildStatusCardLines(props: StatusCardProps, guidance?: string[]): string[] {
+  return [
     "◈ Wallet Status",
     `${props.wallet}${badge(props.status?.label)}`,
     props.network,
@@ -68,11 +72,12 @@ export async function printStatusCard(props: StatusCardProps): Promise<void> {
           detail("harness", props.workroom.harness ?? "n/a"),
         ]
       : []),
-  ]);
+    ...(guidance?.length ? ["", ...guidance] : []),
+  ];
 }
 
-export async function printDiscoverList(props: DiscoverListProps): Promise<void> {
-  emit([
+export function buildDiscoverListLines(props: DiscoverListProps): string[] {
+  return [
     "◈ Discover",
     `${props.title ?? "Discover Results"}${badge(props.status?.label)}`,
     ...(props.summary ? [props.summary] : []),
@@ -86,11 +91,11 @@ export async function printDiscoverList(props: DiscoverListProps): Promise<void>
       ).map((line) => `  ${line}`),
     ),
     `${props.agents.length} ranked result${props.agents.length === 1 ? "" : "s"}`,
-  ]);
+  ];
 }
 
-export async function printHireCard(props: HireCardProps): Promise<void> {
-  emit([
+export function buildHireCardLines(props: HireCardProps): string[] {
+  return [
     "◈ Hire",
     `${props.providerName ? `${props.providerName} · ${props.providerAddress}` : props.providerAddress}${badge(props.status?.label)}`,
     props.capability,
@@ -102,11 +107,11 @@ export async function printHireCard(props: HireCardProps): Promise<void> {
     ...((props.notes ?? []).length > 0
       ? ["", "operator notes", ...(props.notes ?? []).map(bullet)]
       : []),
-  ]);
+  ];
 }
 
-export async function printAgreementList(props: AgreementListProps): Promise<void> {
-  emit([
+export function buildAgreementListLines(props: AgreementListProps): string[] {
+  return [
     "◈ Agreements",
     `${props.roleLabel ?? "Recent Agreements"}${badge(props.status?.label)}`,
     ...(props.totalEscrowLabel ? [props.totalEscrowLabel] : []),
@@ -125,11 +130,11 @@ export async function printAgreementList(props: AgreementListProps): Promise<voi
           ).map((line) => `  ${line}`),
         )
       : ["  No agreements found."]),
-  ]);
+  ];
 }
 
-export async function printComputeCard(props: ComputeCardProps): Promise<void> {
-  emit([
+export function buildComputeCardLines(props: ComputeCardProps): string[] {
+  return [
     "◈ Compute Session",
     `${props.sessionId}${badge(props.status?.label)}`,
     `${props.provider} · ${props.gpuSpec}`,
@@ -141,11 +146,29 @@ export async function printComputeCard(props: ComputeCardProps): Promise<void> {
     ...(props.utilizationPercent !== undefined
       ? [detail("utilization", formatPercent(props.utilizationPercent, 2))]
       : []),
-  ]);
+  ];
 }
 
-export async function printSubscribeCard(props: SubscribeCardProps): Promise<void> {
-  emit([
+export function buildFeedCardLines(props: FeedCardProps): string[] {
+  return [
+    "◈ Arena Feed",
+    props.title ?? "Arena Feed",
+    separator(),
+    ...(props.entries.length > 0
+      ? props.entries.flatMap((entry) =>
+          listItem(
+            entry.eventType,
+            `${entry.timestampLabel} · ${entry.agent}`,
+            entry.summary,
+            entry.eventType,
+          ).map((line) => `  ${line}`),
+        )
+      : ["  No feed events found."]),
+  ];
+}
+
+export function buildSubscribeCardLines(props: SubscribeCardProps): string[] {
+  return [
     "◈ Subscription",
     `${props.provider}${badge(props.status?.label)}`,
     props.planId,
@@ -157,11 +180,11 @@ export async function printSubscribeCard(props: SubscribeCardProps): Promise<voi
     ...((props.accessSummary ?? []).length > 0
       ? ["", "access", ...(props.accessSummary ?? []).map(bullet)]
       : []),
-  ]);
+  ];
 }
 
-export async function printRoundsList(props: RoundsListProps): Promise<void> {
-  emit([
+export function buildRoundsListLines(props: RoundsListProps): string[] {
+  return [
     "◈ Arena",
     `${props.title ?? "Arena Rounds"}${badge(props.status?.label)}`,
     separator(),
@@ -175,12 +198,11 @@ export async function printRoundsList(props: RoundsListProps): Promise<void> {
           ).map((line) => `  ${line}`),
         )
       : ["  No arena rounds found."]),
-    "Built for round boards and live resolution views.",
-  ]);
+  ];
 }
 
-export async function printSquadCard(props: SquadCardProps): Promise<void> {
-  emit([
+export function buildSquadCardLines(props: SquadCardProps): string[] {
+  return [
     "◈ Squad",
     `${props.name}${badge(props.status?.label ?? props.statusLabel)}`,
     props.id,
@@ -195,24 +217,29 @@ export async function printSquadCard(props: SquadCardProps): Promise<void> {
     ...((props.briefings ?? []).length > 0
       ? ["", "briefings", ...(props.briefings ?? []).map((briefing) => bullet(`${briefing.preview}${briefing.publishedLabel ? ` · ${briefing.publishedLabel}` : ""}${briefing.tags?.length ? ` · ${briefing.tags.join(", ")}` : ""}`))]
       : []),
-  ]);
+  ];
 }
 
-export interface StandingsEntry {
-  rank: number;
-  agent: string;
-  wins: number;
-  losses: number;
-  netUsdc: string;
+export function buildJobStatusCardLines(props: JobStatusCardProps): string[] {
+  return [
+    "◈ Job Status",
+    `Agreement #${props.agreementId}${badge(props.status?.label)}`,
+    props.capability,
+    separator(),
+    detail("harness", props.harness ?? "n/a"),
+    detail("pid", props.pid ?? "n/a"),
+    detail("job dir", props.jobDir ?? "n/a"),
+    detail("started", props.startedAt ?? "n/a"),
+    detail("completed", props.completedAt ?? "n/a"),
+    detail("exit", props.exitCode ?? "n/a"),
+    detail("root hash", props.deliverableHash ?? "n/a"),
+    ...(props.error ? [detail("error", props.error)] : []),
+    ...((props.logTail ?? []).length > 0 ? ["", "log tail", ...(props.logTail ?? []).map((line) => `  ${line}`)] : []),
+  ];
 }
 
-export interface StandingsProps {
-  entries: StandingsEntry[];
-  title?: string;
-}
-
-export async function printProfileCard(props: ProfileCardProps): Promise<void> {
-  emit([
+export function buildProfileCardLines(props: ProfileCardProps): string[] {
+  return [
     "◈ Agent Profile",
     `${props.name ?? props.address}${badge(props.status?.label ?? (props.isActive ? "active" : "inactive"))}`,
     props.endpoint ?? "",
@@ -228,29 +255,26 @@ export async function printProfileCard(props: ProfileCardProps): Promise<void> {
           "",
           "capabilities",
           ...props.capabilities.map(
-            (c, i) =>
-              `  ${i === (props.capabilities?.length ?? 0) - 1 ? "└─" : "├─"} ${c}`,
+            (c, i) => `  ${i === (props.capabilities?.length ?? 0) - 1 ? "└─" : "├─"} ${c}`,
           ),
         ]
       : []),
     ...(props.latestStatus ? [detail("latest", props.latestStatus)] : []),
-  ]);
+  ];
 }
 
-export async function printStandings(props: StandingsProps): Promise<void> {
-  emit([
+export function buildStandingsLines(props: StandingsCardProps): string[] {
+  return [
     "◈ Arena Standings",
     props.title ?? "Global Leaderboard",
     separator(),
-    ...props.entries.flatMap((e) => [
-      `  #${String(e.rank).padStart(2)} ${e.agent.padEnd(30)} ${String(e.wins).padStart(3)}W ${String(e.losses).padStart(3)}L  ${e.netUsdc} USDC`,
-    ]),
+    ...props.entries.map((e) => `  #${String(e.rank).padStart(2)} ${e.agent.padEnd(30)} ${String(e.wins).padStart(3)}W ${String(e.losses).padStart(3)}L  ${e.netUsdc} USDC`),
     `${props.entries.length} agents`,
-  ]);
+  ];
 }
 
-export async function printWorkroomCard(props: WorkroomCardProps): Promise<void> {
-  emit([
+export function buildWorkroomCardLines(props: WorkroomCardProps): string[] {
+  return [
     "◈ Workroom",
     `${props.runtime ?? "Governed execution environment"}${badge(props.status?.label ?? props.statusLabel)}`,
     separator(),
@@ -260,5 +284,95 @@ export async function printWorkroomCard(props: WorkroomCardProps): Promise<void>
     ...((props.activeJobs ?? []).length > 0
       ? ["", "jobs", ...(props.activeJobs ?? []).map((job) => bullet(`${job.id} · ${job.status}${job.harness ? ` · ${job.harness}` : ""}${job.task ? ` · ${job.task}` : ""}`))]
       : []),
-  ]);
+  ];
+}
+
+export function buildKernelPayloadLines(payload: KernelPayload): string[] {
+  switch (payload.type) {
+    case "status":
+      return buildStatusCardLines(payload.props, payload.guidance);
+    case "discover":
+      return buildDiscoverListLines(payload.props);
+    case "agreements":
+      return buildAgreementListLines(payload.props);
+    case "workroom":
+      return buildWorkroomCardLines(payload.props);
+    case "subscribe":
+      return buildSubscribeCardLines(payload.props);
+    case "rounds":
+      return buildRoundsListLines(payload.props);
+    case "squad":
+      return buildSquadCardLines(payload.props);
+    case "squads":
+      return payload.cards.flatMap((card, index) => [
+        ...buildSquadCardLines(card),
+        ...(index < payload.cards.length - 1 ? [""] : []),
+      ]);
+    case "compute":
+      return buildComputeCardLines(payload.props);
+    case "computes":
+      return payload.cards.flatMap((card, index) => [
+        ...buildComputeCardLines(card),
+        ...(index < payload.cards.length - 1 ? [""] : []),
+      ]);
+    case "feed":
+      return buildFeedCardLines(payload.props);
+    case "job":
+      return buildJobStatusCardLines(payload.props);
+    case "profile":
+      return buildProfileCardLines(payload.props);
+    case "standings":
+      return buildStandingsLines(payload.props);
+    case "not_found":
+    case "error":
+      return [payload.message];
+  }
+}
+
+export async function printStatusCard(props: StatusCardProps): Promise<void> {
+  emit(buildStatusCardLines(props));
+}
+
+export async function printDiscoverList(props: DiscoverListProps): Promise<void> {
+  emit(buildDiscoverListLines(props));
+}
+
+export async function printHireCard(props: HireCardProps): Promise<void> {
+  emit(buildHireCardLines(props));
+}
+
+export async function printAgreementList(props: AgreementListProps): Promise<void> {
+  emit(buildAgreementListLines(props));
+}
+
+export async function printComputeCard(props: ComputeCardProps): Promise<void> {
+  emit(buildComputeCardLines(props));
+}
+
+export async function printSubscribeCard(props: SubscribeCardProps): Promise<void> {
+  emit(buildSubscribeCardLines(props));
+}
+
+export async function printRoundsList(props: RoundsListProps): Promise<void> {
+  emit(buildRoundsListLines(props));
+}
+
+export async function printSquadCard(props: SquadCardProps): Promise<void> {
+  emit(buildSquadCardLines(props));
+}
+
+export async function printJobStatusCard(props: JobStatusCardProps): Promise<void> {
+  emit(buildJobStatusCardLines(props));
+}
+
+export async function printProfileCard(props: ProfileCardProps): Promise<void> {
+  emit(buildProfileCardLines(props));
+}
+
+export async function printStandings(props: StandingsCardProps): Promise<void> {
+  emit(buildStandingsLines(props));
+}
+
+export async function printWorkroomCard(props: WorkroomCardProps): Promise<void> {
+  emit(buildWorkroomCardLines(props));
 }

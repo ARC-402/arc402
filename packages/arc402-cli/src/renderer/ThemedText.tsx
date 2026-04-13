@@ -1,5 +1,5 @@
 import React from 'react';
-import { useTheme, useComponentStyle } from './ThemeProvider.js';
+import { useTheme } from './ThemeProvider.js';
 import { Text } from './ink.js';
 import type { Color } from './cell.js';
 import type { Theme } from './theme.js';
@@ -7,7 +7,8 @@ import type { Theme } from './theme.js';
 interface ThemedTextProps {
   // Either use a component style token
   variant?: keyof Theme['components'];
-  // Or directly specify color
+  // Or directly specify a theme color token / raw color
+  themeColor?: keyof Theme['colors'];
   color?: Color | null;
   bold?: boolean;
   dim?: boolean;
@@ -16,12 +17,16 @@ interface ThemedTextProps {
   children: React.ReactNode;
 }
 
-export function ThemedText({ variant, color, bold, dim, italic, underline, children }: ThemedTextProps) {
+export function ThemedText({ variant, themeColor, color, bold, dim, italic, underline, children }: ThemedTextProps) {
   const theme = useTheme();
 
   let resolvedColor = color;
   let resolvedBold = bold;
   let resolvedDim = dim;
+
+  if (themeColor && resolvedColor === undefined) {
+    resolvedColor = theme.colors[themeColor] ?? null;
+  }
 
   if (variant) {
     const style = theme.components[variant] as Record<string, unknown>;

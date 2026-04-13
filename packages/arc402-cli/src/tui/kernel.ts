@@ -1,6 +1,7 @@
 import { ServiceAgreementClient } from "@arc402/sdk";
 import { ethers } from "ethers";
 import * as fs from "fs";
+import * as net from "net";
 import * as path from "path";
 import * as os from "os";
 import {
@@ -15,8 +16,10 @@ import { configExists, loadConfig } from "../config";
 import { getClient } from "../client";
 import { agreementStatusLabel } from "../utils/format";
 import { DAEMON_DIR, DAEMON_TOML, loadDaemonConfig } from "../daemon/config";
-import { printAgreementList, printDiscoverList, printRoundsList, printSquadCard, printStatusCard, printSubscribeCard, printWorkroomCard } from "./command-renderers";
+import { printAgreementList, printComputeCard, printDiscoverList, printJobStatusCard, printProfileCard, printRoundsList, printSquadCard, printStandings, printStatusCard, printSubscribeCard, printWorkroomCard } from "./command-renderers";
 import type { KernelPayload } from "./kernel-payload";
+
+type IpcResponse = { ok: boolean; data?: unknown; error?: string };
 
 function readConfiguredWallet(): string | undefined {
   if (fs.existsSync(DAEMON_TOML)) {
@@ -37,6 +40,43 @@ function readConfiguredWallet(): string | undefined {
   }
 
   return undefined;
+}
+
+function sendDaemonIpcCommand(cmd: Record<string, unknown>): Promise<IpcResponse> {
+  const socketPath = path.join(DAEMON_DIR, "daemon.sock");
+  if (!fs.existsSync(socketPath)) {
+    throw new Error("Daemon IPC socket not found. Start the daemon first.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(socketPath, () => {
+      socket.write(JSON.stringify(cmd) + "\n");
+    });
+
+    let buf = "";
+    socket.on("data", (data) => {
+      buf += data.toString();
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          resolve(JSON.parse(line) as IpcResponse);
+        } catch {
+          reject(new Error("Invalid JSON response from daemon"));
+        } finally {
+          socket.destroy();
+        }
+        return;
+      }
+    });
+
+    socket.on("error", reject);
+    socket.setTimeout(5000, () => {
+      socket.destroy();
+      reject(new Error("Daemon IPC timeout"));
+    });
+  });
 }
 
 function renderDaemonGuidance(target: { mode: string }): string[] {
@@ -188,14 +228,16 @@ function readWorkroomStatusSnapshot(): { statusLabel: string; harness?: string; 
 }
 
 export function getTuiTopLevelCommands(): string[] {
-  return ["status", "discover", "agreements", "workroom", "subscription", "subscribe", "arena"];
+  return ["status", "discover", "agreements", "workroom", "subscription", "subscribe", "compute", "job", "arena"];
 }
 
 export function getTuiSubCommands(): Map<string, string[]> {
   return new Map([
     ["workroom", ["status", "worker"]],
     ["subscription", ["status", "list", "cancel", "topup"]],
-    ["arena", ["rounds", "squad"]],
+    ["compute", ["status", "sessions"]],
+    ["job", ["status"]],
+    ["arena", ["rounds", "squad", "profile", "standings", "feed"]],
     ["squad", ["list", "info"]],
   ]);
 }
@@ -234,6 +276,31 @@ async function renderKernelPayload(payload: KernelPayload): Promise<void> {
         writeTuiLine("");
       }
       break;
+    case "compute":
+      await printComputeCard(payload.props);
+      break;
+    case "computes":
+      for (const card of payload.cards) {
+        await printComputeCard(card);
+        const { writeTuiLine } = await import("./render-inline");
+        writeTuiLine("");
+      }
+      break;
+    case "feed": {
+      const { buildFeedCardLines } = await import("./command-renderers");
+      const { writeTuiLine } = await import("./render-inline");
+      for (const line of buildFeedCardLines(payload.props)) writeTuiLine(line);
+      break;
+    }
+    case "job":
+      await printJobStatusCard(payload.props);
+      break;
+    case "profile":
+      await printProfileCard(payload.props);
+      break;
+    case "standings":
+      await printStandings(payload.props);
+      break;
     case "not_found":
     case "error": {
       const { writeTuiLine } = await import("./render-inline");
@@ -271,8 +338,36 @@ export async function executeKernelForPayload(input: string): Promise<KernelPayl
     return fetchSubscribeInspectProps(tokens.slice(1));
   }
 
+  if (tokens[0] === "compute" && tokens[1] === "status") {
+    return fetchComputeStatusProps(tokens.slice(2));
+  }
+
+  if (tokens[0] === "compute" && tokens[1] === "sessions") {
+    return fetchComputeSessionsProps();
+  }
+
+  if (tokens[0] === "job" && tokens[1] === "status") {
+    return fetchJobStatusProps(tokens.slice(2));
+  }
+
+  if (tokens[0] === "feed") {
+    return fetchArenaFeedProps(tokens.slice(1));
+  }
+
+  if (tokens[0] === "arena" && tokens[1] === "feed") {
+    return fetchArenaFeedProps(tokens.slice(2));
+  }
+
   if (tokens[0] === "arena" && tokens[1] === "rounds") {
     return fetchArenaRoundsProps(tokens.slice(2));
+  }
+
+  if (tokens[0] === "arena" && tokens[1] === "profile") {
+    return fetchArenaProfileProps(tokens.slice(2));
+  }
+
+  if (tokens[0] === "arena" && tokens[1] === "standings") {
+    return fetchArenaStandingsProps(tokens.slice(2));
   }
 
   if (tokens[0] === "arena" && tokens[1] === "squad" && tokens[2] === "list") {
@@ -559,6 +654,147 @@ async function fetchWorkroomStatusProps(): Promise<KernelPayload> {
   return { type: "workroom", props: snapshot };
 }
 
+function getLocalDaemonPort(): number {
+  if (fs.existsSync(DAEMON_TOML)) {
+    try {
+      const cfg = loadDaemonConfig();
+      return cfg.relay?.listen_port ?? 4402;
+    } catch {
+      // use default
+    }
+  }
+  return 4402;
+}
+
+async function fetchComputeStatusProps(args: string[]): Promise<KernelPayload> {
+  const sessionId = args[0];
+  if (!sessionId) return fetchComputeSessionsProps();
+
+  const res = await fetch(`http://127.0.0.1:${getLocalDaemonPort()}/compute/session/${sessionId}`);
+  if (!res.ok) {
+    return { type: "not_found", message: `Compute session not found: ${sessionId}` };
+  }
+
+  const data = (await res.json()) as { session: Record<string, unknown>; current: Record<string, unknown> | null };
+  const session = data.session;
+  const current = data.current;
+  const proposal = (session.proposal ?? {}) as Record<string, unknown>;
+  const consumedMinutes = Number(session.consumedMinutes ?? current?.consumedMinutes ?? 0);
+  const maxHours = Number(proposal.maxHours ?? 0);
+  const ratePerHourWei = String(proposal.ratePerHourWei ?? "0");
+  const totalBudgetWei = maxHours > 0 ? BigInt(ratePerHourWei) * BigInt(maxHours) : 0n;
+  const costWei = current?.costWei ? BigInt(String(current.costWei)) : (BigInt(ratePerHourWei) * BigInt(consumedMinutes)) / 60n;
+  const remainingWei = totalBudgetWei > 0n ? (totalBudgetWei - costWei > 0n ? totalBudgetWei - costWei : 0n) : 0n;
+  const pct = totalBudgetWei > 0n ? Number((costWei * 10000n) / totalBudgetWei) / 100 : undefined;
+
+  return {
+    type: "compute",
+    props: {
+      sessionId,
+      provider: String(proposal.clientAddress ?? "unknown"),
+      gpuSpec: String(proposal.gpuSpecHash ?? "gpu session"),
+      rateLabel: `${ratePerHourWei} wei/hr`,
+      consumedLabel: `${consumedMinutes} minutes`,
+      costLabel: `${costWei.toString()} wei`,
+      remainingLabel: totalBudgetWei > 0n ? `${remainingWei.toString()} wei` : undefined,
+      utilizationPercent: pct,
+      status: { label: String(session.status ?? "unknown"), tone: "info" },
+    },
+  };
+}
+
+async function fetchComputeSessionsProps(): Promise<KernelPayload> {
+  const res = await fetch(`http://127.0.0.1:${getLocalDaemonPort()}/compute/sessions`);
+  if (!res.ok) {
+    return { type: "error", message: `Failed to load compute sessions (HTTP ${res.status})` };
+  }
+
+  const data = (await res.json()) as { sessions?: Array<Record<string, unknown>>; count?: number };
+  const sessions = data.sessions ?? [];
+  if (sessions.length === 0) {
+    return { type: "not_found", message: "No compute sessions found." };
+  }
+
+  return {
+    type: "computes",
+    cards: sessions.map((raw) => {
+      const proposal = (raw.proposal ?? {}) as Record<string, unknown>;
+      const ratePerHourWei = String(proposal.ratePerHourWei ?? "0");
+      const maxHours = Number(proposal.maxHours ?? 0);
+      const consumedMinutes = Number(raw.consumedMinutes ?? 0);
+      const totalBudgetWei = BigInt(ratePerHourWei) * BigInt(maxHours);
+      const costWei = (BigInt(ratePerHourWei) * BigInt(consumedMinutes)) / 60n;
+      return {
+        sessionId: String(proposal.sessionId ?? "unknown"),
+        provider: String(proposal.clientAddress ?? "unknown"),
+        gpuSpec: String(proposal.gpuSpecHash ?? "gpu session"),
+        rateLabel: `${ratePerHourWei} wei/hr`,
+        consumedLabel: `${consumedMinutes} minutes`,
+        costLabel: `${costWei.toString()} wei`,
+        remainingLabel: `${(totalBudgetWei - costWei > 0n ? totalBudgetWei - costWei : 0n).toString()} wei`,
+        utilizationPercent: totalBudgetWei > 0n ? Number((costWei * 10000n) / totalBudgetWei) / 100 : undefined,
+        status: { label: String(raw.status ?? "unknown"), tone: "info" as const },
+      };
+    }),
+  };
+}
+
+async function fetchJobStatusProps(args: string[]): Promise<KernelPayload> {
+  const agreementId = args[0];
+  if (!agreementId) {
+    return { type: "error", message: "job status requires an agreement id" };
+  }
+
+  const statusRes = await sendDaemonIpcCommand({ command: "worker-status" });
+  if (!statusRes.ok) {
+    return { type: "error", message: statusRes.error ?? "Failed to load worker status" };
+  }
+
+  const jobs = ((statusRes.data as { jobs?: Array<Record<string, unknown>> } | undefined)?.jobs ?? []);
+  const job = jobs.find((entry) => String(entry.agreementId ?? "") === agreementId);
+  if (!job) {
+    return { type: "not_found", message: `No worker job found for agreement ${agreementId}` };
+  }
+
+  const logsRes = await sendDaemonIpcCommand({ command: "worker-logs", id: agreementId, tail: 20 });
+  const logTail = logsRes.ok
+    ? String(((logsRes.data as { log?: string } | undefined)?.log ?? ""))
+        .split("\n")
+        .map((line) => line.trimEnd())
+        .filter(Boolean)
+        .slice(-12)
+    : [];
+
+  const completedAt = Number(job.completedAt ?? 0);
+  const startedAt = Number(job.startedAt ?? 0);
+  const status = String(job.status ?? "unknown");
+  const tone = status === "completed"
+    ? "success"
+    : status === "failed"
+      ? "danger"
+      : status === "running"
+        ? "info"
+        : "warning";
+
+  return {
+    type: "job",
+    props: {
+      agreementId,
+      capability: String(job.capability ?? "unknown"),
+      status: { label: status, tone },
+      harness: String(job.agentType ?? "n/a"),
+      jobDir: String(job.jobDir ?? "n/a"),
+      pid: job.pid != null ? String(job.pid) : undefined,
+      startedAt: startedAt > 0 ? new Date(startedAt).toLocaleString() : undefined,
+      completedAt: completedAt > 0 ? new Date(completedAt).toLocaleString() : undefined,
+      exitCode: job.exitCode != null ? String(job.exitCode) : undefined,
+      deliverableHash: job.deliverableHash ? String(job.deliverableHash) : undefined,
+      error: job.error ? String(job.error) : undefined,
+      logTail,
+    },
+  };
+}
+
 async function fetchSubscriptionProps(args: string[]): Promise<KernelPayload> {
   const sub = args[0] ?? "status";
   const id = args[1];
@@ -655,6 +891,12 @@ async function arenaGql(query: string): Promise<Record<string, unknown>> {
   return json.data ?? {};
 }
 
+function formatUsdc(raw: bigint): string {
+  const whole = raw / 1_000_000n;
+  const frac = raw % 1_000_000n;
+  return `${whole}.${frac.toString().padStart(6, "0").replace(/0+$/, "") || "0"}`;
+}
+
 function separator(): string {
   return "─".repeat(60);
 }
@@ -684,6 +926,144 @@ function formatElapsed(ts: number): string {
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
   return `${Math.floor(diff / 86400)}d ago`;
+}
+
+async function fetchArenaFeedProps(args: string[]): Promise<KernelPayload> {
+  const type = readFlag(args, "--type");
+  const limit = Number.parseInt(readFlag(args, "--limit") ?? "20", 10);
+  const typeFilter = type ? `eventType: "${type}"` : "";
+  const whereClause = typeFilter ? `where: { ${typeFilter} }` : "";
+
+  const data = await arenaGql(`{
+    feedEvents(${whereClause} first: ${Math.max(1, Math.min(limit, 50))}, orderBy: timestamp, orderDirection: desc) {
+      id
+      eventType
+      agent
+      data
+      timestamp
+    }
+  }`);
+
+  const events = (data["feedEvents"] as unknown[]) ?? [];
+  return {
+    type: "feed",
+    props: {
+      title: type ? `Arena Feed — ${type}` : "Arena Feed",
+      entries: events.map((ev) => {
+        const e = ev as Record<string, unknown>;
+        return {
+          id: String(e["id"]),
+          eventType: String(e["eventType"] ?? "event"),
+          agent: truncateAddr(String(e["agent"] ?? "")),
+          summary: String(e["data"] ?? "").slice(0, 80),
+          timestampLabel: formatElapsed(Number(e["timestamp"] ?? 0)),
+        };
+      }),
+    },
+  };
+}
+
+async function fetchArenaProfileProps(args: string[]): Promise<KernelPayload> {
+  const target = args[0] ?? readConfiguredWallet();
+  if (!target) {
+    return { type: "error", message: "arena profile requires an address or configured wallet" };
+  }
+  const addr = target.toLowerCase();
+  const data = await arenaGql(`{
+    agent(id: "${addr}") {
+      id
+      name
+      serviceType
+      endpoint
+      registeredAt
+      active
+    }
+    arenaEntries(where: { agent: "${addr}" }, first: 1000) {
+      id
+      side
+      amount
+      round { id resolved outcome }
+    }
+    statuses(where: { agent: "${addr}" }, first: 5, orderBy: timestamp, orderDirection: desc) {
+      content
+      timestamp
+    }
+  }`);
+
+  const agent = data["agent"] as Record<string, unknown> | null;
+  const entries = (data["arenaEntries"] as unknown[]) ?? [];
+  const statuses = (data["statuses"] as unknown[]) ?? [];
+
+  let wins = 0;
+  let losses = 0;
+  let netUsdc = 0n;
+
+  for (const e of entries) {
+    const entry = e as Record<string, unknown>;
+    const round = entry["round"] as Record<string, unknown> | null;
+    if (!round || !round["resolved"]) continue;
+    const side = Number(entry["side"]);
+    const outcome = Boolean(round["outcome"]);
+    const amount = BigInt(String(entry["amount"] ?? "0"));
+    const won = (side === 0 && outcome) || (side === 1 && !outcome);
+    if (won) {
+      wins++;
+      netUsdc += amount;
+    } else {
+      losses++;
+      netUsdc -= amount;
+    }
+  }
+
+  const latestStatusContent = statuses.length > 0
+    ? String((statuses[0] as Record<string, unknown>)["content"] ?? "")
+    : undefined;
+
+  return {
+    type: "profile",
+    props: {
+      address: target,
+      name: agent ? String(agent["name"] ?? "") || undefined : undefined,
+      serviceType: agent ? String(agent["serviceType"] ?? "") || undefined : undefined,
+      endpoint: agent ? String(agent["endpoint"] ?? "") || undefined : undefined,
+      isActive: agent ? Boolean(agent["active"]) : false,
+      wins,
+      losses,
+      netUsdc: netUsdc >= 0n ? formatUsdc(netUsdc) : "-" + formatUsdc(-netUsdc),
+      latestStatus: latestStatusContent,
+    },
+  };
+}
+
+async function fetchArenaStandingsProps(args: string[]): Promise<KernelPayload> {
+  const category = readFlag(args, "--category");
+  const limit = Number.parseInt(readFlag(args, "--limit") ?? "20", 10);
+  const catFilter = category ? `where: { category: "${category}" }` : "";
+
+  const data = await arenaGql(`{
+    agentStandings(${catFilter} first: ${Math.max(1, Math.min(limit, 50))}, orderBy: wins, orderDirection: desc) {
+      id agent wins losses netUsdc
+    }
+  }`);
+
+  const standings = (data["agentStandings"] as unknown[]) ?? [];
+  return {
+    type: "standings",
+    props: {
+      title: category ? `Standings — ${category}` : "Global Leaderboard",
+      entries: standings.map((s, i) => {
+        const st = s as Record<string, unknown>;
+        const net = BigInt(String(st["netUsdc"] ?? "0"));
+        return {
+          rank: i + 1,
+          agent: truncateAddr(String(st["agent"])),
+          wins: Number(st["wins"]),
+          losses: Number(st["losses"]),
+          netUsdc: net >= 0n ? "+" + formatUsdc(net) : "-" + formatUsdc(-net),
+        };
+      }),
+    },
+  };
 }
 
 async function fetchArenaRoundsProps(args: string[]): Promise<KernelPayload> {

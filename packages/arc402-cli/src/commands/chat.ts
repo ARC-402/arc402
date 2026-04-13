@@ -22,6 +22,7 @@ import {
   getHarnessReadiness,
   loadDaemonHarnessDefault,
   normalizeHarness,
+  normalizeOpenClawModel,
   resolveInitialChatRuntime,
   type ChatRuntimeConfig,
   type HarnessReadiness,
@@ -189,7 +190,7 @@ async function runGuidedSetup(seed?: Partial<ResolvedChatRuntimeConfig>): Promis
     {
       type: "text",
       name: "model",
-      message: "Default model hint for chat (optional)",
+      message: "Default model hint (OpenClaw: use openclaw or openclaw/<agentId>)",
       initial: initialModel,
     },
   ], {
@@ -202,11 +203,12 @@ async function runGuidedSetup(seed?: Partial<ResolvedChatRuntimeConfig>): Promis
     return null;
   }
 
+  const model = String(setup.model ?? "").trim() || undefined;
   const runtime: ResolvedChatRuntimeConfig = {
     nodeMode: setup.nodeMode,
     daemonUrl: String(setup.daemonUrl).trim().replace(/\/$/, ""),
     harness,
-    model: String(setup.model ?? "").trim() || undefined,
+    model: harness === "openclaw" ? normalizeOpenClawModel(model) : model,
   };
 
   console.log("");
@@ -499,7 +501,7 @@ export function registerChatCommand(program: Command): void {
     .description("Launch the ARC-402 Commerce REPL with guided node and harness setup")
     .option("--daemon-url <url>", "Override the daemon API base URL")
     .option("--harness <name>", "Harness to describe and expect: openclaw | claude-code | codex | hermes")
-    .option("--model <name>", "Default model hint shown in the shell")
+    .option("--model <name>", "Default model hint. For OpenClaw use openclaw or openclaw/<agentId>")
     .option("--setup", "Run guided chat setup before entering the shell")
     .option("--local", "Force local node mode")
     .option("--remote", "Force remote node mode")

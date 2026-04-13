@@ -20,7 +20,7 @@ export interface RoundsListProps {
 
 export function RoundsList({ rounds, title = "Arena Rounds", status }: RoundsListProps) {
   return (
-    <CommerceCard eyebrow="Arena" title={title} status={status} footer="Built for round boards and live resolution views.">
+    <CommerceCard eyebrow="Arena" title={title} status={status}>
       {rounds.map((round) => (
         <ListRow
           key={round.id}

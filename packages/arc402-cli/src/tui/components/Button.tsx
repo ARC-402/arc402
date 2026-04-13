@@ -10,7 +10,7 @@ export interface ButtonProps {
 const VARIANT_COLORS: Record<string, string> = {
   primary: "cyan",
   danger: "red",
-  dim: "gray",
+  dim: "slate",
 };
 
 export function Button({ label, onPress, variant = "primary" }: ButtonProps) {

@@ -613,6 +613,7 @@ export async function runDaemon(foreground = false): Promise<void> {
   // onJobCompleted: worker finished — submit fulfill UserOp on-chain, update DB, notify
   workerExecutor.onJobCompleted = (agreementId, rootHash) => {
     log({ event: "worker_job_completed", agreement_id: agreementId, root_hash: rootHash });
+    emitEvent("job_completed", { id: agreementId, rootHash: rootHash });
     const hire = db.getHireRequestByAgreementId(agreementId);
     if (!hire) {
       log({ event: "worker_complete_no_hire", agreement_id: agreementId });
@@ -669,6 +670,7 @@ export async function runDaemon(foreground = false): Promise<void> {
   // onJobFailed: worker failed — log, update DB, notify operator
   workerExecutor.onJobFailed = (agreementId, error) => {
     log({ event: "worker_job_failed", agreement_id: agreementId, error });
+    emitEvent("job_failed", { id: agreementId, reason: error });
     const hire = db.getHireRequestByAgreementId(agreementId);
     if (hire) {
       db.updateHireRequestStatus(hire.id, "rejected", `worker_failed: ${error}`);
@@ -798,6 +800,12 @@ export async function runDaemon(foreground = false): Promise<void> {
     config.wallet.contract_address,
     async (event) => {
       log({ event: "handshake_received", ...event, amount: event.amount.toString() });
+      emitEvent("handshake_received", {
+        id: event.handshakeId,
+        from: event.from,
+        type: event.hsType,
+        tip: event.amount.toString(),
+      });
     },
     path.join(os.homedir(), '.arc402', 'processed-handshakes.json')
   );
@@ -865,7 +873,7 @@ export async function runDaemon(foreground = false): Promise<void> {
     });
   }
 
-  const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status"]);
+  const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status", "/events"]);
 
   // Protocol POST endpoints — open to external agents (no daemon token required).
   // These are inbound P2P messages: hire proposals, handshakes, delivery notifications, etc.
@@ -885,6 +893,19 @@ export async function runDaemon(foreground = false): Promise<void> {
 
   // CORS whitelist — localhost for local tooling, arc402.xyz for the web app
   const CORS_WHITELIST = new Set(["localhost", "127.0.0.1", "arc402.xyz", "app.arc402.xyz"]);
+
+  const eventClients = new Set<http.ServerResponse>();
+
+  function emitEvent(type: string, data: Record<string, unknown>): void {
+    const payload = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const client of eventClients) {
+      try {
+        client.write(payload);
+      } catch {
+        eventClients.delete(client);
+      }
+    }
+  }
 
   const httpServer = http.createServer(async (req, res) => {
     // CORS — only reflect origin header if it's in the whitelist
@@ -927,6 +948,20 @@ export async function runDaemon(foreground = false): Promise<void> {
         res.end(JSON.stringify({ error: "unauthorized" }));
         return;
       }
+    }
+
+    if (pathname === "/events" && req.method === "GET") {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      });
+      res.write(": connected\n\n");
+      eventClients.add(res);
+      req.on("close", () => {
+        eventClients.delete(res);
+      });
+      return;
     }
 
     // Health / info
@@ -1041,6 +1076,13 @@ export async function runDaemon(foreground = false): Promise<void> {
           });
 
           log({ event: "http_hire_received", id: proposal.messageId, hirer: proposal.hirerAddress, status });
+          emitEvent("hire_proposed", {
+            id: proposal.agreementId ?? proposal.messageId,
+            from: proposal.hirerAddress,
+            amount: proposal.priceEth,
+            capability: proposal.capability,
+            status,
+          });
 
           if (config.notifications.notify_on_hire_request) {
             await notifier.notifyHireRequest(proposal.messageId, proposal.hirerAddress, proposal.priceEth, proposal.capability);
@@ -1058,6 +1100,11 @@ export async function runDaemon(foreground = false): Promise<void> {
               taskDescription: taskDescription || undefined,
             });
             log({ event: "http_job_enqueued", id: proposal.messageId, agreement_id: proposal.agreementId });
+            emitEvent("job_started", {
+              id: proposal.agreementId,
+              harness: workerExecutor.getAgentType(),
+              capability: proposal.capability,
+            });
 
             // Seed staged deliverables if configured for this capability
             const httpStagedDir = config.delivery.staged_dir;
@@ -1087,6 +1134,10 @@ export async function runDaemon(foreground = false): Promise<void> {
                   );
                   const hash = await userOps.submit(callData, config.wallet.contract_address);
                   log({ event: "http_accept_userop_submitted", id: proposal.messageId, hash });
+                  emitEvent("agreement_accepted", {
+                    id: proposal.agreementId ?? proposal.messageId,
+                    userOpHash: hash,
+                  });
                   if (config.notifications.notify_on_hire_accepted) {
                     await notifier.notifyHireAccepted(proposal.messageId, proposal.agreementId!);
                   }
@@ -1117,6 +1168,11 @@ export async function runDaemon(foreground = false): Promise<void> {
       try {
           const msg = JSON.parse(body);
           log({ event: "handshake_received", from: msg.from, type: msg.type, note: msg.note });
+          emitEvent("handshake_received", {
+            from: msg.from,
+            type: msg.type,
+            note: msg.note,
+          });
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ received: true, agent: config.wallet.contract_address }));
         } catch {
@@ -1180,6 +1236,11 @@ export async function runDaemon(foreground = false): Promise<void> {
         const filesUrl = String(msg.files_url ?? msg.filesUrl ?? "");
         const from = String(msg.from ?? "");
         log({ event: "delivery_received", agreementId, deliverableHash, from, has_files_url: !!filesUrl });
+        emitEvent("deliverable_committed", {
+          id: agreementId,
+          hash: deliverableHash,
+          from,
+        });
         // Update DB: mark delivered
         const active = db.listActiveHireRequests();
         const found = active.find(r => r.agreement_id === agreementId);

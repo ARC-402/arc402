@@ -1,5 +1,6 @@
 import React from "react";
-import { Box, Text, useInput } from "../../renderer/index.js";
+import { Box, useInput } from "../../renderer/index.js";
+import { ThemedText } from "../../renderer/ThemedText.js";
 import type { HarnessChoice } from "../../chat/harness.js";
 
 interface ChatHarnessSelectorProps {
@@ -20,18 +21,18 @@ export function ChatHarnessSelector({ choices, selectedIndex, onMove, onConfirm,
 
   return (
     <Box flexDirection="column" marginLeft={2}>
-      <Text color="cyan">◈ Select chat harness</Text>
+      <ThemedText variant="header">◈ Select chat harness</ThemedText>
       {choices.map((choice, index) => {
         const selected = index === selectedIndex;
         const badge = choice.readiness.ready ? "ready" : "setup needed";
         return (
-          <Text key={choice.harness} color={selected ? "cyan" : undefined} bold={selected}>
+          <ThemedText key={choice.harness} themeColor={selected ? "primary" : "white"} bold={selected}>
             {selected ? "  ▶ " : "    "}
             {`${choice.label}, ${badge}: ${choice.readiness.summary}`}
-          </Text>
+          </ThemedText>
         );
       })}
-      <Text dimColor>  ↑↓ or Tab select, Enter confirm, Esc cancel</Text>
+      <ThemedText themeColor="dim">  ↑↓ or Tab select, Enter confirm, Esc cancel</ThemedText>
     </Box>
   );
 }

@@ -1,15 +1,17 @@
 import React from "react";
-import { Box, Text, useTerminalSize } from "../../../renderer/index.js";
+import { Box, useTerminalSize } from "../../../renderer/index.js";
+import { ThemedText } from "../../../renderer/ThemedText.js";
+import type { Theme } from "../../../renderer/theme.js";
 
 export type CommerceTone = "neutral" | "info" | "success" | "warning" | "danger" | "muted";
 
-const TONE_COLOR: Record<CommerceTone, string> = {
+const TONE_THEME_COLOR: Record<CommerceTone, keyof Theme["colors"]> = {
   neutral: "white",
-  info: "cyan",
-  success: "green",
-  warning: "yellow",
-  danger: "red",
-  muted: "gray",
+  info: "primary",
+  success: "success",
+  warning: "warning",
+  danger: "danger",
+  muted: "secondary",
 };
 
 const TONE_ICON: Record<CommerceTone, string> = {
@@ -28,9 +30,9 @@ export interface StatusPillProps {
 
 export function StatusPill({ label, tone = "neutral" }: StatusPillProps) {
   return (
-    <Text color={TONE_COLOR[tone]} bold>
+    <ThemedText themeColor={TONE_THEME_COLOR[tone]} bold>
       {TONE_ICON[tone]} {label}
-    </Text>
+    </ThemedText>
   );
 }
 
@@ -57,23 +59,23 @@ export function CommerceCard({ eyebrow, title, subtitle, status, footer, childre
   return (
     <Box flexDirection="column">
       {eyebrow ? (
-        <Text color="cyan" bold>
+        <ThemedText variant="header">
           ◈ {eyebrow}
-        </Text>
+        </ThemedText>
       ) : null}
-      <Text bold color="white">
+      <ThemedText themeColor="white" bold>
         {title}
-        {status ? <Text>  </Text> : null}
+        {status ? <ThemedText>  </ThemedText> : null}
         {status ? <StatusPill {...status} /> : null}
-      </Text>
-      {subtitle ? <Text dimColor>{subtitle}</Text> : null}
-      <Text dimColor>{"─".repeat(ruleWidth)}</Text>
+      </ThemedText>
+      {subtitle ? <ThemedText themeColor="dim">{subtitle}</ThemedText> : null}
+      <ThemedText variant="separator">{"─".repeat(ruleWidth)}</ThemedText>
       <Box flexDirection="column" marginTop={1}>
         {children}
       </Box>
       {footer ? (
         <Box marginTop={1}>
-          <Text dimColor>{footer}</Text>
+          <ThemedText themeColor="dim">{footer}</ThemedText>
         </Box>
       ) : null}
     </Box>
@@ -93,10 +95,10 @@ export function DetailRow({ label, value, tone = "neutral" }: DetailRowProps) {
   return (
     <Box>
       <Box width={labelWidth} flexShrink={0}>
-        <Text dimColor>{label}</Text>
+        <ThemedText variant="label">{label}</ThemedText>
       </Box>
       <Box flexGrow={1} flexShrink={1}>
-        {typeof value === "string" ? <Text color={TONE_COLOR[tone]}>{value}</Text> : value}
+        {typeof value === "string" ? <ThemedText themeColor={TONE_THEME_COLOR[tone]}>{value}</ThemedText> : value}
       </Box>
     </Box>
   );
@@ -110,7 +112,7 @@ export interface SectionProps {
 export function Section({ title, children }: SectionProps) {
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text bold>{title}</Text>
+      <ThemedText themeColor="white" bold>{title}</ThemedText>
       <Box flexDirection="column" marginLeft={2}>
         {children}
       </Box>
@@ -132,12 +134,12 @@ export function Meter({ label, value, width = 28, tone = "info", suffix = "%" }:
   const empty = Math.max(0, width - filled);
   return (
     <Box flexDirection="column">
-      {label ? <Text dimColor>{label}</Text> : null}
-      <Text color={TONE_COLOR[tone]}>
+      {label ? <ThemedText themeColor="dim">{label}</ThemedText> : null}
+      <ThemedText themeColor={TONE_THEME_COLOR[tone]}>
         {"█".repeat(filled)}
-        <Text dimColor>{"░".repeat(empty)}</Text>
-        <Text> {clamped.toFixed(1)}{suffix}</Text>
-      </Text>
+        <ThemedText themeColor="dim">{"░".repeat(empty)}</ThemedText>
+        <ThemedText> {clamped.toFixed(1)}{suffix}</ThemedText>
+      </ThemedText>
     </Box>
   );
 }
@@ -154,13 +156,13 @@ export function ListRow({ prefix, title, meta, detail, status }: ListRowProps) {
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box>
-        <Text>{prefix ?? "  "}</Text>
-        <Text bold>{title}</Text>
-        {status ? <Text>  </Text> : null}
+        <ThemedText>{prefix ?? "  "}</ThemedText>
+        <ThemedText themeColor="white" bold>{title}</ThemedText>
+        {status ? <ThemedText>  </ThemedText> : null}
         {status ? <StatusPill {...status} /> : null}
       </Box>
-      {meta ? <Text dimColor>{meta}</Text> : null}
-      {detail ? <Text>{detail}</Text> : null}
+      {meta ? <ThemedText themeColor="dim">{meta}</ThemedText> : null}
+      {detail ? <ThemedText>{detail}</ThemedText> : null}
     </Box>
   );
 }

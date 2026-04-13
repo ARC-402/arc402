@@ -2,10 +2,9 @@ import React from "react";
 import { Box, Text } from "../renderer/index.js";
 import type { KernelPayload } from "./kernel-payload";
 import { KernelPayloadRenderer } from "./KernelPayloadRenderer";
-
-function stripAnsi(text: string): string {
-  return text.replace(/\u001B\[[0-9;]*m/g, "");
-}
+import { buildKernelPayloadLines } from "./command-renderers";
+import { AnsiTextLine } from "./components/AnsiTextLine.js";
+import { measureLogicalEntries, sliceVisibleLogicalEntries } from "./viewport-measure.js";
 
 export type ViewportEntry = string | KernelPayload;
 
@@ -17,52 +16,47 @@ interface ViewportProps {
   viewportHeight: number;
 }
 
+function toLogicalLines(entry: ViewportEntry): string[] {
+  return typeof entry === "string" ? [entry] : buildKernelPayloadLines(entry);
+}
+
 /**
  * Scrollable output area that fills remaining terminal space.
- * Renders strings as Text lines and KernelPayloads as Phase 2 Ink components.
  *
- * NOTE: KernelPayload entries are treated as single logical blocks that always
- * render fully — they are not sliced by the scroll window. Only string lines
- * participate in the scroll window calculation. This keeps the Phase 2
- * components rendering correctly while maintaining scroll for text output.
- *
- * For the viewport height calculation, each payload counts as 1 "slot" in
- * the buffer but renders as a full component block.
+ * Full kernel payloads still render as structured components when fully inside
+ * the viewport. If a payload is only partially visible due to scroll position,
+ * the viewport falls back to a clipped text snapshot of the same payload so row
+ * accounting stays honest for multiline cards.
  */
 export function Viewport({ lines, scrollOffset, isAutoScroll, viewportHeight }: ViewportProps) {
-  const totalLines = lines.length;
-  let endIdx: number;
-  let startIdx: number;
-
-  if (scrollOffset === 0) {
-    endIdx = totalLines;
-    startIdx = Math.max(0, endIdx - viewportHeight);
-  } else {
-    endIdx = Math.max(0, totalLines - scrollOffset);
-    startIdx = Math.max(0, endIdx - viewportHeight);
-  }
-
-  const visibleEntries = lines.slice(startIdx, endIdx);
-  const padCount = Math.max(0, viewportHeight - visibleEntries.length);
-  const paddedEntries: ViewportEntry[] = [
-    ...Array<ViewportEntry>(padCount).fill(""),
-    ...visibleEntries,
-  ];
-
+  const { measured } = measureLogicalEntries(lines.map((entry) => ({ entry, logicalLines: toLogicalLines(entry) })));
+  const { segments: visibleSegments, padCount } = sliceVisibleLogicalEntries(measured, scrollOffset, viewportHeight);
   const canScrollDown = scrollOffset > 0;
 
   return (
     <Box flexDirection="column" flexGrow={1} flexShrink={1}>
       <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-        {paddedEntries.map((entry, i) =>
-          typeof entry === "string" ? (
-            <Text key={i}>{stripAnsi(entry)}</Text>
-          ) : (
-            <Box key={i} flexDirection="column" marginBottom={1}>
-              <KernelPayloadRenderer payload={entry} />
-            </Box>
-          )
-        )}
+        {Array.from({ length: padCount }, (_, i) => (
+          <AnsiTextLine key={`pad:${i}`} line="" />
+        ))}
+
+        {visibleSegments.map((segment, index) => {
+          const { item, sliceStart, sliceEnd, isFull } = segment;
+          if (typeof item.entry !== "string" && isFull) {
+            return (
+              <Box key={`payload:${item.rowStart}:${index}`} flexDirection="column">
+                <KernelPayloadRenderer payload={item.entry} />
+              </Box>
+            );
+          }
+
+          return item.logicalLines.slice(sliceStart, sliceEnd).map((line, lineIndex) => (
+            <AnsiTextLine
+              key={`line:${item.rowStart}:${sliceStart + lineIndex}:${index}`}
+              line={line}
+            />
+          ));
+        })}
       </Box>
       {canScrollDown && !isAutoScroll && (
         <Box justifyContent="flex-end" flexShrink={0}>
