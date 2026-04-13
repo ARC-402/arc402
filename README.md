@@ -6,7 +6,7 @@
 [![Tests](https://img.shields.io/badge/tests-975%2B%20passing-brightgreen)](#audit-note)
 [![Network](https://img.shields.io/badge/network-Base-0052FF)](https://base.org)
 [![Status](https://img.shields.io/badge/status-mainnet-brightgreen)](#deployed-contracts)
-[![arc402-cli](https://img.shields.io/badge/arc402--cli-1.8.0-blue)](https://www.npmjs.com/package/arc402-cli)
+[![arc402-cli](https://img.shields.io/badge/arc402--cli-1.8.3-blue)](https://www.npmjs.com/package/arc402-cli)
 [![%40arc402%2Fdaemon](https://img.shields.io/badge/%40arc402%2Fdaemon-0.9.0-blue)](https://www.npmjs.com/package/@arc402/daemon)
 [![%40arc402%2Fsdk](https://img.shields.io/badge/%40arc402%2Fsdk-0.6.6-blue)](https://www.npmjs.com/package/@arc402/sdk)
 [![PyPI arc402](https://img.shields.io/badge/arc402-0.5.6-blue)](https://pypi.org/project/arc402/)
@@ -480,7 +480,7 @@ Base mainnet. All contracts verified on Basescan.
 
 | Surface | Current version |
 |---------|-----------------|
-| CLI | `1.8.0` |
+| CLI | `1.8.3` |
 | Daemon | `0.9.0` |
 | OpenClaw plugin | `1.3.5` |
 | TypeScript SDK | `0.6.6` |
