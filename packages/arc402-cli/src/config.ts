@@ -103,6 +103,7 @@ export function loadConfig(): Arc402Config {
       policyEngineAddress: defaults.policyEngineAddress,
       trustRegistryAddress: defaults.trustRegistryAddress ?? "",
       agentRegistryAddress: d.agentRegistryV2Address ?? defaults.agentRegistryAddress,
+      agentRegistryV2Address: defaults.agentRegistryV2Address,
       serviceAgreementAddress: defaults.serviceAgreementAddress,
       reputationOracleAddress: defaults.reputationOracleAddress,
       sponsorshipAttestationAddress: defaults.sponsorshipAttestationAddress,
@@ -162,6 +163,40 @@ export function loadConfig(): Arc402Config {
       config.policyEngineAddress = POLICY_ENGINE_V2;
       migrated = true;
     }
+
+    const safeDefaultBackfills: Array<keyof Arc402Config> = [
+      "policyEngineAddress",
+      "trustRegistryAddress",
+      "agentRegistryAddress",
+      "agentRegistryV2Address",
+      "arc402RegistryV3Address",
+      "serviceAgreementAddress",
+      "reputationOracleAddress",
+      "sponsorshipAttestationAddress",
+      "capabilityRegistryAddress",
+      "governanceAddress",
+      "walletFactoryAddress",
+      "sessionChannelsAddress",
+      "disputeModuleAddress",
+      "disputeArbitrationAddress",
+      "watchtowerRegistryAddress",
+      "governedTokenWhitelistAddress",
+      "vouchingRegistryAddress",
+      "migrationRegistryAddress",
+      "handshakeAddress",
+      "computeAgreementAddress",
+      "subscriptionAgreementAddress",
+      "settlementCoordinatorAddress",
+      "intentAttestationAddress",
+    ];
+
+    for (const key of safeDefaultBackfills) {
+      if (!config[key] && currentDefaults[key]) {
+        (config as unknown as Record<string, unknown>)[key] = currentDefaults[key] as unknown;
+        migrated = true;
+      }
+    }
+
     if (migrated) saveConfig(config);
   }
 

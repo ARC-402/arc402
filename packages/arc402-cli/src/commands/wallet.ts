@@ -22,7 +22,6 @@ import { startSpinner } from "../ui/spinner";
 import { c } from "../ui/colors";
 import { formatAddress } from "../ui/format";
 
-const POLICY_ENGINE_DEFAULT = "0x44102e70c2A366632d98Fe40d892a2501fC7fFF2";
 const GUARDIAN_KEY_PATH = path.join(os.homedir(), ".arc402", "guardian.key");
 
 /** Save guardian private key to a restricted standalone file (never to config.json). */
@@ -53,6 +52,40 @@ function parseAmount(raw: string): bigint {
   return BigInt(raw);
 }
 
+function resolvePolicyEngineAddress(config: Arc402Config): string {
+  return (
+    config.policyEngineAddress ??
+    NETWORK_DEFAULTS[config.network]?.policyEngineAddress ??
+    "0x9449B15268bE7042C0b473F3f711a41A29220866"
+  );
+}
+
+function getWalletAddressFromFactoryLogs(
+  factoryInterface: ethers.Interface,
+  logs: readonly ethers.Log[] | readonly ethers.EventLog[] | readonly ethers.LogDescription[] | readonly unknown[],
+): string | null {
+  for (const log of logs) {
+    try {
+      const parsed = factoryInterface.parseLog(log as ethers.Log);
+      if (!parsed) continue;
+
+      if (parsed.name === "WalletDeployed") {
+        const wallet = (parsed.args as any).wallet ?? (parsed.args as any).walletAddress ?? parsed.args[0];
+        if (wallet) return ethers.getAddress(wallet as string);
+      }
+
+      if (parsed.name === "WalletCreated") {
+        const wallet = (parsed.args as any).walletAddress ?? (parsed.args as any).wallet ?? parsed.args[1] ?? parsed.args[0];
+        if (wallet) return ethers.getAddress(wallet as string);
+      }
+    } catch {
+      // skip unparseable logs
+    }
+  }
+
+  return null;
+}
+
 // Standard onboarding categories required for a newly deployed wallet.
 // These cover the full ARC-402 flow: spending, hiring, compute, research, protocol ops.
 const ONBOARDING_CATEGORIES = [
@@ -76,7 +109,7 @@ async function runWalletOnboardingCeremony(
   provider: ethers.JsonRpcProvider,
   sendTx: (call: { to: string; data: string; value: string }, description: string) => Promise<string>,
 ): Promise<void> {
-  const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+  const policyAddress = resolvePolicyEngineAddress(config);
   const executeIface = new ethers.Interface(ARC402_WALLET_EXECUTE_ABI);
   const govIface = new ethers.Interface(POLICY_ENGINE_GOVERNANCE_ABI);
   const limitsIface = new ethers.Interface(POLICY_ENGINE_LIMITS_ABI);
@@ -164,7 +197,7 @@ async function runCompleteOnboardingCeremony(
   provider: ethers.JsonRpcProvider,
   sendTx: (call: { to: string; data: string; value: string }, description: string) => Promise<string>,
 ): Promise<void> {
-  const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+  const policyAddress = resolvePolicyEngineAddress(config);
   const agentRegistryAddress =
     config.agentRegistryV2Address ??
     NETWORK_DEFAULTS[config.network]?.agentRegistryV2Address;
@@ -716,22 +749,33 @@ export function registerWalletCommands(program: Command): void {
 
   wallet.command("new")
     .description("Generate a fresh keypair and save to config")
-    .option("--network <network>", "Network (base-mainnet or base-sepolia)", "base-sepolia")
+    .option("--network <network>", "Network (base-mainnet or base-sepolia)")
     .action(async (opts) => {
-      const network = opts.network as "base-mainnet" | "base-sepolia";
+      const existing = fs.existsSync(getConfigPath()) ? loadConfig() : undefined;
+      const network = ((opts.network as "base-mainnet" | "base-sepolia" | undefined) ?? existing?.network ?? "base-mainnet");
       const defaults = NETWORK_DEFAULTS[network];
       if (!defaults) {
         console.error(`Unknown network: ${network}. Use base-mainnet or base-sepolia.`);
         process.exit(1);
       }
       const generated = ethers.Wallet.createRandom();
+      const networkChanged = !!existing && existing.network !== network;
       const config: Arc402Config = {
+        ...(existing ?? {}),
         network,
         rpcUrl: defaults.rpcUrl!,
         privateKey: generated.privateKey,
         trustRegistryAddress: defaults.trustRegistryAddress!,
+        policyEngineAddress: defaults.policyEngineAddress,
         walletFactoryAddress: defaults.walletFactoryAddress,
+        agentRegistryV2Address: defaults.agentRegistryV2Address,
       };
+      if (networkChanged) {
+        delete config.walletContractAddress;
+        delete config.ownerAddress;
+        delete config.onboardingProgress;
+        delete config.wcSession;
+      }
       saveConfig(config);
       renderTree([
         { label: "Address", value: generated.address },
@@ -744,10 +788,11 @@ export function registerWalletCommands(program: Command): void {
 
   wallet.command("import")
     .description("Import an existing private key (use --key-file or stdin prompt)")
-    .option("--network <network>", "Network (base-mainnet or base-sepolia)", "base-sepolia")
+    .option("--network <network>", "Network (base-mainnet or base-sepolia)")
     .option("--key-file <path>", "Read private key from file instead of prompting")
     .action(async (opts) => {
-      const network = opts.network as "base-mainnet" | "base-sepolia";
+      const existing = fs.existsSync(getConfigPath()) ? loadConfig() : undefined;
+      const network = ((opts.network as "base-mainnet" | "base-sepolia" | undefined) ?? existing?.network ?? "base-mainnet");
       const defaults = NETWORK_DEFAULTS[network];
       if (!defaults) {
         console.error(`Unknown network: ${network}. Use base-mainnet or base-sepolia.`);
@@ -783,13 +828,23 @@ export function registerWalletCommands(program: Command): void {
         console.error("Invalid private key. Must be a 0x-prefixed hex string.");
         process.exit(1);
       }
+      const networkChanged = !!existing && existing.network !== network;
       const config: Arc402Config = {
+        ...(existing ?? {}),
         network,
         rpcUrl: defaults.rpcUrl!,
         privateKey: imported.privateKey,
         trustRegistryAddress: defaults.trustRegistryAddress!,
+        policyEngineAddress: defaults.policyEngineAddress,
         walletFactoryAddress: defaults.walletFactoryAddress,
+        agentRegistryV2Address: defaults.agentRegistryV2Address,
       };
+      if (networkChanged) {
+        delete config.walletContractAddress;
+        delete config.ownerAddress;
+        delete config.onboardingProgress;
+        delete config.wcSession;
+      }
       saveConfig(config);
       renderTree([
         { label: "Address", value: imported.address },
@@ -1102,17 +1157,8 @@ export function registerWalletCommands(program: Command): void {
           console.error("Transaction not confirmed. Check on-chain.");
           process.exit(1);
         }
-        let walletAddress: string | null = null;
         const factoryContract = new ethers.Contract(factoryAddress, WALLET_FACTORY_ABI, provider);
-        for (const log of receipt.logs) {
-          try {
-            const parsed = factoryContract.interface.parseLog(log);
-            if (parsed?.name === "WalletDeployed" || parsed?.name === "WalletCreated") {
-              walletAddress = parsed.args.walletAddress as string;
-              break;
-            }
-          } catch { /* skip unparseable logs */ }
-        }
+        const walletAddress = getWalletAddressFromFactoryLogs(factoryContract.interface, receipt.logs);
         if (!walletAddress) {
           console.error("Could not find WalletDeployed/WalletCreated event in receipt. Check the transaction on-chain.");
           process.exit(1);
@@ -1216,17 +1262,8 @@ export function registerWalletCommands(program: Command): void {
             console.error("Transaction not confirmed. Check on-chain.");
             process.exit(1);
           }
-          let deployedWallet: string | null = null;
           const factoryContract = new ethers.Contract(factoryAddress, WALLET_FACTORY_ABI, provider);
-          for (const log of receipt.logs) {
-            try {
-              const parsed = factoryContract.interface.parseLog(log);
-              if (parsed?.name === "WalletDeployed" || parsed?.name === "WalletCreated") {
-                deployedWallet = parsed.args.walletAddress as string;
-                break;
-              }
-            } catch { /* skip unparseable logs */ }
-          }
+          const deployedWallet = getWalletAddressFromFactoryLogs(factoryContract.interface, receipt.logs);
           if (!deployedWallet) {
             console.error("Could not find WalletDeployed/WalletCreated event in receipt. Check the transaction on-chain.");
             process.exit(1);
@@ -1266,16 +1303,7 @@ export function registerWalletCommands(program: Command): void {
         const deploySpinner = startSpinner(`Deploying ARC402Wallet via factory at ${factoryAddress}...`);
         const tx = await factory["deployWallet()"]();
         const receipt = await tx.wait();
-        let walletAddress: string | null = null;
-        for (const log of receipt.logs) {
-          try {
-            const parsed = factory.interface.parseLog(log);
-            if (parsed?.name === "WalletDeployed" || parsed?.name === "WalletDeployed" || parsed?.name === "WalletCreated") {
-              walletAddress = parsed.args.walletAddress as string;
-              break;
-            }
-          } catch { /* skip unparseable logs */ }
-        }
+        const walletAddress = getWalletAddressFromFactoryLogs(factory.interface, receipt.logs);
         if (!walletAddress) {
           deploySpinner.fail("Could not find WalletDeployed/WalletCreated event in receipt. Check the transaction on-chain.");
           process.exit(1);
@@ -1349,7 +1377,7 @@ export function registerWalletCommands(program: Command): void {
       }
 
       const walletAddress = config.walletContractAddress!;
-      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddress = resolvePolicyEngineAddress(config);
       const chainId = config.network === "base-mainnet" ? 8453 : 84532;
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
 
@@ -1578,7 +1606,7 @@ export function registerWalletCommands(program: Command): void {
     .requiredOption("--category <cat>", "Category name (e.g. code.review)")
     .action(async (opts) => {
       const config = loadConfig();
-      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddress = resolvePolicyEngineAddress(config);
       const walletAddr = config.walletContractAddress;
       if (!walletAddr) {
         console.error("walletContractAddress not set in config. Run `arc402 wallet deploy` first.");
@@ -1605,7 +1633,7 @@ export function registerWalletCommands(program: Command): void {
     .requiredOption("--amount <eth>", "Limit in ETH (e.g. 0.1)")
     .action(async (opts) => {
       const config = loadConfig();
-      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddress = resolvePolicyEngineAddress(config);
       const chainId = config.network === "base-mainnet" ? 8453 : 84532;
       const amount = ethers.parseEther(opts.amount);
       const policyInterface = new ethers.Interface(POLICY_ENGINE_LIMITS_ABI);
@@ -1662,7 +1690,7 @@ export function registerWalletCommands(program: Command): void {
       console.log(`  1. Wallet-level (arc402 wallet set-velocity-limit): ETH cap per rolling hour, enforced by ARC402Wallet contract. Breach auto-freezes wallet.`);
       console.log(`  2. PolicyEngine-level (arc402 wallet policy set-daily-limit): Per-category daily cap, enforced by PolicyEngine. Breach returns a soft error without freezing.`);
       console.log(`  Both must be configured for full protection.\n`);
-      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddress = resolvePolicyEngineAddress(config);
       const chainId = config.network === "base-mainnet" ? 8453 : 84532;
       const walletAddr = config.walletContractAddress;
       if (!walletAddr) {
@@ -1712,7 +1740,7 @@ export function registerWalletCommands(program: Command): void {
     .option("--protocol <eth>", "Protocol limit", "0.1")
     .action(async (opts) => {
       const config = loadConfig();
-      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddress = resolvePolicyEngineAddress(config);
       const chainId = config.network === "base-mainnet" ? 8453 : 84532;
       const walletAddr = config.walletContractAddress;
       if (!walletAddr) {
@@ -2242,7 +2270,7 @@ export function registerWalletCommands(program: Command): void {
         process.exit(1);
       }
 
-      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddress = resolvePolicyEngineAddress(config);
       const chainId = config.network === "base-mainnet" ? 8453 : 84532;
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
 
@@ -2446,7 +2474,7 @@ export function registerWalletCommands(program: Command): void {
         console.error("walletConnectProjectId not set in config. Run `arc402 config set walletConnectProjectId <id>`.");
         process.exit(1);
       }
-      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddress = resolvePolicyEngineAddress(config);
       const chainId = config.network === "base-mainnet" ? 8453 : 84532;
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
 
@@ -2610,7 +2638,7 @@ export function registerWalletCommands(program: Command): void {
         process.exit(1);
       }
 
-      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddress = resolvePolicyEngineAddress(config);
       const chainId = config.network === "base-mainnet" ? 8453 : 84532;
 
       // ── Step 1: velocity limit ────────────────────────────────────────────
@@ -3423,7 +3451,7 @@ export function registerWalletCommands(program: Command): void {
       }
 
       // Check category is configured on PolicyEngine
-      const policyAddress = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddress = resolvePolicyEngineAddress(config);
       const policyContract = new ethers.Contract(policyAddress, POLICY_ENGINE_LIMITS_ABI, provider);
       const categoryLimit: bigint = await policyContract.categoryLimits(walletAddr, opts.category);
       if (categoryLimit === 0n) {
@@ -3713,7 +3741,7 @@ export function registerWalletCommands(program: Command): void {
       }
 
       // Check category is configured on PolicyEngine
-      const policyAddressT = config.policyEngineAddress ?? POLICY_ENGINE_DEFAULT;
+      const policyAddressT = resolvePolicyEngineAddress(config);
       const policyContractT = new ethers.Contract(policyAddressT, POLICY_ENGINE_LIMITS_ABI, provider);
       const categoryLimitT: bigint = await policyContractT.categoryLimits(walletAddr, opts.category);
       if (categoryLimitT === 0n) {

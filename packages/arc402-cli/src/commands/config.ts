@@ -15,23 +15,34 @@ export function registerConfigCommands(program: Command): void {
     if (!answers.network) { console.log(chalk.red("✗ Setup cancelled")); return; }
 
     const defaults = NETWORK_DEFAULTS[answers.network] ?? {};
+    const sameNetwork = existing.network === answers.network;
     const cfg: Arc402Config = {
       network: answers.network,
       walletConnectProjectId: getWcProjectId(),
       rpcUrl: defaults.rpcUrl ?? "https://mainnet.base.org",
+      policyEngineAddress: defaults.policyEngineAddress,
       trustRegistryAddress: defaults.trustRegistryAddress ?? "",
       agentRegistryAddress: defaults.agentRegistryV2Address ?? defaults.agentRegistryAddress,
+      agentRegistryV2Address: defaults.agentRegistryV2Address,
       serviceAgreementAddress: defaults.serviceAgreementAddress,
       reputationOracleAddress: defaults.reputationOracleAddress,
       sponsorshipAttestationAddress: defaults.sponsorshipAttestationAddress,
       capabilityRegistryAddress: defaults.capabilityRegistryAddress,
       governanceAddress: defaults.governanceAddress,
+      walletFactoryAddress: defaults.walletFactoryAddress,
+      sessionChannelsAddress: defaults.sessionChannelsAddress,
+      disputeModuleAddress: defaults.disputeModuleAddress,
+      disputeArbitrationAddress: defaults.disputeArbitrationAddress,
+      handshakeAddress: defaults.handshakeAddress,
+      computeAgreementAddress: defaults.computeAgreementAddress,
+      subscriptionAgreementAddress: defaults.subscriptionAgreementAddress,
       ...(existing.privateKey ? { privateKey: existing.privateKey } : {}),
       ...(existing.subdomainApi ? { subdomainApi: existing.subdomainApi } : {}),
       ...(existing.telegramBotToken ? { telegramBotToken: existing.telegramBotToken } : {}),
       ...(existing.telegramChatId ? { telegramChatId: existing.telegramChatId } : {}),
       ...(existing.telegramThreadId ? { telegramThreadId: existing.telegramThreadId } : {}),
-      ...(existing.walletContractAddress ? { walletContractAddress: existing.walletContractAddress } : {}),
+      ...(sameNetwork && existing.walletContractAddress ? { walletContractAddress: existing.walletContractAddress } : {}),
+      ...(sameNetwork && existing.ownerAddress ? { ownerAddress: existing.ownerAddress } : {}),
     };
     saveConfig(cfg);
 
