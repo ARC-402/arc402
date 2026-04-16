@@ -15,23 +15,43 @@ export function registerConfigCommands(program: Command): void {
     if (!answers.network) { console.log(chalk.red("✗ Setup cancelled")); return; }
 
     const defaults = NETWORK_DEFAULTS[answers.network] ?? {};
+    const sameNetwork = existing.network === answers.network;
     const cfg: Arc402Config = {
       network: answers.network,
       walletConnectProjectId: getWcProjectId(),
-      rpcUrl: defaults.rpcUrl ?? "https://mainnet.base.org",
+      rpcUrl: defaults.rpcUrl ?? NETWORK_DEFAULTS[answers.network]?.rpcUrl ?? "https://developer-access-mainnet.base.org",
+      policyEngineAddress: defaults.policyEngineAddress,
       trustRegistryAddress: defaults.trustRegistryAddress ?? "",
+      trustRegistryV2Address: defaults.trustRegistryV2Address,
+      intentAttestationAddress: defaults.intentAttestationAddress,
+      settlementCoordinatorAddress: defaults.settlementCoordinatorAddress,
       agentRegistryAddress: defaults.agentRegistryV2Address ?? defaults.agentRegistryAddress,
+      agentRegistryV2Address: defaults.agentRegistryV2Address,
+      arc402RegistryV3Address: defaults.arc402RegistryV3Address,
       serviceAgreementAddress: defaults.serviceAgreementAddress,
+      disputeArbitrationAddress: defaults.disputeArbitrationAddress,
+      disputeModuleAddress: defaults.disputeModuleAddress,
       reputationOracleAddress: defaults.reputationOracleAddress,
       sponsorshipAttestationAddress: defaults.sponsorshipAttestationAddress,
       capabilityRegistryAddress: defaults.capabilityRegistryAddress,
       governanceAddress: defaults.governanceAddress,
+      agreementTreeAddress: defaults.agreementTreeAddress,
+      walletFactoryAddress: defaults.walletFactoryAddress,
+      sessionChannelsAddress: defaults.sessionChannelsAddress,
+      watchtowerRegistryAddress: defaults.watchtowerRegistryAddress,
+      governedTokenWhitelistAddress: defaults.governedTokenWhitelistAddress,
+      vouchingRegistryAddress: defaults.vouchingRegistryAddress,
+      migrationRegistryAddress: defaults.migrationRegistryAddress,
+      handshakeAddress: defaults.handshakeAddress,
+      computeAgreementAddress: defaults.computeAgreementAddress,
+      subscriptionAgreementAddress: defaults.subscriptionAgreementAddress,
       ...(existing.privateKey ? { privateKey: existing.privateKey } : {}),
       ...(existing.subdomainApi ? { subdomainApi: existing.subdomainApi } : {}),
       ...(existing.telegramBotToken ? { telegramBotToken: existing.telegramBotToken } : {}),
       ...(existing.telegramChatId ? { telegramChatId: existing.telegramChatId } : {}),
       ...(existing.telegramThreadId ? { telegramThreadId: existing.telegramThreadId } : {}),
-      ...(existing.walletContractAddress ? { walletContractAddress: existing.walletContractAddress } : {}),
+      ...(sameNetwork && existing.walletContractAddress ? { walletContractAddress: existing.walletContractAddress } : {}),
+      ...(sameNetwork && existing.ownerAddress ? { ownerAddress: existing.ownerAddress } : {}),
     };
     saveConfig(cfg);
 

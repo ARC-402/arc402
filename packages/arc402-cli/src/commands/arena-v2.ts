@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import chalk from "chalk";
-import { loadConfig } from "../config";
+import { getBaseRpcPriority, loadConfig } from "../config";
 import { requireSigner } from "../client";
 import { AGENT_REGISTRY_ABI, TRUST_REGISTRY_ABI } from "../abis";
 import { startSpinner } from "../ui/spinner";
@@ -47,7 +47,7 @@ async function resolveArenaAddresses(rpcUrl?: string): Promise<Record<ArenaKey, 
   if (_arenaAddressCache) return _arenaAddressCache;
 
   try {
-    const provider = new ethers.JsonRpcProvider(rpcUrl ?? "https://mainnet.base.org");
+    const provider = new ethers.JsonRpcProvider(rpcUrl ?? getBaseRpcPriority()[0]);
     const registry = new ethers.Contract(REGISTRY_V3, REGISTRY_V3_ABI, provider);
 
     const resolved: Partial<Record<ArenaKey, string>> = {};

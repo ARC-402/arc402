@@ -88,6 +88,85 @@ function getOrCreateDeviceId(): string {
   return id;
 }
 
+const CANONICAL_PROTOCOL_KEYS: Array<keyof Arc402Config> = [
+  "policyEngineAddress",
+  "trustRegistryAddress",
+  "trustRegistryV2Address",
+  "intentAttestationAddress",
+  "settlementCoordinatorAddress",
+  "agentRegistryAddress",
+  "agentRegistryV2Address",
+  "arc402RegistryV3Address",
+  "serviceAgreementAddress",
+  "disputeArbitrationAddress",
+  "disputeModuleAddress",
+  "sessionChannelsAddress",
+  "reputationOracleAddress",
+  "sponsorshipAttestationAddress",
+  "capabilityRegistryAddress",
+  "governanceAddress",
+  "agreementTreeAddress",
+  "walletFactoryAddress",
+  "watchtowerRegistryAddress",
+  "governedTokenWhitelistAddress",
+  "vouchingRegistryAddress",
+  "migrationRegistryAddress",
+  "handshakeAddress",
+  "computeAgreementAddress",
+  "subscriptionAgreementAddress",
+];
+
+function syncCanonicalProtocolAddresses(
+  config: Arc402Config,
+  defaults: Partial<Arc402Config> & { usdcAddress: string },
+): boolean {
+  let migrated = false;
+  const configRecord = config as unknown as Record<string, unknown>;
+
+  for (const key of CANONICAL_PROTOCOL_KEYS) {
+    const nextValue = defaults[key];
+    if (!nextValue) continue;
+    if (config[key] !== nextValue) {
+      configRecord[key] = nextValue;
+      migrated = true;
+    }
+  }
+
+  const discoveryRegistry = defaults.agentRegistryV2Address ?? defaults.agentRegistryAddress;
+  if (discoveryRegistry) {
+    if (config.agentRegistryAddress !== discoveryRegistry) {
+      config.agentRegistryAddress = discoveryRegistry;
+      migrated = true;
+    }
+    if (config.agentRegistryV2Address !== discoveryRegistry) {
+      config.agentRegistryV2Address = discoveryRegistry;
+      migrated = true;
+    }
+  }
+
+  if (config.walletContractAddress) {
+    if (configRecord.walletAddress !== config.walletContractAddress) {
+      configRecord.walletAddress = config.walletContractAddress;
+      migrated = true;
+    }
+
+    if (configRecord.arc402WalletAddress && configRecord.arc402WalletAddress !== config.walletContractAddress) {
+      delete configRecord.arc402WalletAddress;
+      migrated = true;
+    }
+
+    if (
+      config.onboardingProgress?.walletAddress &&
+      config.onboardingProgress.walletAddress !== config.walletContractAddress
+    ) {
+      delete config.onboardingProgress;
+      migrated = true;
+    }
+  }
+
+  return migrated;
+}
+
 export function loadConfig(): Arc402Config {
   const thisDeviceId = getOrCreateDeviceId();
 
@@ -97,22 +176,34 @@ export function loadConfig(): Arc402Config {
     const d = defaults as unknown as Record<string,string>;
     const autoConfig: Arc402Config = {
       network: "base-mainnet",
-      rpcUrl: defaults.rpcUrl ?? "https://mainnet.base.org",
+      rpcUrl: defaults.rpcUrl ?? getBaseRpcPriority()[0],
       walletConnectProjectId: getWcProjectId(),
       ownerAddress: undefined,
       policyEngineAddress: defaults.policyEngineAddress,
       trustRegistryAddress: defaults.trustRegistryAddress ?? "",
       agentRegistryAddress: d.agentRegistryV2Address ?? defaults.agentRegistryAddress,
+      agentRegistryV2Address: defaults.agentRegistryV2Address,
+      arc402RegistryV3Address: defaults.arc402RegistryV3Address,
       serviceAgreementAddress: defaults.serviceAgreementAddress,
+      disputeArbitrationAddress: defaults.disputeArbitrationAddress,
+      trustRegistryV2Address: defaults.trustRegistryV2Address,
+      intentAttestationAddress: defaults.intentAttestationAddress,
+      settlementCoordinatorAddress: defaults.settlementCoordinatorAddress,
       reputationOracleAddress: defaults.reputationOracleAddress,
       sponsorshipAttestationAddress: defaults.sponsorshipAttestationAddress,
       capabilityRegistryAddress: defaults.capabilityRegistryAddress,
       governanceAddress: defaults.governanceAddress,
+      agreementTreeAddress: defaults.agreementTreeAddress,
       walletFactoryAddress: defaults.walletFactoryAddress,
       sessionChannelsAddress: defaults.sessionChannelsAddress,
       disputeModuleAddress: defaults.disputeModuleAddress,
+      watchtowerRegistryAddress: defaults.watchtowerRegistryAddress,
+      governedTokenWhitelistAddress: defaults.governedTokenWhitelistAddress,
+      vouchingRegistryAddress: defaults.vouchingRegistryAddress,
+      migrationRegistryAddress: defaults.migrationRegistryAddress,
       computeAgreementAddress: defaults.computeAgreementAddress,
       subscriptionAgreementAddress: defaults.subscriptionAgreementAddress,
+      handshakeAddress: defaults.handshakeAddress,
       deviceId: thisDeviceId,
     };
     saveConfig(autoConfig);
@@ -135,10 +226,9 @@ export function loadConfig(): Arc402Config {
   }
 
   // ── Contract address migration ────────────────────────────────────────────
-  // Always enforce current NETWORK_DEFAULTS for known protocol addresses.
-  // This prevents stale V3/V4/V5 factory addresses from persisting in config
-  // after a CLI upgrade. User-overrides are intentional — but factory/PE/registry
-  // addresses must track the latest deployed versions.
+  // ARC-402 protocol addresses are canonical per network.
+  // Keep them pinned to NETWORK_DEFAULTS so stale onboarding/config state
+  // cannot leak old registries or mixed-network contracts into operator flows.
   const network = config.network ?? "base-mainnet";
   const currentDefaults = NETWORK_DEFAULTS[network];
   if (currentDefaults) {
@@ -162,6 +252,8 @@ export function loadConfig(): Arc402Config {
       config.policyEngineAddress = POLICY_ENGINE_V2;
       migrated = true;
     }
+    if (syncCanonicalProtocolAddresses(config, currentDefaults)) migrated = true;
+
     if (migrated) saveConfig(config);
   }
 
@@ -179,9 +271,25 @@ export function saveConfig(config: Arc402Config): void {
 
 export const configExists = () => fs.existsSync(CONFIG_PATH);
 
-// Public Base RPC — stale state, do not use for production. Alchemy recommended.
+// Base mainnet RPC priority.
+// Shared/public endpoints are ordered best → worst, with the canonical public Base RPC last.
 export const PUBLIC_BASE_RPC = "https://mainnet.base.org";
-export const ALCHEMY_BASE_RPC = "https://mainnet.base.org";
+export const SHARED_BASE_RPC = "https://developer-access-mainnet.base.org";
+export const ALCHEMY_BASE_RPC = SHARED_BASE_RPC; // deprecated name, kept for compatibility
+export const BASE_RPC_FALLBACKS = [
+  SHARED_BASE_RPC,
+  "https://base.llamarpc.com",
+  "https://base-rpc.publicnode.com",
+  "https://1rpc.io/base",
+  PUBLIC_BASE_RPC,
+] as const;
+
+export function getBaseRpcPriority(preferred?: string): string[] {
+  const urls = [preferred, process.env.ARC402_RPC_URL, ...BASE_RPC_FALLBACKS].filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  return [...new Set(urls)];
+}
 
 /**
  * Warn at runtime if the configured RPC is the public Base endpoint.
@@ -189,14 +297,15 @@ export const ALCHEMY_BASE_RPC = "https://mainnet.base.org";
  */
 export function warnIfPublicRpc(config: Arc402Config): void {
   if (config.rpcUrl === PUBLIC_BASE_RPC || config.rpcUrl === "https://sepolia.base.org") {
-    console.warn("WARN: Using public Base RPC — state reads may be stale. Set rpcUrl to an Alchemy endpoint for production.");
-    console.warn(`  Recommended: arc402 config set rpcUrl ${ALCHEMY_BASE_RPC}`);
+    console.warn("WARN: Using public Base RPC — state reads may be stale and rate limits can cause false failure diagnosis.");
+    console.warn(`  Better default: arc402 config set rpcUrl ${SHARED_BASE_RPC}`);
+    console.warn("  Best: set rpcUrl to your own dedicated provider endpoint (Alchemy, QuickNode, Chainstack, etc).");
   }
 }
 
 export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddress: string }> = {
   "base-mainnet": {
-    rpcUrl: ALCHEMY_BASE_RPC,
+    rpcUrl: getBaseRpcPriority()[0],
     usdcAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     paymasterUrl: "https://api.developer.coinbase.com/rpc/v1/base/dca85088-a2ac-4ec3-8647-5154b150e7a9",
     // Base Mainnet deployments — v2 deployed 2026-03-15
@@ -205,7 +314,7 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     trustRegistryV2Address:        "0xdA1D377991B2E580991B0DD381CdD635dd71aC39",   // old v2, kept for reference
     intentAttestationAddress:      "0x66585C2F96cAe05EA360F6dBF76bA092A7B87669",
     settlementCoordinatorAddress: "0xd52d8Be9728976E0D70C89db9F8ACeb5B5e97cA2",  // SettlementCoordinatorV2
-    agentRegistryAddress:          "0xcc0D8731ccCf6CFfF4e66F6d68cA86330Ea8B622",   // ARC402RegistryV2 — kept for backward compat
+    agentRegistryAddress:          "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865",   // AgentRegistry — discovery directory
     arc402RegistryV3Address:       "0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6",   // ARC402RegistryV3 — new default
     agentRegistryV2Address:        "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865",   // AgentRegistry
     walletFactoryAddress:          "0x801f0553585f511D9953419A9668edA078196997",   // WalletFactoryV6 — redeployed 2026-03-24 (stack-too-deep fix)
@@ -249,7 +358,7 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     watchtowerRegistryAddress:    "0x70c4E53E3A916eB8A695630f129B943af9C61C57",
     // v2 contracts (new/redeployed 2026-03-15):
     trustRegistryAddress:         "0xf2aE072BB8575c23B0efbF44bDc8188aA900cA7a", // TrustRegistryV3
-    agentRegistryAddress:         "0x0461b2b7A1E50866962CB07326000A94009c58Ff", // ARC402RegistryV2
+    agentRegistryAddress:         "0x07D526f8A8e148570509aFa249EFF295045A0cc9", // AgentRegistry
     serviceAgreementAddress:      "0xbbb1DA355D810E9baEF1a7D072B2132E4755976B",
     sessionChannelsAddress:       "0x5EF144AE2C8456d014e6E3F293c162410C043564",
     disputeModuleAddress:         "0x01866144495fBBbBB7aaD81605de051B2A62594A",

@@ -1,14 +1,11 @@
 import { ethers } from "ethers";
+import { getBaseRpcPriority } from "../config";
 
 /**
  * Public RPC endpoints for Base mainnet, ordered by reliability.
  * Used as fallbacks when the configured RPC fails on read-only calls.
  */
-const BASE_FALLBACK_RPCS = [
-  "https://base.llamarpc.com",
-  "https://base-rpc.publicnode.com",
-  "https://1rpc.io/base",
-];
+const BASE_FALLBACK_RPCS = getBaseRpcPriority();
 
 /** Check if verbose mode is enabled via --verbose flag or ARC402_DEBUG env */
 export function isVerbose(): boolean {
@@ -43,6 +40,7 @@ export async function callWithFallback<T>(
 
   // Try each fallback
   for (const rpc of BASE_FALLBACK_RPCS) {
+    if (rpc === configuredRpcUrl) continue;
     try {
       verbose(`Falling back to ${rpc}`);
       const provider = new ethers.JsonRpcProvider(rpc);

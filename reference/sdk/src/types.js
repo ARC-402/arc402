@@ -14,7 +14,7 @@ exports.NETWORKS = {
     },
     base: {
         chainId: 8453,
-        rpc: "https://mainnet.base.org",
+        rpc: "https://developer-access-mainnet.base.org",
         contracts: {
             policyEngine: "0x0000000000000000000000000000000000000000",
             trustRegistry: "0x0000000000000000000000000000000000000000",

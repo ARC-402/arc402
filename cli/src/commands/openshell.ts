@@ -33,9 +33,10 @@ const PYTHON_BINARIES = [
 ];
 const DEFAULT_POLICY_KEYS = ["base_rpc", "base_rpc_alchemy", "base_rpc_llama", "arc402_relay", "bundler", "telegram"] as const;
 const CORE_LAUNCH_HOSTS = [
-  ["mainnet.base.org", "Base RPC (public)"],
+  ["developer-access-mainnet.base.org", "Base RPC (developer access)"],
   ["base-mainnet.g.alchemy.com", "Base RPC (Alchemy)"],
   ["base.llamarpc.com", "Base RPC (Llama)"],
+  ["mainnet.base.org", "Base RPC (public last resort)"],
   ["relay.arc402.xyz", "ARC-402 relay"],
   ["public.pimlico.io", "Bundler"],
   ["api.telegram.org", "Telegram notifications"],
@@ -102,7 +103,7 @@ function buildDefaultPolicy(): PolicyFile {
       run_as_group: "sandbox",
     },
     network_policies: {
-      base_rpc: buildPolicyEntry("base-mainnet-rpc", "mainnet.base.org"),
+      base_rpc: buildPolicyEntry("base-mainnet-rpc", "developer-access-mainnet.base.org"),
       base_rpc_alchemy: buildPolicyEntry("base-mainnet-rpc-alchemy", "base-mainnet.g.alchemy.com"),
       base_rpc_llama: buildPolicyEntry("base-mainnet-rpc-llama", "base.llamarpc.com"),
       arc402_relay: buildPolicyEntry("arc402-relay", "relay.arc402.xyz"),
@@ -474,7 +475,7 @@ function printPolicyTable(policy: PolicyFile): void {
 
 function ensureCoreLaunchPreset(policy: PolicyFile): Array<{ key: string; result: string }> {
   const entries: Array<{ key: string; result: string }> = [];
-  entries.push({ key: "base_rpc", result: ensurePolicyEntry(policy, "base_rpc", buildPolicyEntry("base-mainnet-rpc", "mainnet.base.org")) });
+  entries.push({ key: "base_rpc", result: ensurePolicyEntry(policy, "base_rpc", buildPolicyEntry("base-mainnet-rpc", "developer-access-mainnet.base.org")) });
   entries.push({ key: "arc402_relay", result: ensurePolicyEntry(policy, "arc402_relay", buildPolicyEntry("arc402-relay", "relay.arc402.xyz")) });
   entries.push({ key: "bundler", result: ensurePolicyEntry(policy, "bundler", buildPolicyEntry("pimlico-bundler", "public.pimlico.io")) });
   entries.push({ key: "telegram", result: ensurePolicyEntry(policy, "telegram", buildPolicyEntry("telegram-notifications", "api.telegram.org")) });

@@ -323,11 +323,13 @@ network_policies:
   base_rpc:
     name: base-mainnet-rpc
     endpoints:
-      - host: mainnet.base.org
+      - host: developer-access-mainnet.base.org
         port: 443
       - host: base.llamarpc.com
         port: 443
       - host: base-mainnet.g.alchemy.com
+        port: 443
+      - host: mainnet.base.org
         port: 443
 
   bundler:
@@ -859,7 +861,7 @@ network_policies:
 
       // Network connectivity (if running)
       if (running) {
-        const rpcTest = runCmd("docker", ["exec", WORKROOM_CONTAINER, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", "https://mainnet.base.org"]);
+        const rpcTest = runCmd("docker", ["exec", WORKROOM_CONTAINER, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", "https://developer-access-mainnet.base.org"]);
         const rpcOk = rpcTest.ok && rpcTest.stdout.trim() !== "000";
         checks.push({ label: "Base RPC from workroom", pass: rpcOk, detail: rpcOk ? `HTTP ${rpcTest.stdout.trim()}` : "FAILED — network policy may be blocking RPC" });
       }

@@ -80,7 +80,7 @@ export const NETWORKS: Record<string, NetworkConfig> = {
   },
   base: {
     chainId: 8453,
-    rpc: "https://mainnet.base.org",
+    rpc: "https://developer-access-mainnet.base.org",
     contracts: {
       policyEngine: "0x9449B15268bE7042C0b473F3f711a41A29220866",
       trustRegistry: "0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1",   // TrustRegistryV3 — v2

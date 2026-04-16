@@ -3,7 +3,7 @@ import { KeyValueStorage } from "@walletconnect/keyvaluestorage";
 import qrcode from "qrcode-terminal";
 import path from "path";
 import os from "os";
-import { Arc402Config } from "./config";
+import { Arc402Config, getBaseRpcPriority } from "./config";
 import { loadWCSession, saveWCSession, clearWCSession } from "./walletconnect-session";
 import { sendWalletConnectApprovalButton } from "./telegram-notify";
 
@@ -28,6 +28,16 @@ export type WCCallbacks = {
 // Infer SignClient instance and session types from the SDK
 type SignClientT = Awaited<ReturnType<typeof SignClient.init>>;
 type WCSession = ReturnType<SignClientT["session"]["get"]>;
+
+function baseMainnetChainParams(preferredRpc?: string) {
+  return [{
+    chainId: "0x2105",
+    chainName: "Base",
+    nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+    rpcUrls: getBaseRpcPriority(preferredRpc),
+    blockExplorerUrls: ["https://basescan.org"],
+  }];
+}
 
 async function makeSignClient(projectId: string, opts?: { quiet?: boolean }): Promise<SignClientT> {
   const storageDir = path.join(os.homedir(), ".arc402");
@@ -238,7 +248,7 @@ export async function connectPhoneWallet(
             chainId: `eip155:${sessionChainId}`,
             request: {
               method: "wallet_addEthereumChain",
-              params: [{ chainId: hexChainId, chainName: "Base", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://mainnet.base.org"], blockExplorerUrls: ["https://basescan.org"] }],
+              params: baseMainnetChainParams(config.rpcUrl),
             },
           });
         } catch { /* already added or unsupported */ }
@@ -316,7 +326,7 @@ export async function sendTransactionWithSession(
           chainId: `eip155:${sessionChainId}`,
           request: {
             method: "wallet_addEthereumChain",
-            params: [{ chainId: hexChainId, chainName: "Base", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://mainnet.base.org"], blockExplorerUrls: ["https://basescan.org"] }],
+            params: baseMainnetChainParams(),
           },
         });
       } catch { /* already added */ }
@@ -423,7 +433,7 @@ export async function requestPhoneWalletSignature(
           await client.request({
             topic: session.topic,
             chainId: `eip155:${sessionChainId}`,
-            request: { method: "wallet_addEthereumChain", params: [{ chainId: hexId, chainName: "Base", nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://mainnet.base.org"], blockExplorerUrls: ["https://basescan.org"] }] },
+            request: { method: "wallet_addEthereumChain", params: baseMainnetChainParams() },
           });
         } catch { /* already added or unsupported */ }
       }
