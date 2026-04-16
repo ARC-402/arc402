@@ -21,9 +21,60 @@ import { renderTree } from "../ui/tree";
 import { startSpinner } from "../ui/spinner";
 import { c } from "../ui/colors";
 import { formatAddress } from "../ui/format";
+import { callWithFallback } from "../ui/rpc-fallback";
 
 const POLICY_ENGINE_DEFAULT = "0x44102e70c2A366632d98Fe40d892a2501fC7fFF2";
 const GUARDIAN_KEY_PATH = path.join(os.homedir(), ".arc402", "guardian.key");
+
+function buildFreshConfigFromDefaults(
+  existing: Arc402Config | undefined,
+  network: "base-mainnet" | "base-sepolia",
+  privateKey: string,
+  ownerAddress: string,
+): Arc402Config {
+  const defaults = NETWORK_DEFAULTS[network];
+  if (!defaults) throw new Error(`Unknown network: ${network}`);
+
+  return {
+    network,
+    rpcUrl: defaults.rpcUrl!,
+    privateKey,
+    ownerAddress,
+    walletConnectProjectId: existing?.walletConnectProjectId,
+    subdomainApi: existing?.subdomainApi,
+    telegramBotToken: existing?.telegramBotToken,
+    telegramChatId: existing?.telegramChatId,
+    telegramThreadId: existing?.telegramThreadId,
+    deviceId: existing?.deviceId,
+    chat: existing?.chat,
+    policyEngineAddress: defaults.policyEngineAddress,
+    trustRegistryAddress: defaults.trustRegistryAddress!,
+    trustRegistryV2Address: defaults.trustRegistryV2Address,
+    intentAttestationAddress: defaults.intentAttestationAddress,
+    settlementCoordinatorAddress: defaults.settlementCoordinatorAddress,
+    agentRegistryAddress: defaults.agentRegistryV2Address ?? defaults.agentRegistryAddress,
+    agentRegistryV2Address: defaults.agentRegistryV2Address,
+    arc402RegistryV3Address: defaults.arc402RegistryV3Address,
+    serviceAgreementAddress: defaults.serviceAgreementAddress,
+    disputeArbitrationAddress: defaults.disputeArbitrationAddress,
+    disputeModuleAddress: defaults.disputeModuleAddress,
+    sessionChannelsAddress: defaults.sessionChannelsAddress,
+    reputationOracleAddress: defaults.reputationOracleAddress,
+    sponsorshipAttestationAddress: defaults.sponsorshipAttestationAddress,
+    capabilityRegistryAddress: defaults.capabilityRegistryAddress,
+    governanceAddress: defaults.governanceAddress,
+    agreementTreeAddress: defaults.agreementTreeAddress,
+    walletFactoryAddress: defaults.walletFactoryAddress,
+    watchtowerRegistryAddress: defaults.watchtowerRegistryAddress,
+    governedTokenWhitelistAddress: defaults.governedTokenWhitelistAddress,
+    vouchingRegistryAddress: defaults.vouchingRegistryAddress,
+    migrationRegistryAddress: defaults.migrationRegistryAddress,
+    handshakeAddress: defaults.handshakeAddress,
+    computeAgreementAddress: defaults.computeAgreementAddress,
+    subscriptionAgreementAddress: defaults.subscriptionAgreementAddress,
+    lastCliVersion: existing?.lastCliVersion,
+  };
+}
 
 /** Save guardian private key to a restricted standalone file (never to config.json). */
 function saveGuardianKey(privateKey: string): void {
@@ -606,20 +657,32 @@ export function registerWalletCommands(program: Command): void {
     const { provider, address } = await getClient(config);
     if (!address) throw new Error("No wallet configured");
     const usdcAddress = getUsdcAddress(config);
-    const usdc = new ethers.Contract(usdcAddress, ["function balanceOf(address owner) external view returns (uint256)"], provider);
-    const trust = new TrustClient(config.trustRegistryAddress, provider);
     const statusSpinner = opts.json ? null : startSpinner("Loading wallet status…");
-    let ethBalance: bigint, usdcBalance: bigint, score: { score: number };
-    try {
-      [ethBalance, usdcBalance, score] = await Promise.all([
-        provider.getBalance(address),
-        usdc.balanceOf(address),
-        trust.getScore(address),
-      ]);
-      statusSpinner?.succeed("Wallet status loaded");
-    } catch (err) {
+    const [ethResult, usdcResult, trustResult] = await Promise.allSettled([
+      callWithFallback(config.rpcUrl, (fallbackProvider) => fallbackProvider.getBalance(address)),
+      callWithFallback(config.rpcUrl, async (fallbackProvider) => {
+        const usdc = new ethers.Contract(usdcAddress, ["function balanceOf(address owner) external view returns (uint256)"], fallbackProvider);
+        return usdc.balanceOf(address) as Promise<bigint>;
+      }),
+      callWithFallback(config.rpcUrl, async (fallbackProvider) => {
+        const trust = new TrustClient(config.trustRegistryAddress, fallbackProvider);
+        return trust.getScore(address);
+      }),
+    ]);
+
+    if (ethResult.status === "rejected") {
       statusSpinner?.fail("Failed to load wallet status");
-      throw err;
+      throw ethResult.reason;
+    }
+
+    const ethBalance = ethResult.value;
+    const usdcBalance = usdcResult.status === "fulfilled" ? usdcResult.value : 0n;
+    const score = trustResult.status === "fulfilled" ? trustResult.value : { score: 0 };
+
+    if (usdcResult.status === "rejected" || trustResult.status === "rejected") {
+      statusSpinner?.succeed("Wallet status loaded (with fallbacks)");
+    } else {
+      statusSpinner?.succeed("Wallet status loaded");
     }
 
     // Query contract wallet for frozen/guardian state if deployed
@@ -716,22 +779,17 @@ export function registerWalletCommands(program: Command): void {
 
   wallet.command("new")
     .description("Generate a fresh keypair and save to config")
-    .option("--network <network>", "Network (base-mainnet or base-sepolia)", "base-sepolia")
+    .option("--network <network>", "Network (base-mainnet or base-sepolia)")
     .action(async (opts) => {
-      const network = opts.network as "base-mainnet" | "base-sepolia";
+      const existing = fs.existsSync(getConfigPath()) ? loadConfig() : undefined;
+      const network = ((opts.network as "base-mainnet" | "base-sepolia" | undefined) ?? existing?.network ?? "base-mainnet");
       const defaults = NETWORK_DEFAULTS[network];
       if (!defaults) {
         console.error(`Unknown network: ${network}. Use base-mainnet or base-sepolia.`);
         process.exit(1);
       }
       const generated = ethers.Wallet.createRandom();
-      const config: Arc402Config = {
-        network,
-        rpcUrl: defaults.rpcUrl!,
-        privateKey: generated.privateKey,
-        trustRegistryAddress: defaults.trustRegistryAddress!,
-        walletFactoryAddress: defaults.walletFactoryAddress,
-      };
+      const config = buildFreshConfigFromDefaults(existing, network, generated.privateKey, generated.address);
       saveConfig(config);
       renderTree([
         { label: "Address", value: generated.address },
@@ -744,10 +802,11 @@ export function registerWalletCommands(program: Command): void {
 
   wallet.command("import")
     .description("Import an existing private key (use --key-file or stdin prompt)")
-    .option("--network <network>", "Network (base-mainnet or base-sepolia)", "base-sepolia")
+    .option("--network <network>", "Network (base-mainnet or base-sepolia)")
     .option("--key-file <path>", "Read private key from file instead of prompting")
     .action(async (opts) => {
-      const network = opts.network as "base-mainnet" | "base-sepolia";
+      const existing = fs.existsSync(getConfigPath()) ? loadConfig() : undefined;
+      const network = ((opts.network as "base-mainnet" | "base-sepolia" | undefined) ?? existing?.network ?? "base-mainnet");
       const defaults = NETWORK_DEFAULTS[network];
       if (!defaults) {
         console.error(`Unknown network: ${network}. Use base-mainnet or base-sepolia.`);
@@ -783,13 +842,7 @@ export function registerWalletCommands(program: Command): void {
         console.error("Invalid private key. Must be a 0x-prefixed hex string.");
         process.exit(1);
       }
-      const config: Arc402Config = {
-        network,
-        rpcUrl: defaults.rpcUrl!,
-        privateKey: imported.privateKey,
-        trustRegistryAddress: defaults.trustRegistryAddress!,
-        walletFactoryAddress: defaults.walletFactoryAddress,
-      };
+      const config = buildFreshConfigFromDefaults(existing, network, imported.privateKey, imported.address);
       saveConfig(config);
       renderTree([
         { label: "Address", value: imported.address },
@@ -856,17 +909,22 @@ export function registerWalletCommands(program: Command): void {
         console.error("No owner address. Pass --owner <address> or set ownerAddress in config (run `arc402 wallet deploy` first).");
         process.exit(1);
       }
-      const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-      const factory = new ethers.Contract(factoryAddress, WALLET_FACTORY_ABI, provider);
-      const wallets: string[] = await factory.getWallets(ownerAddress);
+      const wallets = await callWithFallback(config.rpcUrl, async (fallbackProvider) => {
+        const factory = new ethers.Contract(factoryAddress, WALLET_FACTORY_ABI, fallbackProvider);
+        return factory.getWallets(ownerAddress) as Promise<string[]>;
+      });
 
       const results = await Promise.all(
         wallets.map(async (addr) => {
-          const walletContract = new ethers.Contract(addr, ARC402_WALLET_GUARDIAN_ABI, provider);
-          const trustContract = new ethers.Contract(config.trustRegistryAddress, TRUST_REGISTRY_ABI, provider);
           const [frozen, score] = await Promise.all([
-            walletContract.frozen().catch(() => null),
-            trustContract.getScore(addr).catch(() => BigInt(0)),
+            callWithFallback(config.rpcUrl, async (fallbackProvider) => {
+              const walletContract = new ethers.Contract(addr, ARC402_WALLET_GUARDIAN_ABI, fallbackProvider);
+              return walletContract.frozen().catch(() => null) as Promise<boolean | null>;
+            }).catch(() => null),
+            callWithFallback(config.rpcUrl, async (fallbackProvider) => {
+              const trustContract = new ethers.Contract(config.trustRegistryAddress, TRUST_REGISTRY_ABI, fallbackProvider);
+              return trustContract.getScore(addr).catch(() => BigInt(0)) as Promise<bigint>;
+            }).catch(() => BigInt(0)),
           ]);
           return { address: addr, frozen: frozen as boolean | null, score: Number(score) };
         })
@@ -908,9 +966,10 @@ export function registerWalletCommands(program: Command): void {
       const factoryAddress = config.walletFactoryAddress ?? NETWORK_DEFAULTS[config.network]?.walletFactoryAddress;
       if (factoryAddress && config.ownerAddress) {
         try {
-          const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-          const factory = new ethers.Contract(factoryAddress, WALLET_FACTORY_ABI, provider);
-          const wallets: string[] = await factory.getWallets(config.ownerAddress);
+          const wallets = await callWithFallback(config.rpcUrl, async (fallbackProvider) => {
+            const factory = new ethers.Contract(factoryAddress, WALLET_FACTORY_ABI, fallbackProvider);
+            return factory.getWallets(config.ownerAddress) as Promise<string[]>;
+          });
           const found = wallets.some((w) => w.toLowerCase() === checksumAddress.toLowerCase());
           if (!found) {
             console.warn(`WARN: ${checksumAddress} was not found in WalletFactory wallets for owner ${config.ownerAddress}`);
