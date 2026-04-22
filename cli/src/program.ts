@@ -40,6 +40,7 @@ import { registerJobCommands } from "./commands/job";
 import { registerHermesInitCommand } from "./commands/hermes-init";
 import { registerIndexCommands } from "./commands/index";
 import { registerSubscriptionCommands } from "./commands/subscription";
+import { registerTelegramCommands } from "./commands/telegram";
 import reputation from "./commands/reputation.js";
 import policy from "./commands/policy.js";
 
@@ -94,6 +95,7 @@ export function createProgram(): Command {
   registerHermesInitCommand(program);
   registerIndexCommands(program);
   registerSubscriptionCommands(program);
+  registerTelegramCommands(program);
   program.addCommand(reputation);
   program.addCommand(policy);
 

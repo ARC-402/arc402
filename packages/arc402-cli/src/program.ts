@@ -44,6 +44,7 @@ import { registerStatusCommand } from "./commands/status";
 import { registerAuthCommand } from "./commands/auth";
 import { registerSecurityCommand } from "./commands/security";
 import { registerLifecycleCommand } from "./commands/lifecycle";
+import { registerTelegramCommands } from "./commands/telegram";
 import reputation from "./commands/reputation.js";
 import policy from "./commands/policy.js";
 
@@ -102,6 +103,7 @@ export function createProgram(): Command {
   registerIndexCommands(program);
   registerSubscriptionCommands(program);
   registerSecurityCommand(program);
+  registerTelegramCommands(program);
   program.addCommand(reputation);
   program.addCommand(policy);
 
