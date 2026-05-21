@@ -44,7 +44,7 @@ function warn(label: string, detail?: string): void {
  * look like a broken wallet or de-authorized key, which sends operators chasing
  * a phantom auth problem. Report them as inconclusive and point at a real RPC.
  */
-function looksLikeRpcProblem(err: unknown): boolean {
+export function looksLikeRpcProblem(err: unknown): boolean {
   const e = err as {
     code?: string;
     shortMessage?: string;
