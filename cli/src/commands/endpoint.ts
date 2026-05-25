@@ -191,11 +191,17 @@ function checkCloudflared(endpointTunnelTarget?: string): DoctorCheck {
     };
   }
 
+  const command = ps.stdout.trim();
+  const pidMatch = command.match(/^\S+\s+(\d+)\b/);
+  const pid = pidMatch?.[1];
+  const redactedTarget = endpointTunnelTarget ? ` for ${endpointTunnelTarget}` : "";
   return {
     layer: "ingress",
     label: "Tunnel process",
     ok: true,
-    detail: `detected: ${ps.stdout}`,
+    detail: pid
+      ? `detected cloudflared tunnel process${redactedTarget} (pid ${pid}, command redacted)`
+      : `detected cloudflared tunnel process${redactedTarget} (command redacted)`,
   };
 }
 
