@@ -646,7 +646,7 @@ network_policies:
         // Inject enabled provider API keys (never written to container disk)
         ...providerEnvFlags,
         // Expose relay port
-        "-p", "4402:4402",
+        "-p", "4402:4403",
         WORKROOM_IMAGE,
       ];
 
@@ -857,9 +857,15 @@ network_policies:
       const daemonCfg = fs.existsSync(DAEMON_TOML);
       checks.push({ label: "daemon.toml", pass: daemonCfg, detail: daemonCfg ? "found" : "missing — run: arc402 daemon init" });
 
-      // Machine key env
-      const mk = !!process.env.ARC402_MACHINE_KEY;
-      checks.push({ label: "Machine key env", pass: mk, detail: mk ? "set" : "ARC402_MACHINE_KEY not in environment" });
+      // Machine key env — for Workroom, the authoritative check is inside the running container.
+      let mk = !!process.env.ARC402_MACHINE_KEY;
+      let mkDetail = mk ? "set on host" : "ARC402_MACHINE_KEY not in host environment";
+      if (running) {
+        const mkInContainer = runCmd("docker", ["exec", WORKROOM_CONTAINER, "sh", "-lc", "test -n \"$ARC402_MACHINE_KEY\""]);
+        mk = mkInContainer.ok;
+        mkDetail = mk ? "set inside Workroom container" : "ARC402_MACHINE_KEY not in Workroom container";
+      }
+      checks.push({ label: "Machine key env", pass: mk, detail: mkDetail });
 
       // Worker agent registered in openclaw.json
       {

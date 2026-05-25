@@ -9,13 +9,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # This runs at image build time so native addons compile for Linux, not the host OS.
 # ARG allows pinning a specific version: docker build --build-arg ARC402_CLI_VERSION=1.4.19
 ARG ARC402_CLI_VERSION=latest
-RUN npm install -g arc402-cli@${ARC402_CLI_VERSION} --build-from-source 2>&1 | tail -5
+RUN npm install -g arc402-cli@${ARC402_CLI_VERSION} --build-from-source
 # Stamp the CLI version as an image label so workroom start can detect stale images.
 LABEL arc402.cli.version=${ARC402_CLI_VERSION}
 
 # Install @arc402/daemon globally — split from arc402-cli in Spec 46.
 ARG ARC402_DAEMON_VERSION=latest
-RUN npm install -g @arc402/daemon@${ARC402_DAEMON_VERSION} 2>&1 | tail -5
+RUN npm install -g @arc402/daemon@${ARC402_DAEMON_VERSION}
 LABEL arc402.daemon.version=${ARC402_DAEMON_VERSION}
 
 # Install Claude Code CLI — required for agent_type = "claude-code" worker execution.
