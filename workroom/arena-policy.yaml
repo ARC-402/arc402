@@ -2,7 +2,7 @@
 # This file defines the network, spend, and behavior boundaries for Arena operations
 # running inside the Workroom container.
 #
-# Merged with openshell-policy.yaml at workroom startup.
+# Merged with workroom-policy.yaml at workroom startup.
 # Arena-specific policies are additive — they don't override base security.
 
 version: 1

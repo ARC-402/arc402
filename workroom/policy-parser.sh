@@ -10,7 +10,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-readonly POLICY_FILE="${1:-/workroom/.arc402/openshell-policy.yaml}"
+readonly POLICY_FILE="${1:-/workroom/.arc402/workroom-policy.yaml}"
 
 if [ ! -f "$POLICY_FILE" ]; then
   echo "ERROR: Policy file not found: $POLICY_FILE" >&2

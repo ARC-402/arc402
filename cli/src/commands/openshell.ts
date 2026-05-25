@@ -23,6 +23,7 @@ import { DAEMON_PID, DAEMON_LOG, DAEMON_TOML } from "../daemon/config";
 
 const POLICY_FILE = path.join(ARC402_DIR, "openshell-policy.yaml");
 const SANDBOX_NAME = "arc402-daemon";
+const REMOTE_DAEMON_PID = "/sandbox/.arc402/daemon.pid";
 const NODE_BINARIES = [
   { path: "/usr/bin/node" },
   { path: "/usr/local/bin/node" },
@@ -310,20 +311,30 @@ function buildOpenShellDoctorChecks(): OpenShellDoctorCheck[] {
     if (Number.isFinite(pid) && pid > 0 && isProcessAlive(pid)) {
       checks.push({ label: "Daemon process", ok: true, detail: `running (PID ${pid})` });
     } else {
+      const remotePid = config?.sandbox.name ? readOpenShellDaemonPid(config.sandbox.name) : null;
+      if (remotePid) {
+        checks.push({ label: "Daemon process", ok: true, detail: `running in OpenShell sandbox (PID ${remotePid})` });
+      } else {
+        checks.push({
+          label: "Daemon process",
+          ok: false,
+          detail: `stale or invalid PID file (${JSON.stringify(rawPid)})`,
+          fix: "Remove the stale PID file or restart with `arc402 daemon start`.",
+        });
+      }
+    }
+  } else {
+    const remotePid = config?.sandbox.name ? readOpenShellDaemonPid(config.sandbox.name) : null;
+    if (remotePid) {
+      checks.push({ label: "Daemon process", ok: true, detail: `running in OpenShell sandbox (PID ${remotePid})` });
+    } else {
       checks.push({
         label: "Daemon process",
         ok: false,
-        detail: `stale or invalid PID file (${JSON.stringify(rawPid)})`,
-        fix: "Remove the stale PID file or restart with `arc402 daemon start`.",
+        detail: "not running yet (no PID file)",
+        fix: "Run `arc402 daemon start` after init completes.",
       });
     }
-  } else {
-    checks.push({
-      label: "Daemon process",
-      ok: false,
-      detail: "not running yet (no PID file)",
-      fix: "Run `arc402 daemon start` after init completes.",
-    });
   }
 
   checks.push({
@@ -337,6 +348,29 @@ function buildOpenShellDoctorChecks(): OpenShellDoctorCheck[] {
 }
 
 // ─── Policy file helpers ──────────────────────────────────────────────────────
+
+function readOpenShellDaemonPid(sandboxName: string): number | null {
+  try {
+    const { configPath, host } = buildOpenShellSshConfig(sandboxName);
+    const pidRead = runCmd("ssh", [
+      "-F", configPath,
+      host,
+      `test -f ${REMOTE_DAEMON_PID} && cat ${REMOTE_DAEMON_PID}`,
+    ], { timeout: 20000 });
+    if (!pidRead.ok || !pidRead.stdout.trim()) return null;
+    const pid = parseInt(pidRead.stdout.trim(), 10);
+    if (!Number.isFinite(pid) || pid <= 0) return null;
+
+    const aliveCheck = runCmd("ssh", [
+      "-F", configPath,
+      host,
+      `kill -0 ${pid} >/dev/null 2>&1 && echo alive || echo dead`,
+    ], { timeout: 20000 });
+    return aliveCheck.ok && /alive/i.test(aliveCheck.stdout) ? pid : null;
+  } catch {
+    return null;
+  }
+}
 
 function loadPolicyFile(): PolicyFile | null {
   if (!fs.existsSync(POLICY_FILE)) return null;

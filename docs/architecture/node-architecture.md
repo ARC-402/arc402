@@ -123,7 +123,7 @@ Governed execution environment. iptables restricts outbound to policy-approved h
 
 | Element | What it is |
 |---------|------------|
-| **Network wall** | iptables rules derived from `openshell-policy.yaml` |
+| **Network wall** | iptables rules derived from `workroom-policy.yaml` |
 | **Worker identity** | `SOUL.md`, `IDENTITY.md`, `memory/`, `datasets/`, `skills/` per worker |
 | **Job isolation** | `~/.arc402/jobs/<agreementId>/` — scoped filesystem per hire |
 | **Credential injection** | Secrets loaded at runtime, never baked into images |

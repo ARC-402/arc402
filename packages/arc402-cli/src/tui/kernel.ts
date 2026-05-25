@@ -196,7 +196,7 @@ function parseTokens(input: string): string[] {
 }
 
 function readWorkroomStatusSnapshot(): { statusLabel: string; harness?: string; policyHash?: string; queueDepth?: number; runtime?: string } {
-  const policyFile = path.join(DAEMON_DIR, "openshell-policy.yaml");
+  const policyFile = path.join(DAEMON_DIR, "workroom-policy.yaml");
   let policyHash = "n/a";
   if (fs.existsSync(policyFile)) {
     const content = fs.readFileSync(policyFile, "utf-8");

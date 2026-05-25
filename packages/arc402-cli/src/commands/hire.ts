@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { ServiceAgreementClient, SessionManager } from "@arc402/sdk";
 import { ethers } from "ethers";
-import { getUsdcAddress, loadConfig } from "../config";
+import { getCanonicalAgentRegistryAddress, getUsdcAddress, loadConfig } from "../config";
 import { requireSigner } from "../client";
 import { hashFile, hashString } from "../utils/hash";
 import { parseDuration } from "../utils/time";
@@ -13,8 +13,6 @@ import { renderTree, TreeItem } from '../ui/tree';
 import { formatAddress } from '../ui/format';
 import { isTuiRenderMode } from "../tui/render-inline";
 import { printHireCard } from "../tui/command-renderers";
-
-const DEFAULT_REGISTRY_ADDRESS = "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865";
 
 /**
  * Resolve a provider argument to a wallet address.
@@ -92,7 +90,7 @@ export function registerHireCommand(program: Command): void {
       const rawProvider = providerArg ?? opts.agent;
       if (!rawProvider) throw new Error("Provider required. Pass as positional arg (gigabrain.arc402.xyz) or --agent <address>");
       const rpcProvider = new ethers.JsonRpcProvider(config.rpcUrl);
-      const registryAddr = config.agentRegistryAddress ?? DEFAULT_REGISTRY_ADDRESS;
+      const registryAddr = getCanonicalAgentRegistryAddress(config);
       const resolving = startSpinner(`Resolving provider: ${rawProvider}`);
       opts.agent = await resolveProviderAddress(rawProvider, registryAddr, rpcProvider).catch((e: Error) => {
         resolving.fail(`Could not resolve provider: ${e.message}`);
@@ -140,7 +138,7 @@ export function registerHireCommand(program: Command): void {
       }
 
       // Pre-flight: check provider is registered in AgentRegistry (J2-02)
-      const agentRegistryAddress = config.agentRegistryV2Address ?? config.agentRegistryAddress;
+      const agentRegistryAddress = getCanonicalAgentRegistryAddress(config);
       if (agentRegistryAddress) {
         const arProvider = new ethers.JsonRpcProvider(config.rpcUrl);
         const arCheck = new ethers.Contract(
@@ -253,7 +251,7 @@ export function registerHireCommand(program: Command): void {
       hireSpinner.succeed('Agreement proposed');
 
       // Notify provider's HTTP endpoint (non-blocking)
-      const hireRegistryAddress = config.agentRegistryV2Address ?? config.agentRegistryAddress ?? DEFAULT_REGISTRY_ADDRESS;
+      const hireRegistryAddress = getCanonicalAgentRegistryAddress(config);
       try {
         const hireProvider = new ethers.JsonRpcProvider(config.rpcUrl);
         const hireRegistry = new ethers.Contract(hireRegistryAddress, AGENT_REGISTRY_ABI, hireProvider);

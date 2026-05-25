@@ -34,6 +34,7 @@ const PYTHON_BINARIES = [
   { path: "/usr/local/bin/python3" },
 ];
 const DEFAULT_POLICY_KEYS = ["base_rpc", "base_rpc_alchemy", "base_rpc_llama", "arc402_relay", "bundler", "telegram"] as const;
+const REMOTE_DAEMON_PID = "/sandbox/.arc402/daemon.pid";
 const CORE_LAUNCH_HOSTS = [
   ["developer-access-mainnet.base.org", "Base RPC (developer access)"],
   ["base-mainnet.g.alchemy.com", "Base RPC (Alchemy)"],
@@ -312,20 +313,30 @@ function buildOpenShellDoctorChecks(): OpenShellDoctorCheck[] {
     if (Number.isFinite(pid) && pid > 0 && isProcessAlive(pid)) {
       checks.push({ label: "Daemon process", ok: true, detail: `running (PID ${pid})` });
     } else {
+      const remotePid = config?.sandbox.name ? readOpenShellDaemonPid(config.sandbox.name) : null;
+      if (remotePid) {
+        checks.push({ label: "Daemon process", ok: true, detail: `running in Workroom sandbox (PID ${remotePid})` });
+      } else {
+        checks.push({
+          label: "Daemon process",
+          ok: false,
+          detail: `stale or invalid PID file (${JSON.stringify(rawPid)})`,
+          fix: "Remove the stale PID file or restart with `arc402 daemon start`.",
+        });
+      }
+    }
+  } else {
+    const remotePid = config?.sandbox.name ? readOpenShellDaemonPid(config.sandbox.name) : null;
+    if (remotePid) {
+      checks.push({ label: "Daemon process", ok: true, detail: `running in Workroom sandbox (PID ${remotePid})` });
+    } else {
       checks.push({
         label: "Daemon process",
         ok: false,
-        detail: `stale or invalid PID file (${JSON.stringify(rawPid)})`,
-        fix: "Remove the stale PID file or restart with `arc402 daemon start`.",
+        detail: "not running yet (no PID file)",
+        fix: "Run `arc402 daemon start` after init completes.",
       });
     }
-  } else {
-    checks.push({
-      label: "Daemon process",
-      ok: false,
-      detail: "not running yet (no PID file)",
-      fix: "Run `arc402 daemon start` after init completes.",
-    });
   }
 
   checks.push({
@@ -339,6 +350,29 @@ function buildOpenShellDoctorChecks(): OpenShellDoctorCheck[] {
 }
 
 // ─── Policy file helpers ──────────────────────────────────────────────────────
+
+function readOpenShellDaemonPid(sandboxName: string): number | null {
+  try {
+    const { configPath, host } = buildOpenShellSshConfig(sandboxName);
+    const pidRead = runCmd("ssh", [
+      "-F", configPath,
+      host,
+      `test -f ${REMOTE_DAEMON_PID} && cat ${REMOTE_DAEMON_PID}`,
+    ], { timeout: 20000 });
+    if (!pidRead.ok || !pidRead.stdout.trim()) return null;
+    const pid = parseInt(pidRead.stdout.trim(), 10);
+    if (!Number.isFinite(pid) || pid <= 0) return null;
+
+    const aliveCheck = runCmd("ssh", [
+      "-F", configPath,
+      host,
+      `kill -0 ${pid} >/dev/null 2>&1 && echo alive || echo dead`,
+    ], { timeout: 20000 });
+    return aliveCheck.ok && /alive/i.test(aliveCheck.stdout) ? pid : null;
+  } catch {
+    return null;
+  }
+}
 
 function loadPolicyFile(): PolicyFile | null {
   if (!fs.existsSync(POLICY_FILE)) return null;
@@ -370,7 +404,7 @@ function requirePolicyFile(): PolicyFile {
   const policy = loadPolicyFile();
   if (!policy) {
     console.error(`Policy file not found: ${POLICY_FILE}`);
-    console.error("Run: arc402 openshell init");
+    console.error("Main path: arc402 workroom init");
     process.exit(1);
   }
   return policy;
@@ -528,14 +562,14 @@ function printPolicyConcepts(): void {
 export function registerOpenShellCommands(program: Command): void {
   const openshell = program
     .command("openshell")
-    .description("OpenShell sandbox integration for the ARC-402 daemon (Spec 34)");
+    .description("Internal legacy alias for the Workroom runtime control plane.");
 
   // ── openshell install ──────────────────────────────────────────────────────
   openshell
     .command("install")
     .description("Install OpenShell from the official source (requires Docker).")
     .action(() => {
-      console.log("OpenShell Install");
+      console.log("Workroom Runtime Substrate Install");
       console.log("─────────────────");
 
       process.stdout.write("Checking Docker... ");
@@ -546,7 +580,7 @@ export function registerOpenShellCommands(program: Command): void {
       }
       console.log(docker.detail);
 
-      console.log("\nDownloading OpenShell from github.com/NVIDIA/OpenShell ...");
+      console.log("\nDownloading the Workroom sandbox substrate from github.com/NVIDIA/OpenShell ...");
       const install = runCmd("sh", ["-c",
         "curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh"
       ], { timeout: 120000 });
@@ -571,29 +605,29 @@ export function registerOpenShellCommands(program: Command): void {
 
       const status = runCmd("openshell", ["status"]);
       if (!status.ok) {
-        console.log("\nOpenShell installed, but the gateway is not healthy yet.");
+        console.log("\nWorkroom substrate installed, but the gateway is not healthy yet.");
         console.log("Run one of:");
         console.log("  openshell gateway start");
         console.log("  openshell doctor");
       }
 
-      console.log("\nOpenShell installed successfully.");
-      console.log("Run: arc402 openshell init");
+      console.log("\nWorkroom substrate installed successfully.");
+      console.log("Main path: arc402 workroom init");
     });
 
   // ── openshell init ─────────────────────────────────────────────────────────
   openshell
     .command("init")
-    .description("Initialize the launch runtime once: create the arc402-daemon sandbox, write the default policy, and hide OpenShell wiring behind ARC-402 commands.")
+    .description("Initialize the internal Workroom sandbox runtime once: create the arc402-daemon sandbox, write the default policy, and keep the substrate hidden behind Workroom commands.")
     .action(async () => {
-      console.log("OpenShell Init");
+      console.log("Workroom Runtime Init");
       console.log("──────────────");
 
-      process.stdout.write("OpenShell:  ");
+      process.stdout.write("Substrate:  ");
       const shellPath = checkOpenShellInstalled();
       if (!shellPath) {
         console.log("not installed");
-        console.error("OpenShell is not installed. Run: arc402 openshell install");
+        console.error("Workroom substrate is not installed. Run: arc402 openshell install");
         process.exit(1);
       }
       const vr = runCmd("openshell", ["--version"]);
@@ -604,7 +638,7 @@ export function registerOpenShellCommands(program: Command): void {
       const docker = detectDockerAccess();
       if (!docker.ok) {
         if (gatewayStatus.ok) {
-          console.log(`${docker.detail} (continuing because OpenShell gateway is already connected)`);
+          console.log(`${docker.detail} (continuing because the runtime gateway is already connected)`);
         } else {
           console.log(docker.detail);
           ensureDockerAccessOrExit("Docker", docker);
@@ -725,7 +759,7 @@ export function registerOpenShellCommands(program: Command): void {
       console.log(`\nConfig: ${OPENSHELL_TOML}`);
 
       console.log(`
-OpenShell integration configured.
+Workroom runtime integration configured.
 
   Sandbox:   ${SANDBOX_NAME}
   Policy:    ${POLICY_FILE}
@@ -736,11 +770,8 @@ arc402 daemon start will now use the provisioned ARC-402 runtime inside ${SANDBO
 Default policy: Base RPC + relay + bundler + Telegram API. All other network access blocked.
 
 To allow additional endpoints for your harness or worker tools:
-  See the launch-safe presets and toggles: arc402 openshell policy concepts
-  Core preset:         arc402 openshell policy preset core-launch
-  Peer agent allow:    arc402 openshell policy peer add gigabrain.arc402.xyz
-  Harness/API pack:    arc402 openshell policy preset harness
-  List current policy: arc402 openshell policy list
+  See the launch-safe presets and toggles via the internal runtime policy layer.
+  Operator-facing path remains Workroom.
   No daemon restart needed.
 
 If you update the local CLI build and want the sandbox to pick it up immediately:
@@ -750,15 +781,15 @@ If you update the local CLI build and want the sandbox to pick it up immediately
   // ── openshell sync-runtime ────────────────────────────────────────────────
   openshell
     .command("sync-runtime")
-    .description("Package the local ARC-402 CLI and upload it into the configured OpenShell sandbox so daemon startup is genuinely one-click.")
+    .description("Package the local ARC-402 CLI and upload it into the configured Workroom sandbox so daemon startup is genuinely one-click.")
     .action(() => {
       const cfg = readOpenShellConfig();
       if (!cfg?.sandbox?.name) {
-        console.error("OpenShell is not configured yet. Run: arc402 openshell init");
+        console.error("Workroom runtime is not configured yet. Main path: arc402 workroom init");
         process.exit(1);
       }
 
-      console.log("Syncing ARC-402 runtime into OpenShell...");
+      console.log("Syncing ARC-402 runtime into the Workroom sandbox...");
       try {
         const provisioned = provisionRuntimeToSandbox(
           cfg.sandbox.name,
@@ -782,9 +813,9 @@ If you update the local CLI build and want the sandbox to pick it up immediately
   // ── openshell doctor ───────────────────────────────────────────────────────
   openshell
     .command("doctor")
-    .description("Prove where MacBook/clean-room setup is blocked: Docker, OpenShell, sandbox, providers, runtime sync, or daemon boot.")
+    .description("Internal doctor for the Workroom sandbox substrate.")
     .action(() => {
-      console.log("ARC-402 OpenShell Doctor");
+      console.log("ARC-402 Workroom Runtime Doctor");
       console.log("─────────────────────");
 
       const checks = buildOpenShellDoctorChecks();
@@ -800,14 +831,14 @@ If you update the local CLI build and want the sandbox to pick it up immediately
       }
 
       if (failures === 0) {
-        console.log("\nOpenShell launch path looks ready for current launch scope.");
+        console.log("\nWorkroom runtime launch path looks ready for current launch scope.");
       } else {
         console.log(`\n${failures} readiness gap(s) found.`);
       }
 
       console.log("\nLayer order:");
-      console.log("  1. Docker / OpenShell substrate");
-      console.log("  2. ARC-402 OpenShell config + providers");
+      console.log("  1. Docker / runtime substrate");
+      console.log("  2. ARC-402 runtime config + providers");
       console.log("  3. sandbox existence + policy file");
       console.log("  4. remote runtime bundle sync");
       console.log("  5. daemon config + launch seam");
@@ -817,9 +848,9 @@ If you update the local CLI build and want the sandbox to pick it up immediately
   // ── openshell status ───────────────────────────────────────────────────────
   openshell
     .command("status")
-    .description("Show OpenShell integration status.")
+    .description("Show internal Workroom runtime integration status.")
     .action(() => {
-      console.log("OpenShell Integration");
+      console.log("Workroom Runtime Integration");
       console.log("─────────────────────");
 
       const line = (label: string, value: string) =>
@@ -830,7 +861,7 @@ If you update the local CLI build and want the sandbox to pick it up immediately
         const vr = runCmd("openshell", ["--version"]);
         line("Installed:", `yes (${vr.stdout || "unknown version"})`);
       } else {
-        line("Installed:", "no  ← run: arc402 openshell install");
+        line("Installed:", "no  ← internal substrate install: arc402 openshell install");
       }
 
       const docker = detectDockerAccess();
@@ -843,7 +874,7 @@ If you update the local CLI build and want the sandbox to pick it up immediately
         if (listR.ok && listR.stdout) {
           line("Sandbox:", `${SANDBOX_NAME} (found)`);
         } else {
-          line("Sandbox:", `${SANDBOX_NAME} not found  ← run: arc402 openshell init`);
+          line("Sandbox:", `${SANDBOX_NAME} not found  ← run: arc402 workroom init`);
         }
       }
 
@@ -855,8 +886,8 @@ If you update the local CLI build and want the sandbox to pick it up immediately
 
       const openShellConfig = readOpenShellConfig();
       if (openShellConfig) {
-        line("Daemon mode:", "OpenShell-owned governed workroom runtime");
-        line("Public mode:", "separate layer — endpoint/tunnel ingress is host-facing, not a sandbox policy toggle");
+        line("Daemon mode:", "Workroom-governed sandbox runtime");
+        line("Public mode:", "separate layer — endpoint/tunnel ingress is host-facing, not a workroom policy toggle");
         line("Runtime root:", openShellConfig.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT);
         line("Last sync:", openShellConfig.runtime?.synced_at ?? "unknown");
 
@@ -875,7 +906,7 @@ If you update the local CLI build and want the sandbox to pick it up immediately
             "printf '%s' \"${ARC402_MACHINE_KEY:-missing}\"",
           ], { timeout: 60000 });
           if (secretProbe.ok && secretProbe.stdout.startsWith("openshell:resolve:env:")) {
-            line("Secret mode:", "raw SSH shows OpenShell placeholders; ARC-402 overlays real launch envs from local config ✓");
+            line("Secret mode:", "raw SSH shows substrate placeholders; ARC-402 overlays real launch envs from local config ✓");
           } else if (secretProbe.ok && secretProbe.stdout && secretProbe.stdout !== "missing") {
             line("Secret mode:", "sandbox env already materialized ✓");
           } else {
@@ -885,7 +916,7 @@ If you update the local CLI build and want the sandbox to pick it up immediately
           line("Runtime sync:", "could not verify remote bundle");
         }
       } else {
-        line("Daemon mode:", "not configured for launch (run: arc402 openshell init)");
+        line("Daemon mode:", "not configured for launch (main path: arc402 workroom init)");
       }
 
       const policy = loadPolicyFile();
@@ -916,7 +947,7 @@ If you update the local CLI build and want the sandbox to pick it up immediately
   // ── openshell policy ───────────────────────────────────────────────────────
   const policyCmd = openshell
     .command("policy")
-    .description("Manage the OpenShell outbound network policy for the arc402-daemon sandbox. This is separate from public endpoint / tunnel ingress.");
+    .description("Manage the internal runtime outbound network policy for the arc402-daemon sandbox. This is separate from public endpoint / tunnel ingress.");
 
   policyCmd
     .command("concepts")

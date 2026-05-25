@@ -110,7 +110,7 @@ export const POLICY_ENGINE_LIMITS_ABI = [
 
 // PolicyEngine governance functions — for onboarding ceremony
 export const POLICY_ENGINE_GOVERNANCE_ABI = [
-  // registerWallet requires msg.sender == wallet — route through wallet's executeContractCall
+  // registerWallet is called directly on PolicyEngine by the owner wallet during onboarding
   "function registerWallet(address wallet, address owner) external",
   // enableDefiAccess: onlyWalletOwnerOrWallet — owner can call directly on PolicyEngine
   "function enableDefiAccess(address wallet) external",

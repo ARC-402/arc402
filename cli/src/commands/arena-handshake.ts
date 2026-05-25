@@ -1,13 +1,11 @@
 import { Command } from "commander";
 import { ethers } from "ethers";
-import { loadConfig, getUsdcAddress } from "../config";
+import { getCanonicalAgentRegistryAddress, getCanonicalNetworkAddress, getUsdcAddress, loadConfig } from "../config";
 import { requireSigner } from "../client";
 import { AGENT_REGISTRY_ABI } from "../abis";
 import { startSpinner } from "../ui/spinner";
 import { renderTree } from "../ui/tree";
 import { c } from "../ui/colors";
-
-const DEFAULT_REGISTRY_ADDRESS = "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865";
 
 async function pingHandshakeEndpoint(
   agentAddress: string,
@@ -104,17 +102,11 @@ export function registerArenaHandshakeCommands(program: Command): void {
       const { signer, provider } = await requireSigner(config);
       const myAddress = await signer.getAddress();
 
-      if (!config.handshakeAddress) {
-        console.error("handshakeAddress not configured. Run: arc402 config set handshakeAddress <address>");
-        process.exit(1);
-      }
-      if (!config.policyEngineAddress) {
-        console.error("policyEngineAddress not configured.");
-        process.exit(1);
-      }
+      const handshakeAddress = getCanonicalNetworkAddress(config, "handshakeAddress");
+      const policyEngineAddress = getCanonicalNetworkAddress(config, "policyEngineAddress");
 
       // Auto-whitelist check
-      await ensureWhitelisted(signer, provider, myAddress, config.policyEngineAddress, config.handshakeAddress);
+      await ensureWhitelisted(signer, provider, myAddress, policyEngineAddress, handshakeAddress);
 
       const hsType = HANDSHAKE_TYPES[opts.type.toLowerCase()];
       if (hsType === undefined) {
@@ -123,7 +115,7 @@ export function registerArenaHandshakeCommands(program: Command): void {
         process.exit(1);
       }
 
-      const handshake = new ethers.Contract(config.handshakeAddress, HANDSHAKE_ABI, signer);
+      const handshake = new ethers.Contract(handshakeAddress, HANDSHAKE_ABI, signer);
 
       const hsSpinner = startSpinner(`Sending ${opts.type} handshake...`);
       let tx;
@@ -140,7 +132,7 @@ export function registerArenaHandshakeCommands(program: Command): void {
       hsSpinner.succeed("Handshake sent");
 
       // Notify recipient's HTTP endpoint (non-blocking)
-      const registryAddress = config.agentRegistryV2Address ?? config.agentRegistryAddress ?? DEFAULT_REGISTRY_ADDRESS;
+      const registryAddress = getCanonicalAgentRegistryAddress(config);
       try {
         await pingHandshakeEndpoint(
           agentAddress,
@@ -179,12 +171,10 @@ export function registerArenaHandshakeCommands(program: Command): void {
       const { signer, provider } = await requireSigner(config);
       const myAddress = await signer.getAddress();
 
-      if (!config.handshakeAddress || !config.policyEngineAddress) {
-        console.error("handshakeAddress or policyEngineAddress not configured.");
-        process.exit(1);
-      }
+      const handshakeAddress = getCanonicalNetworkAddress(config, "handshakeAddress");
+      const policyEngineAddress = getCanonicalNetworkAddress(config, "policyEngineAddress");
 
-      await ensureWhitelisted(signer, provider, myAddress, config.policyEngineAddress, config.handshakeAddress);
+      await ensureWhitelisted(signer, provider, myAddress, policyEngineAddress, handshakeAddress);
 
       const hsType = HANDSHAKE_TYPES[opts.type.toLowerCase()];
       if (hsType === undefined) {
@@ -197,7 +187,7 @@ export function registerArenaHandshakeCommands(program: Command): void {
         process.exit(1);
       }
 
-      const handshake = new ethers.Contract(config.handshakeAddress, HANDSHAKE_ABI, signer);
+      const handshake = new ethers.Contract(handshakeAddress, HANDSHAKE_ABI, signer);
       const types = agents.map(() => hsType);
       const notes = agents.map(() => opts.note);
 

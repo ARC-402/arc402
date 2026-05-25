@@ -233,3 +233,54 @@ export async function buildSponsoredUserOp(
   const userOp = await buildUserOp(callData, sender, nonce, config);
   return paymasterClient.sponsorUserOperation(userOp, DEFAULT_ENTRY_POINT);
 }
+
+export function getUserOperationHash(
+  userOp: UserOperation,
+  entryPointAddress: string,
+  chainId: number,
+): string {
+  const initCode = (userOp.factory && userOp.factoryData)
+    ? ethers.concat([userOp.factory, userOp.factoryData])
+    : "0x";
+  const paymasterAndData = userOp.paymaster
+    ? ethers.concat([
+        userOp.paymaster,
+        userOp.paymasterVerificationGasLimit ?? "0x",
+        userOp.paymasterPostOpGasLimit ?? "0x",
+        userOp.paymasterData ?? "0x",
+      ])
+    : "0x";
+
+  const verificationGasLimit = BigInt(userOp.verificationGasLimit);
+  const callGasLimit = BigInt(userOp.callGasLimit);
+  const accountGasLimits = ethers.zeroPadValue(
+    ethers.toBeHex((verificationGasLimit << BigInt(128)) | callGasLimit),
+    32,
+  );
+
+  const maxPriorityFeePerGas = BigInt(userOp.maxPriorityFeePerGas);
+  const maxFeePerGas = BigInt(userOp.maxFeePerGas);
+  const gasFees = ethers.zeroPadValue(
+    ethers.toBeHex((maxPriorityFeePerGas << BigInt(128)) | maxFeePerGas),
+    32,
+  );
+
+  const packedHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ["address", "uint256", "bytes32", "bytes32", "bytes32", "uint256", "bytes32", "bytes32"],
+    [
+      userOp.sender,
+      BigInt(userOp.nonce),
+      ethers.keccak256(initCode),
+      ethers.keccak256(userOp.callData),
+      accountGasLimits,
+      BigInt(userOp.preVerificationGas),
+      gasFees,
+      ethers.keccak256(paymasterAndData),
+    ],
+  ));
+
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ["bytes32", "address", "uint256"],
+    [packedHash, entryPointAddress, chainId],
+  ));
+}

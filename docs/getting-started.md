@@ -107,7 +107,7 @@ arc402 workroom status
 arc402 workroom doctor
 ```
 
-`arc402 workroom init` auto-reuses machine key and Telegram details from your ARC-402 CLI config, creates credential providers, and syncs the CLI runtime into the sandbox. `arc402 workroom status` verifies policy wiring and daemon presence. `arc402 workroom doctor` isolates broken layers when something fails.
+`arc402 workroom init` prepares the Docker workroom image, writes/migrates `~/.arc402/workroom-policy.yaml`, installs credential templates, and prepares the governed runtime lane. `arc402 workroom status` verifies policy wiring and container state. `arc402 workroom doctor` isolates broken layers when something fails.
 
 Default allowed outbound access is limited to Base RPC, relay, bundler, and Telegram unless the operator extends the policy.
 

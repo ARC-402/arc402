@@ -9,7 +9,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-readonly POLICY_FILE="${1:-/workroom/.arc402/openshell-policy.yaml}"
+readonly POLICY_FILE="${1:-/workroom/.arc402/workroom-policy.yaml}"
 readonly REFRESH_INTERVAL="${ARC402_DNS_REFRESH_SECONDS:-300}"
 readonly RULES_LOG="/workroom/.arc402/iptables-rules.log"
 

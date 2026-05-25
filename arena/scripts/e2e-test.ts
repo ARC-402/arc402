@@ -25,8 +25,8 @@
 
 import {
   ethers,
+  BaseContract,
   ContractFactory,
-  Contract,
   Wallet,
   JsonRpcProvider,
   formatEther,
@@ -119,7 +119,7 @@ async function deploy(
   factory: ContractFactory,
   args: unknown[],
   label: string
-): Promise<Contract> {
+): Promise<BaseContract> {
   process.stdout.write(`    Deploying ${label}...`);
   const contract  = await factory.deploy(...args);
   const deployTx  = contract.deploymentTransaction();
@@ -596,7 +596,7 @@ async function main() {
 
   const splitRecs   = [lead.address, contrib1.address, contrib3.address];
   const splitShares = [4000n, 3000n, 3000n];
-  let revenueSplit!: Contract;
+  let revenueSplit!: BaseContract;
 
   await test("deploy SquadRevenueSplit (40/30/30)", async () => {
     revenueSplit = await deploy(
@@ -810,7 +810,7 @@ async function main() {
     assert(threshEvents[0]!.args[1] === 5n, `threshold=5, got ${threshEvents[0]!.args[1]}`);
   });
 
-  let d2RevSplit!: Contract;
+  let d2RevSplit!: BaseContract;
 
   await test("LEAD deploys SquadRevenueSplit for contributors", async () => {
     const d2Recs = [lead.address, contrib3.address, extraCiters[0].address];

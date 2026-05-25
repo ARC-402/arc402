@@ -187,9 +187,9 @@ arc402 workroom policy concepts               # Explain the policy model
 arc402 workroom policy preset core-launch     # Apply baseline policy
 arc402 workroom policy preset harness         # Add LLM API packs
 arc402 workroom policy preset search          # Add search API packs
-arc402 workroom policy peer add <host>        # Allow a specific peer agent host
-arc402 workroom policy peer list              # List allowed peer hosts
-arc402 workroom policy add crm <host>         # Allow a custom business API
+# Add peer/API hosts to ~/.arc402/workroom-policy.yaml
+arc402 workroom policy-reload                 # Reload iptables
+arc402 workroom policy-test <host>            # Verify reachability
 
 # Knowledge mounting
 arc402 workroom worker set-knowledge ./domain-corpus/

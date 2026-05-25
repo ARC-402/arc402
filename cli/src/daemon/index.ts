@@ -36,6 +36,7 @@ import { UserOpsManager, buildAcceptCalldata, buildFulfillCalldata } from "./use
 import { generateReceipt, extractLearnings, createJobDirectory, cleanJobDirectory } from "./job-lifecycle";
 import { FileDeliveryManager } from "./file-delivery";
 import { DeliveryClient } from "./delivery-client";
+import { getPasskeyApprovalRequest, updatePasskeyApprovalRequest } from "./passkey-approvals";
 import { COMPUTE_AGREEMENT_ABI, SERVICE_AGREEMENT_ABI } from "../abis";
 import { HandshakeWatcher } from "./handshake-watcher.js";
 import { WorkerExecutor } from "./worker-executor.js";
@@ -900,6 +901,7 @@ export async function runDaemon(foreground = false): Promise<void> {
     "/delivery/accepted",
     "/dispute",
     "/dispute/resolved",
+    "/approvals/passkey/callback",
     "/workroom/status",
     "/auth/challenge",
     "/auth/verify",
@@ -997,6 +999,77 @@ export async function runDaemon(foreground = false): Promise<void> {
         bundlerMode: config.bundler.mode,
         relay: config.relay.enabled,
       }));
+      return;
+    }
+
+    if (pathname === "/approvals/passkey/callback" && req.method === "POST") {
+      const body = await readBody(req, res);
+      if (body === null) return;
+      try {
+        const { approvalId, challenge, wallet, operation, signature, credentialId } = JSON.parse(body) as {
+          approvalId?: string;
+          challenge?: string;
+          wallet?: string;
+          operation?: string;
+          signature?: string;
+          credentialId?: string;
+        };
+
+        if (!approvalId || !signature || !credentialId) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "approvalId, signature, credentialId required" }));
+          return;
+        }
+
+        const request = getPasskeyApprovalRequest(approvalId);
+        if (!request) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "approval_not_found" }));
+          return;
+        }
+
+        if (request.status !== "pending") {
+          res.writeHead(409, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "approval_not_pending", status: request.status }));
+          return;
+        }
+
+        if (Date.now() > Date.parse(request.expiresAt)) {
+          updatePasskeyApprovalRequest(approvalId, { status: "expired", completedAt: new Date().toISOString() });
+          res.writeHead(410, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "approval_expired" }));
+          return;
+        }
+
+        if (challenge && request.challenge !== challenge) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "challenge_mismatch" }));
+          return;
+        }
+
+        if (wallet && request.intent.walletAddress && wallet.toLowerCase() !== request.intent.walletAddress.toLowerCase()) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "wallet_mismatch" }));
+          return;
+        }
+
+        const updated = updatePasskeyApprovalRequest(approvalId, {
+          status: "approved",
+          approvedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          signature,
+          credentialId,
+          operation,
+          wallet,
+        });
+
+        log({ event: "passkey_approval_received", approval_id: approvalId, wallet: wallet ?? request.intent.walletAddress ?? null });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true, approvalId, status: updated?.status ?? "approved" }));
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid_json" }));
+      }
       return;
     }
 

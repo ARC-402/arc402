@@ -76,7 +76,8 @@ function notifyDaemonWorkroomStatus(
 
 const WORKROOM_IMAGE = "arc402-workroom";
 const WORKROOM_CONTAINER = "arc402-workroom";
-const POLICY_FILE = path.join(ARC402_DIR, "openshell-policy.yaml");
+const POLICY_FILE = path.join(ARC402_DIR, "workroom-policy.yaml");
+const LEGACY_POLICY_FILE = path.join(ARC402_DIR, "openshell-policy.yaml");
 const ARENA_POLICY_FILE = path.join(ARC402_DIR, "arena-policy.yaml");
 const ARENA_DATA_DIR = path.join(ARC402_DIR, "arena");
 // ── Package root resolution ────────────────────────────────────────────────
@@ -158,7 +159,7 @@ function buildImage(useGpu = false): boolean {
   // Pass current CLI version as build arg — installs matching arc402-cli inside the Linux container.
   // Also stamp the version as a label so imageVersionMatches() can detect stale images on future runs.
   const version = getCliVersion();
-  const daemonVersion = "0.9.0";
+  const daemonVersion = "0.9.1";
   console.log(`Building ARC-402 Workroom image (${dockerfile}, arc402-cli@${version}, @arc402/daemon@${daemonVersion})...`);
   const result = spawnSync("docker", [
     "build",
@@ -299,7 +300,7 @@ export function registerWorkroomCommands(program: Command): void {
   // ── init ──────────────────────────────────────────────────────────────────
   workroom
     .command("init")
-    .description("Create the ARC-402 Workroom: build Docker image, validate policy, prepare runtime bundle.")
+    .description("Create the ARC-402 Workroom: build Docker image, validate policy, prepare Docker runtime.")
     .action(async () => {
       console.log(c.brightCyan("ARC-402 Workroom Init"));
       console.log(c.dim("─────────────────────"));
@@ -310,6 +311,11 @@ export function registerWorkroomCommands(program: Command): void {
         process.exit(1);
       }
       console.log(" " + c.success + c.white(" Docker available"));
+
+      if (!fs.existsSync(POLICY_FILE) && fs.existsSync(LEGACY_POLICY_FILE)) {
+        fs.copyFileSync(LEGACY_POLICY_FILE, POLICY_FILE);
+        console.log(" " + c.success + c.white(" Migrated legacy openshell-policy.yaml → workroom-policy.yaml"));
+      }
 
       // Check policy file — generate a minimal bootstrap policy if missing.
       // This ensures the workroom container can always reach Base RPC + ARC-402 infra
@@ -898,20 +904,18 @@ network_policies:
       }
     });
 
-  // ── policy (delegate to existing openshell policy commands) ───────────────
+  // ── policy ───────────────────────────────────────────────────────────────
   workroom
     .command("policy")
-    .description("Manage workroom network policy. Delegates to the existing policy UX.")
+    .description("Manage Workroom network policy.")
     .action(() => {
-      console.log("Use the policy subcommands:");
-      console.log("  arc402 workroom policy list");
-      console.log("  arc402 workroom policy preset <name>");
-      console.log("  arc402 workroom policy peer add <host>");
-      console.log("  arc402 workroom policy test <host>");
-      console.log("  arc402 workroom policy hash");
-      console.log("  arc402 workroom policy reload");
-      console.log("\nFor now, these delegate to 'arc402 openshell policy' commands.");
-      console.log("Full native workroom policy management coming in next release.");
+      console.log("Workroom policy is stored at: ~/.arc402/workroom-policy.yaml");
+      console.log("Edit that YAML, then use:");
+      console.log("  arc402 workroom policy-test <host>");
+      console.log("  arc402 workroom policy-hash");
+      console.log("  arc402 workroom policy-reload");
+      console.log("\nPolicy is Workroom-owned. Docker + iptables is the canonical runtime trust layer.");
+      console.log("Use Workroom as the only operator-facing runtime path.");
     });
 
   // ── policy hash ──────────────────────────────────────────────────────────
@@ -941,7 +945,7 @@ network_policies:
       } else {
         console.log(" " + c.failure + " " + c.red(`${host} is NOT reachable from the workroom`));
         console.log(c.dim("  This host may not be in the workroom policy."));
-        console.log(c.dim("  Add it with: arc402 openshell policy add <name> <host>"));
+        console.log(c.dim("  Add it through the workroom policy flow."));
       }
     });
 
@@ -1399,7 +1403,7 @@ No learnings yet. Complete your first hired task to start accumulating expertise
       // Trigger DNS refresh manually (which re-reads policy and updates iptables)
       const result = runCmd("docker", [
         "exec", WORKROOM_CONTAINER,
-        "bash", "-c", "/dns-refresh.sh /workroom/.arc402/openshell-policy.yaml &",
+        "bash", "-c", "/dns-refresh.sh /workroom/.arc402/workroom-policy.yaml &",
       ]);
       if (result.ok) {
         console.log(" " + c.success + c.white(" Policy reload triggered"));

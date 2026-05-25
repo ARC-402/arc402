@@ -13,7 +13,7 @@ import * as path from "path";
 import * as os from "os";
 import { ethers } from "ethers";
 import chalk from "chalk";
-import { loadConfig, Arc402Config } from "../config";
+import { loadConfig, Arc402Config, getCanonicalAgentRegistryAddress } from "../config";
 import { getClient } from "../client";
 import { SERVICE_AGREEMENT_ABI } from "../abis";
 import { resolveAgentEndpoint, validateEndpointUrl } from "../endpoint-notify";
@@ -61,8 +61,7 @@ async function resolveProviderEndpoint(
   const ag = await sa.getAgreement(BigInt(agreementId));
   const providerAddress: string = ag.provider;
 
-  const registryAddress =
-    config.agentRegistryAddress ?? config.agentRegistryV2Address ?? config.arc402RegistryV3Address;
+  const registryAddress = getCanonicalAgentRegistryAddress(config);
   const endpoint = await resolveAgentEndpoint(providerAddress, ethProvider, registryAddress);
   if (!endpoint) throw new Error(`Provider ${providerAddress} has no registered endpoint`);
 

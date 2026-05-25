@@ -11,7 +11,7 @@ import {
 } from "../endpoint-config";
 import { configExists, getSubdomainApi, loadConfig, NETWORK_DEFAULTS } from "../config";
 import { DAEMON_PID } from "../daemon/config";
-import { detectDockerAccess, readOpenShellConfig, runCmd } from "../openshell-runtime";
+import { detectDockerAccess, runCmd } from "../openshell-runtime";
 import { getClient } from "../client";
 import * as dns from "dns/promises";
 import * as fs from "fs";
@@ -100,8 +100,8 @@ function checkDaemon(): DoctorCheck {
       layer: "runtime",
       label: "Daemon",
       ok: false,
-      detail: "no PID file found",
-      fix: "Run `arc402 openshell init` if needed, then `arc402 daemon start`.",
+      detail: "no host PID file found",
+      fix: "Main path: run `arc402 workroom init` and `arc402 workroom start`.",
     };
   }
 
@@ -112,8 +112,8 @@ function checkDaemon(): DoctorCheck {
       layer: "runtime",
       label: "Daemon",
       ok: false,
-      detail: `invalid PID file contents: ${JSON.stringify(rawPid)}`,
-      fix: "Remove the stale PID file and restart the daemon.",
+      detail: `invalid host PID file contents: ${JSON.stringify(rawPid)}`,
+      fix: "Remove the stale PID file. Main path: `arc402 workroom start`.",
     };
   }
 
@@ -122,8 +122,8 @@ function checkDaemon(): DoctorCheck {
       layer: "runtime",
       label: "Daemon",
       ok: false,
-      detail: `stale PID file (${pid})`,
-      fix: "Remove the stale PID file and restart with `arc402 daemon start`.",
+      detail: `stale host PID file (${pid})`,
+      fix: "Remove the stale PID file. Main path: `arc402 workroom start`.",
     };
   }
 
@@ -131,36 +131,38 @@ function checkDaemon(): DoctorCheck {
     layer: "runtime",
     label: "Daemon",
     ok: true,
-    detail: `running (PID ${pid})`,
+    detail: `running on host (PID ${pid})`,
   };
 }
 
-function checkOpenShell(): DoctorCheck {
-  const config = readOpenShellConfig();
+function checkWorkroomRuntime(): DoctorCheck {
   const docker = detectDockerAccess();
-  if (!config?.sandbox?.name) {
-    return {
-      layer: "runtime",
-      label: "OpenShell runtime",
-      ok: false,
-      detail: "not configured for launch",
-      fix: "Run `arc402 openshell init` so ARC-402 runtime stays sandboxed.",
-    };
-  }
   if (!docker.ok) {
     return {
       layer: "runtime",
-      label: "OpenShell runtime",
+      label: "Workroom runtime",
       ok: false,
-      detail: `configured, but Docker/OpenShell substrate is unhealthy: ${docker.detail}`,
-      fix: "Restore Docker/OpenShell health, then re-run `arc402 openshell status`.",
+      detail: `Docker unavailable: ${docker.detail}`,
+      fix: "Install/start Docker, then run `arc402 workroom init` and `arc402 workroom start`.",
     };
   }
+
+  const running = runCmd("docker", ["inspect", "arc402-workroom", "--format", "{{.State.Running}}"], { timeout: 10000 });
+  if (!running.ok || running.stdout.trim() !== "true") {
+    return {
+      layer: "runtime",
+      label: "Workroom runtime",
+      ok: false,
+      detail: "arc402-workroom container is not running",
+      fix: "Run `arc402 workroom init` and `arc402 workroom start`.",
+    };
+  }
+
   return {
     layer: "runtime",
-    label: "OpenShell runtime",
+    label: "Workroom runtime",
     ok: true,
-    detail: `${config.sandbox.name} configured; Docker ${docker.detail}`,
+    detail: `arc402-workroom running; Docker ${docker.detail}`,
   };
 }
 
@@ -368,10 +370,21 @@ async function buildDoctorChecks(endpoint = loadEndpointConfig()): Promise<Docto
     });
   }
 
-  checks.push(checkOpenShell());
-  checks.push(checkDaemon());
+  checks.push(checkWorkroomRuntime());
 
   const localTarget = await checkLocalTarget(endpoint.localIngressTarget);
+  const daemonCheck = checkDaemon();
+  checks.push(
+    !daemonCheck.ok && localTarget.ok
+      ? {
+          layer: "runtime",
+          label: "Daemon",
+          ok: true,
+          detail: `reachable through Workroom ingress (${endpoint.localIngressTarget}) — PID proof unavailable`,
+        }
+      : daemonCheck
+  );
+
   checks.push({
     layer: "ingress",
     label: "Local ingress target",
@@ -469,7 +482,7 @@ async function claimSubdomain(subdomain: string, walletAddress: string, tunnelTa
 export function registerEndpointCommands(program: Command): void {
   const endpoint = program
     .command("endpoint")
-    .description("Canonical public endpoint scaffold for ARC-402 launch: public ingress identity outside the sandbox, runtime still sandboxed inside OpenShell.");
+    .description("Canonical public endpoint scaffold for ARC-402 launch: public ingress identity outside the sandbox, runtime served by Workroom.");
 
   endpoint
     .command("init [agentName]")
@@ -501,7 +514,7 @@ export function registerEndpointCommands(program: Command): void {
         walletAddress,
         subdomainApi: readSubdomainApi(),
         existing,
-        notes: "Launch default: host-managed Cloudflare Tunnel outside the sandbox. Public ingress identity is separate from OpenShell outbound policy.",
+        notes: "Launch default: host-managed Cloudflare Tunnel outside the workroom. Public ingress identity is separate from workroom outbound policy.",
       });
       saveEndpointConfig(cfg);
 
@@ -514,9 +527,9 @@ export function registerEndpointCommands(program: Command): void {
       if (cfg.tunnelTarget) console.log(`  Tunnel target: ${cfg.tunnelTarget}`);
       console.log(`  Wallet:        ${cfg.walletAddress ?? "not yet resolved"}`);
       console.log("\nArchitecture truth:");
-      console.log("  • ARC-402 runtime stays inside the OpenShell sandbox.");
+      console.log("  • ARC-402 runtime is served by Workroom.");
       console.log("  • This command only locks the public-ingress identity + host target.");
-      console.log("  • Sandbox outbound policy remains separate: use `arc402 openshell policy ...` for peer/API allowlists.");
+      console.log("  • Workroom outbound policy remains separate from public ingress.");
       console.log("\nNext:");
       console.log(`  1. Start your host-managed tunnel toward ${cfg.localIngressTarget}`);
       console.log(`  2. Claim the canonical hostname: arc402 endpoint claim ${cfg.agentName}${cfg.tunnelTarget ? "" : " --tunnel-target <https://your-tunnel.example.com>"}`);
@@ -560,7 +573,7 @@ export function registerEndpointCommands(program: Command): void {
 
       console.log("\nWhat this proves now:");
       console.log("  • canonical endpoint identity is locked locally");
-      console.log("  • runtime sandboxing is checked separately from ingress");
+      console.log("  • Workroom runtime is checked separately from ingress");
       console.log("  • local ingress target + daemon/tunnel wiring can be diagnosed without pretending every external layer is automated");
       console.log("  • AgentRegistry/public-hostname parity is checked when config + RPC + wallet context make proof possible");
     });
@@ -609,7 +622,7 @@ export function registerEndpointCommands(program: Command): void {
 
   endpoint
     .command("doctor")
-    .description("Diagnose the broken layer without blurring ingress, runtime sandbox, or public identity.")
+    .description("Diagnose the broken layer without blurring ingress, Workroom runtime, or public identity.")
     .action(async () => {
       const checks = await buildDoctorChecks();
       console.log("ARC-402 Endpoint Doctor");
@@ -639,7 +652,7 @@ export function registerEndpointCommands(program: Command): void {
       console.log("  2. public identity (`agentname.arc402.xyz`)");
       console.log("  3. host-managed ingress / tunnel");
       console.log("  4. local ingress target");
-      console.log("  5. ARC-402 runtime inside OpenShell");
+      console.log("  5. ARC-402 runtime / Workroom");
       console.log("  6. AgentRegistry/public-endpoint parity");
       console.log("  7. sandbox outbound policy (separate; not implied by public ingress)");
       console.log("\nIf only the registry/public checks fail while local runtime is healthy, the proof is partial rather than the stack being fully down.");

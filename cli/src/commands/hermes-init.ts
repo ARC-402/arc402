@@ -246,7 +246,7 @@ export function registerHermesInitCommand(program: Command): void {
           `auto_accept = true`,
           ``,
           `[policy]`,
-          `file = "~/.arc402/openshell-policy.yaml"`,
+          `file = "~/.arc402/workroom-policy.yaml"`,
           ``,
           `[workroom]`,
           `data_dir = "~/.arc402/workroom"`,

@@ -11,7 +11,7 @@ import {
 } from "../endpoint-config";
 import { configExists, getSubdomainApi, loadConfig, NETWORK_DEFAULTS } from "../config";
 import { DAEMON_PID } from "../daemon/config";
-import { detectDockerAccess, readOpenShellConfig, runCmd } from "../openshell-runtime";
+import { detectDockerAccess, runCmd } from "../openshell-runtime";
 import { getClient } from "../client";
 import * as dns from "dns/promises";
 import * as fs from "fs";
@@ -100,8 +100,8 @@ function checkDaemon(): DoctorCheck {
       layer: "runtime",
       label: "Daemon",
       ok: false,
-      detail: "no PID file found",
-      fix: "Run `arc402 openshell init` if needed, then `arc402 daemon start`.",
+      detail: "no host PID file found",
+      fix: "Main path: run `arc402 workroom init` and `arc402 workroom start`.",
     };
   }
 
@@ -112,8 +112,8 @@ function checkDaemon(): DoctorCheck {
       layer: "runtime",
       label: "Daemon",
       ok: false,
-      detail: `invalid PID file contents: ${JSON.stringify(rawPid)}`,
-      fix: "Remove the stale PID file and restart the daemon.",
+      detail: `invalid host PID file contents: ${JSON.stringify(rawPid)}`,
+      fix: "Remove the stale PID file. Main path: `arc402 workroom start`.",
     };
   }
 
@@ -122,8 +122,8 @@ function checkDaemon(): DoctorCheck {
       layer: "runtime",
       label: "Daemon",
       ok: false,
-      detail: `stale PID file (${pid})`,
-      fix: "Remove the stale PID file and restart with `arc402 daemon start`.",
+      detail: `stale host PID file (${pid})`,
+      fix: "Remove the stale PID file. Main path: `arc402 workroom start`.",
     };
   }
 
@@ -131,36 +131,38 @@ function checkDaemon(): DoctorCheck {
     layer: "runtime",
     label: "Daemon",
     ok: true,
-    detail: `running (PID ${pid})`,
+    detail: `running on host (PID ${pid})`,
   };
 }
 
-function checkOpenShell(): DoctorCheck {
-  const config = readOpenShellConfig();
+function checkWorkroomRuntime(): DoctorCheck {
   const docker = detectDockerAccess();
-  if (!config?.sandbox?.name) {
-    return {
-      layer: "runtime",
-      label: "OpenShell runtime",
-      ok: false,
-      detail: "not configured for launch",
-      fix: "Run `arc402 openshell init` so ARC-402 runtime stays sandboxed.",
-    };
-  }
   if (!docker.ok) {
     return {
       layer: "runtime",
-      label: "OpenShell runtime",
+      label: "Workroom runtime",
       ok: false,
-      detail: `configured, but Docker/OpenShell substrate is unhealthy: ${docker.detail}`,
-      fix: "Restore Docker/OpenShell health, then re-run `arc402 openshell status`.",
+      detail: `Docker unavailable: ${docker.detail}`,
+      fix: "Install/start Docker, then run `arc402 workroom init` and `arc402 workroom start`.",
     };
   }
+
+  const running = runCmd("docker", ["inspect", "arc402-workroom", "--format", "{{.State.Running}}"], { timeout: 10000 });
+  if (!running.ok || running.stdout.trim() !== "true") {
+    return {
+      layer: "runtime",
+      label: "Workroom runtime",
+      ok: false,
+      detail: "arc402-workroom container is not running",
+      fix: "Run `arc402 workroom init` and `arc402 workroom start`.",
+    };
+  }
+
   return {
     layer: "runtime",
-    label: "OpenShell runtime",
+    label: "Workroom runtime",
     ok: true,
-    detail: `${config.sandbox.name} configured; Docker ${docker.detail}`,
+    detail: `arc402-workroom running; Docker ${docker.detail}`,
   };
 }
 
@@ -368,7 +370,7 @@ async function buildDoctorChecks(endpoint = loadEndpointConfig()): Promise<Docto
     });
   }
 
-  checks.push(checkOpenShell());
+  checks.push(checkWorkroomRuntime());
   checks.push(checkDaemon());
 
   const localTarget = await checkLocalTarget(endpoint.localIngressTarget);

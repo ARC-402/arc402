@@ -166,32 +166,21 @@ export function buildRuntimeTarball(): { cliRoot: string; tarballPath: string } 
   const cliRoot = findCliRoot(__dirname);
   fs.mkdirSync(OPENSHELL_RUNTIME_DIR, { recursive: true, mode: 0o700 });
 
+  const tarMembers = ["package.json", "dist", "node_modules"];
+  const lockfile = path.join(cliRoot, "package-lock.json");
+  if (fs.existsSync(lockfile)) tarMembers.splice(1, 0, "package-lock.json");
+
   const tar = runCmd(
-    "tar",
+    "bash",
     [
-      "-czf",
-      OPENSHELL_RUNTIME_TARBALL,
-      "package.json",
-      "package-lock.json",
-      "dist",
-      "node_modules",
+      "-lc",
+      `cd ${shellEscape(cliRoot)} && tar -czf ${shellEscape(OPENSHELL_RUNTIME_TARBALL)} ${tarMembers.map(shellEscape).join(" ")}`,
     ],
     { timeout: 300000, env: process.env }
   );
 
   if (!tar.ok) {
-    // Retry from the cli root via shell so relative paths resolve correctly.
-    const shellTar = runCmd(
-      "bash",
-      [
-        "-lc",
-        `cd ${shellEscape(cliRoot)} && tar -czf ${shellEscape(OPENSHELL_RUNTIME_TARBALL)} package.json package-lock.json dist node_modules`,
-      ],
-      { timeout: 300000 }
-    );
-    if (!shellTar.ok) {
-      throw new Error(shellTar.stderr || shellTar.stdout || "Failed to build ARC-402 runtime tarball");
-    }
+    throw new Error(tar.stderr || tar.stdout || "Failed to build ARC-402 runtime tarball");
   }
 
   return { cliRoot, tarballPath: OPENSHELL_RUNTIME_TARBALL };
@@ -251,17 +240,25 @@ export function provisionRuntimeToSandbox(
     throw new Error(`Failed to prepare remote upload directory: ${prep.stderr || prep.stdout}`);
   }
 
-  const upload = runCmd("openshell", ["sandbox", "upload", sandboxName, tarballPath, remoteUploadDir], { timeout: 300000 });
+  const uploadDest = `${remoteUploadDir}/`;
+  const upload = runCmd("openshell", ["sandbox", "upload", sandboxName, tarballPath, uploadDest], { timeout: 300000 });
   if (!upload.ok) {
     throw new Error(`Failed to upload ARC-402 runtime bundle: ${upload.stderr || upload.stdout}`);
   }
 
+  const expectedDaemon = path.posix.join(remoteRoot, "dist/daemon/index.js");
   const extract = runCmd(
     "ssh",
     [
       "-F", configPath,
       host,
-      `mkdir -p ${shellEscape(remoteRoot)} && tar -xzf ${shellEscape(remoteTarball)} -C ${shellEscape(remoteRoot)} && test -f ${shellEscape(path.posix.join(remoteRoot, "dist/daemon/index.js"))}`,
+      [
+        `test -d ${shellEscape(remoteUploadDir)} || { echo ${shellEscape(`runtime upload destination is not a directory: ${remoteUploadDir}`)}; ls -ld ${shellEscape(remoteUploadDir)} 2>/dev/null || true; exit 1; }`,
+        `test -f ${shellEscape(remoteTarball)} || { echo ${shellEscape(`runtime tarball missing after upload: ${remoteTarball}`)}; ls -la ${shellEscape(remoteUploadDir)} 2>/dev/null || true; exit 1; }`,
+        `mkdir -p ${shellEscape(remoteRoot)}`,
+        `tar -xzf ${shellEscape(remoteTarball)} -C ${shellEscape(remoteRoot)}`,
+        `test -f ${shellEscape(expectedDaemon)}`,
+      ].join(" && "),
     ],
     { timeout: 300000 }
   );

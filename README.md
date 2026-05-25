@@ -6,8 +6,8 @@
 [![Tests](https://img.shields.io/badge/tests-975%2B%20passing-brightgreen)](#audit-note)
 [![Network](https://img.shields.io/badge/network-Base-0052FF)](https://base.org)
 [![Status](https://img.shields.io/badge/status-mainnet-brightgreen)](#deployed-contracts)
-[![arc402-cli](https://img.shields.io/badge/arc402--cli-1.8.4-blue)](https://www.npmjs.com/package/arc402-cli)
-[![%40arc402%2Fdaemon](https://img.shields.io/badge/%40arc402%2Fdaemon-0.9.1-blue)](https://www.npmjs.com/package/@arc402/daemon)
+[![arc402-cli](https://img.shields.io/badge/arc402--cli-1.8.7-blue)](https://www.npmjs.com/package/arc402-cli)
+[![%40arc402%2Fdaemon](https://img.shields.io/badge/%40arc402%2Fdaemon-0.9.2-blue)](https://www.npmjs.com/package/@arc402/daemon)
 [![%40arc402%2Fsdk](https://img.shields.io/badge/%40arc402%2Fsdk-0.6.6-blue)](https://www.npmjs.com/package/@arc402/sdk)
 [![PyPI arc402](https://img.shields.io/badge/arc402-0.5.6-blue)](https://pypi.org/project/arc402/)
 
@@ -176,13 +176,14 @@ arc402 endpoint status
 
 ## Verification
 
-For the Phase 6C verification lane:
+For an operator install, verify the Workroom path directly:
 
 ```bash
-bash scripts/verify-phase6c.sh
+arc402 workroom doctor
+arc402 endpoint status
 ```
 
-That path rebuilds `cli` and `packages/arc402-daemon`, then runs a secret-free split-daemon smoke against mock RPC and bundler services. Remote/OpenShell follow-up checks live in [`docs/phase6c-verification.md`](docs/phase6c-verification.md).
+The public operator path is Workroom-first. Internal release smoke lanes are not part of the public quickstart.
 
 ## How the system works
 
@@ -480,15 +481,17 @@ Base mainnet. All contracts verified on Basescan.
 
 | Surface | Current version |
 |---------|-----------------|
-| CLI | `1.8.4` |
-| Daemon | `0.9.1` |
-| OpenClaw plugin | `1.3.5` |
+| CLI | `1.8.7` |
+| Daemon | `0.9.2` |
+| OpenClaw plugin | `1.3.6` |
 | TypeScript SDK | `0.6.6` |
 | Python SDK | `0.5.6` |
 | Hermes | `1.0.0` |
 | Protocol version | `1.0.0` |
 
 Release-lane notes and the next version bump matrix live in [`docs/release-plan-phase5b.md`](docs/release-plan-phase5b.md).
+
+Operator-truth fixes must follow the permanent [`docs/truth-sync-checklist.md`](docs/truth-sync-checklist.md) so chain state, source defaults, hosted surfaces, published artifacts, local config, and docs stay aligned.
 
 ## Audit note
 

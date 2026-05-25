@@ -1,11 +1,11 @@
 import { Command } from "commander";
 import { ServiceAgreementClient } from "@arc402/sdk";
 import { ethers } from "ethers";
-import { loadConfig } from "../config";
+import { getCanonicalAgentRegistryAddress, loadConfig } from "../config";
 import { requireSigner } from "../client";
 import { printSenderInfo, executeContractWriteViaWallet } from "../wallet-router";
 import { SERVICE_AGREEMENT_ABI } from "../abis";
-import { resolveAgentEndpoint, notifyAgent, DEFAULT_REGISTRY_ADDRESS } from "../endpoint-notify";
+import { resolveAgentEndpoint, notifyAgent } from "../endpoint-notify";
 import { c } from "../ui/colors";
 import { startSpinner } from "../ui/spinner";
 
@@ -53,7 +53,7 @@ export function registerAcceptCommand(program: Command): void {
     if (clientAddress) {
       try {
         const notifyProvider = new ethers.JsonRpcProvider(config.rpcUrl);
-        const registryAddress = config.agentRegistryV2Address ?? config.agentRegistryAddress ?? DEFAULT_REGISTRY_ADDRESS;
+        const registryAddress = getCanonicalAgentRegistryAddress(config);
         const endpoint = await resolveAgentEndpoint(clientAddress, notifyProvider, registryAddress);
         const payload = { agreementId: id, from: signerAddress };
         await notifyAgent(endpoint, "/hire/accepted", payload);

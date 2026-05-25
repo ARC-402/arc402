@@ -1,14 +1,14 @@
 import { Command } from "commander";
 import { ServiceAgreementClient, uploadEncryptedIPFS } from "@arc402/sdk";
 import { ethers } from "ethers";
-import { loadConfig } from "../config";
+import { getCanonicalAgentRegistryAddress, loadConfig } from "../config";
 import { getClient, requireSigner } from "../client";
 import { hashFile, hashString } from "../utils/hash";
 import { printSenderInfo, executeContractWriteViaWallet } from "../wallet-router";
 import { SERVICE_AGREEMENT_ABI } from "../abis";
 import { readFile } from "fs/promises";
 import prompts from "prompts";
-import { resolveAgentEndpoint, notifyAgent, DEFAULT_REGISTRY_ADDRESS } from "../endpoint-notify";
+import { resolveAgentEndpoint, notifyAgent } from "../endpoint-notify";
 import { c } from '../ui/colors';
 import { startSpinner } from '../ui/spinner';
 import { renderTree } from '../ui/tree';
@@ -134,7 +134,7 @@ export function registerDeliverCommand(program: Command): void {
       if (clientAddress) {
         try {
           const notifyProvider = new ethers.JsonRpcProvider(config.rpcUrl);
-          const registryAddress = config.agentRegistryV2Address ?? config.agentRegistryAddress ?? DEFAULT_REGISTRY_ADDRESS;
+          const registryAddress = getCanonicalAgentRegistryAddress(config);
           const endpoint = await resolveAgentEndpoint(clientAddress, notifyProvider, registryAddress);
           await notifyAgent(endpoint, "/delivery", {
             agreementId: id,

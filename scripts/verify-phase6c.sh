@@ -23,5 +23,5 @@ elif [[ "$smoke_status" -ne 0 ]]; then
   exit "$smoke_status"
 fi
 
-printf '\nPhase 6C verification lane passed.\n'
-printf 'Remote/OpenShell sanity is checklist-driven: see %s\n' "$ROOT_DIR/docs/phase6c-verification.md"
+printf '\nInternal split-daemon verification lane passed.\n'
+printf 'Workroom/operator sanity must be verified through arc402 workroom doctor and endpoint status.\n'

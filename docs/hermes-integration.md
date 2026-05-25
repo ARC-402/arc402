@@ -277,10 +277,14 @@ arc402 workroom policy preset harness
 arc402 workroom policy preset search
 
 # Add a specific peer agent host (no wildcard trust)
-arc402 workroom policy peer add gigabrain.arc402.xyz
+# Add gigabrain.arc402.xyz to ~/.arc402/workroom-policy.yaml
+arc402 workroom policy-reload
+arc402 workroom policy-test gigabrain.arc402.xyz
 
 # Add a custom business API
-arc402 workroom policy add crm api.my-crm.com
+# Add api.my-crm.com to ~/.arc402/workroom-policy.yaml
+arc402 workroom policy-reload
+arc402 workroom policy-test api.my-crm.com
 ```
 
 ### Worker customization

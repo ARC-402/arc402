@@ -25,6 +25,7 @@ import Database from "better-sqlite3";
 import { loadDaemonConfig } from "./config";
 import { registerAuthRoutes, type AuthServerConfig } from "./auth-server";
 import { SESSION_FORBIDDEN, isCapabilityAllowed } from "./capabilities";
+import { getPasskeyApprovalRequest, updatePasskeyApprovalRequest } from "./passkey-approvals";
 import { SIGNER_SOCKET_PATH, type SignRequest, type SignResponse } from "./signer";
 import { EndpointPolicy, hasExplicitCommerceDelegation, resolveJobId } from "./endpoint-policy";
 import { guardTaskContent } from "./prompt-guard";
@@ -359,6 +360,61 @@ export function createApiServer(apiConfig: ApiConfig): express.Express {
     walletAddress: apiConfig.walletAddress,
   };
   registerAuthRoutes(app, db, authCfg);
+
+  app.post("/approvals/passkey/callback", express.json(), (req: Request, res: Response): void => {
+    const { approvalId, challenge, wallet, operation, signature, credentialId } = req.body as {
+      approvalId?: string;
+      challenge?: string;
+      wallet?: string;
+      operation?: string;
+      signature?: string;
+      credentialId?: string;
+    };
+
+    if (!approvalId || !signature || !credentialId) {
+      res.status(400).json({ error: "approvalId, signature, credentialId required" });
+      return;
+    }
+
+    const request = getPasskeyApprovalRequest(approvalId);
+    if (!request) {
+      res.status(404).json({ error: "approval_not_found" });
+      return;
+    }
+
+    if (request.status !== "pending") {
+      res.status(409).json({ error: "approval_not_pending", status: request.status });
+      return;
+    }
+
+    if (Date.now() > Date.parse(request.expiresAt)) {
+      updatePasskeyApprovalRequest(approvalId, { status: "expired", completedAt: new Date().toISOString() });
+      res.status(410).json({ error: "approval_expired" });
+      return;
+    }
+
+    if (challenge && request.challenge !== challenge) {
+      res.status(400).json({ error: "challenge_mismatch" });
+      return;
+    }
+
+    if (wallet && request.intent.walletAddress && wallet.toLowerCase() !== request.intent.walletAddress.toLowerCase()) {
+      res.status(400).json({ error: "wallet_mismatch" });
+      return;
+    }
+
+    const updated = updatePasskeyApprovalRequest(approvalId, {
+      status: "approved",
+      approvedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      signature,
+      credentialId,
+      operation,
+      wallet,
+    });
+
+    res.json({ ok: true, approvalId, status: updated?.status ?? "approved" });
+  });
 
   // ── Commerce (execution — proxied to signer) ─────────────────────────────────
   app.post("/hire",      sessionMiddleware, makeCommerceHandler("hire",      policyEngineAddress, rpcUrl));

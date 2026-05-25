@@ -17,7 +17,7 @@ import * as os from "os";
 import * as http from "http";
 import { ethers } from "ethers";
 import { DAEMON_DIR, DAEMON_TOML } from "../daemon/config";
-import { loadConfig, NETWORK_DEFAULTS } from "../config";
+import { getCanonicalNetworkAddress, loadConfig, NETWORK_DEFAULTS } from "../config";
 import { requireSigner } from "../client";
 import { printSenderInfo, executeContractWriteViaWallet } from "../wallet-router";
 import { COMPUTE_AGREEMENT_ABI, AGENT_REGISTRY_ABI } from "../abis";
@@ -325,8 +325,7 @@ export function registerComputeCommands(program: Command): void {
       notifyUrl?: string;
     }) => {
       const config = loadConfig();
-      const computeAddr = config.computeAgreementAddress
-        ?? NETWORK_DEFAULTS["base-mainnet"].computeAgreementAddress;
+      const computeAddr = getCanonicalNetworkAddress(config, "computeAgreementAddress");
       if (!computeAddr) {
         console.error(c.red("computeAgreementAddress missing in config (~/.arc402/config.json)"));
         process.exit(1);
@@ -480,7 +479,7 @@ export function registerComputeCommands(program: Command): void {
     .option("--url <provider-url>", "Provider endpoint (defaults to local daemon)")
     .action(async (sessionId: string, opts: { url?: string }) => {
       const config = loadConfig();
-      config.computeAgreementAddress ??= NETWORK_DEFAULTS["base-mainnet"].computeAgreementAddress;
+      config.computeAgreementAddress = getCanonicalNetworkAddress(config, "computeAgreementAddress");
       const port = getDaemonPort();
 
       const endSpinner = startSpinner(`Ending session ${sessionId}...`);
@@ -544,7 +543,7 @@ export function registerComputeCommands(program: Command): void {
     .option("--token <address>", "ERC-20 token address (default: ETH / address(0))", ethers.ZeroAddress)
     .action(async (opts: { token: string }) => {
       const config = loadConfig();
-      config.computeAgreementAddress ??= NETWORK_DEFAULTS["base-mainnet"].computeAgreementAddress;
+      config.computeAgreementAddress = getCanonicalNetworkAddress(config, "computeAgreementAddress");
       if (!config.computeAgreementAddress) {
         console.error(c.red("computeAgreementAddress missing in config"));
         process.exit(1);

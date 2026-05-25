@@ -10,7 +10,7 @@
 set -euo pipefail
 
 OPENCLAW_CONFIG="${1:-$HOME/.openclaw/openclaw.json}"
-POLICY_FILE="${2:-$HOME/.arc402/openshell-policy.yaml}"
+POLICY_FILE="${2:-$HOME/.arc402/workroom-policy.yaml}"
 
 # Known LLM provider → endpoint mapping
 declare -A PROVIDER_HOSTS

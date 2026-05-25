@@ -44,6 +44,21 @@ export interface Arc402Config {
   telegramBotToken?: string;
   telegramChatId?: string;
   telegramThreadId?: number;
+  approval?: {
+    defaultTransport?: "telegram_walletconnect" | "telegram_passkey_link" | "local_qr" | "desktop_wallet";
+    fallbackTransport?: "local_qr" | "desktop_wallet";
+    requireTestOnInit?: boolean;
+    walletConnectProjectId?: string;
+    telegram?: {
+      botToken?: string;
+      chatId?: string;
+      threadId?: number;
+    };
+    passkey?: {
+      baseUrl?: string;
+      rpId?: string;
+    };
+  };
   /** Tracks onboarding progress so `wallet deploy` can resume after interruption. */
   onboardingProgress?: {
     walletAddress: string;
@@ -167,45 +182,65 @@ function syncCanonicalProtocolAddresses(
   return migrated;
 }
 
+function buildDefaultConfig(thisDeviceId: string): Arc402Config {
+  const defaults = NETWORK_DEFAULTS["base-mainnet"] ?? {};
+  const d = defaults as unknown as Record<string, string>;
+  return {
+    network: "base-mainnet",
+    rpcUrl: defaults.rpcUrl ?? getBaseRpcPriority()[0],
+    walletConnectProjectId: getWcProjectId(),
+    approval: {
+      defaultTransport: "telegram_walletconnect",
+      fallbackTransport: "local_qr",
+      requireTestOnInit: true,
+      walletConnectProjectId: getWcProjectId(),
+      passkey: {
+        baseUrl: "https://app.arc402.xyz/passkey-sign",
+        rpId: "app.arc402.xyz",
+      },
+    },
+    ownerAddress: undefined,
+    policyEngineAddress: defaults.policyEngineAddress,
+    trustRegistryAddress: defaults.trustRegistryAddress ?? "",
+    agentRegistryAddress: d.agentRegistryV2Address ?? defaults.agentRegistryAddress,
+    agentRegistryV2Address: defaults.agentRegistryV2Address,
+    arc402RegistryV3Address: defaults.arc402RegistryV3Address,
+    serviceAgreementAddress: defaults.serviceAgreementAddress,
+    disputeArbitrationAddress: defaults.disputeArbitrationAddress,
+    trustRegistryV2Address: defaults.trustRegistryV2Address,
+    intentAttestationAddress: defaults.intentAttestationAddress,
+    settlementCoordinatorAddress: defaults.settlementCoordinatorAddress,
+    reputationOracleAddress: defaults.reputationOracleAddress,
+    sponsorshipAttestationAddress: defaults.sponsorshipAttestationAddress,
+    capabilityRegistryAddress: defaults.capabilityRegistryAddress,
+    governanceAddress: defaults.governanceAddress,
+    agreementTreeAddress: defaults.agreementTreeAddress,
+    walletFactoryAddress: defaults.walletFactoryAddress,
+    sessionChannelsAddress: defaults.sessionChannelsAddress,
+    disputeModuleAddress: defaults.disputeModuleAddress,
+    watchtowerRegistryAddress: defaults.watchtowerRegistryAddress,
+    governedTokenWhitelistAddress: defaults.governedTokenWhitelistAddress,
+    vouchingRegistryAddress: defaults.vouchingRegistryAddress,
+    migrationRegistryAddress: defaults.migrationRegistryAddress,
+    computeAgreementAddress: defaults.computeAgreementAddress,
+    subscriptionAgreementAddress: defaults.subscriptionAgreementAddress,
+    handshakeAddress: defaults.handshakeAddress,
+    deviceId: thisDeviceId,
+  };
+}
+
+function isInteractiveConfigInit(): boolean {
+  return process.argv.includes("config") && process.argv.includes("init");
+}
+
 export function loadConfig(): Arc402Config {
   const thisDeviceId = getOrCreateDeviceId();
 
   if (!fs.existsSync(CONFIG_PATH)) {
-    // Auto-create with Base Mainnet defaults — zero friction
-    const defaults = NETWORK_DEFAULTS["base-mainnet"] ?? {};
-    const d = defaults as unknown as Record<string,string>;
-    const autoConfig: Arc402Config = {
-      network: "base-mainnet",
-      rpcUrl: defaults.rpcUrl ?? getBaseRpcPriority()[0],
-      walletConnectProjectId: getWcProjectId(),
-      ownerAddress: undefined,
-      policyEngineAddress: defaults.policyEngineAddress,
-      trustRegistryAddress: defaults.trustRegistryAddress ?? "",
-      agentRegistryAddress: d.agentRegistryV2Address ?? defaults.agentRegistryAddress,
-      agentRegistryV2Address: defaults.agentRegistryV2Address,
-      arc402RegistryV3Address: defaults.arc402RegistryV3Address,
-      serviceAgreementAddress: defaults.serviceAgreementAddress,
-      disputeArbitrationAddress: defaults.disputeArbitrationAddress,
-      trustRegistryV2Address: defaults.trustRegistryV2Address,
-      intentAttestationAddress: defaults.intentAttestationAddress,
-      settlementCoordinatorAddress: defaults.settlementCoordinatorAddress,
-      reputationOracleAddress: defaults.reputationOracleAddress,
-      sponsorshipAttestationAddress: defaults.sponsorshipAttestationAddress,
-      capabilityRegistryAddress: defaults.capabilityRegistryAddress,
-      governanceAddress: defaults.governanceAddress,
-      agreementTreeAddress: defaults.agreementTreeAddress,
-      walletFactoryAddress: defaults.walletFactoryAddress,
-      sessionChannelsAddress: defaults.sessionChannelsAddress,
-      disputeModuleAddress: defaults.disputeModuleAddress,
-      watchtowerRegistryAddress: defaults.watchtowerRegistryAddress,
-      governedTokenWhitelistAddress: defaults.governedTokenWhitelistAddress,
-      vouchingRegistryAddress: defaults.vouchingRegistryAddress,
-      migrationRegistryAddress: defaults.migrationRegistryAddress,
-      computeAgreementAddress: defaults.computeAgreementAddress,
-      subscriptionAgreementAddress: defaults.subscriptionAgreementAddress,
-      handshakeAddress: defaults.handshakeAddress,
-      deviceId: thisDeviceId,
-    };
+    const autoConfig = buildDefaultConfig(thisDeviceId);
+    if (isInteractiveConfigInit()) {
+      return autoConfig;
+    }
     saveConfig(autoConfig);
     console.log(`◈ Config auto-created at ${CONFIG_PATH} (Base Mainnet)`);
     console.log("⚠ Base Mainnet — real funds at risk. Use arc402 config init for testnet.");
@@ -265,7 +300,10 @@ export function saveConfig(config: Arc402Config): void {
   fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
   if (config.privateKey) {
-    console.warn("⚠ Private key stored in plaintext at ~/.arc402/config.json");
+    const displayPath = CONFIG_PATH.startsWith(os.homedir() + path.sep)
+      ? `~/${path.relative(os.homedir(), CONFIG_PATH)}`
+      : CONFIG_PATH;
+    console.warn(`⚠ Private key stored in plaintext at ${displayPath}`);
   }
 }
 
@@ -345,6 +383,7 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     policyEngineAddress:          "0x44102e70c2A366632d98Fe40d892a2501fC7fFF2",
     intentAttestationAddress:     "0x942c807Cc6E0240A061e074b61345618aBadc457",
     settlementCoordinatorAddress: "0x52b565797975781f069368Df40d6633b2aD03390",
+    trustRegistryV2Address:       "0xfCc2CDC42654e05Dad5F6734cE5caFf3dAE0E94F",
     agentRegistryV2Address:       "0x07D526f8A8e148570509aFa249EFF295045A0cc9", // AgentRegistry
     reputationOracleAddress:      "0x410e650113fd163389C956BC7fC51c5642617187",
     walletFactoryAddress:         "0xD560C22aD5372Aa830ee5ffBFa4a5D9f528e7B87",
@@ -367,6 +406,32 @@ export const NETWORK_DEFAULTS: Record<string, Partial<Arc402Config> & { usdcAddr
     migrationRegistryAddress:     "0x3aeAaD32386D6fC40eeb5c2C27a5aCFE6aDf9ABD",
   },
 };
+
+export type CanonicalNetworkAddressKey = keyof (Partial<Arc402Config> & { usdcAddress: string });
+
+export function getCanonicalNetworkAddress(
+  configOrNetwork: Arc402Config | Arc402Config["network"],
+  key: CanonicalNetworkAddressKey,
+): string {
+  const network = typeof configOrNetwork === "string" ? configOrNetwork : configOrNetwork.network;
+  const value = NETWORK_DEFAULTS[network]?.[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Missing canonical ${String(key)} for network: ${network}`);
+  }
+  return value;
+}
+
+export function getCanonicalAgentRegistryAddress(
+  configOrNetwork: Arc402Config | Arc402Config["network"],
+): string {
+  const network = typeof configOrNetwork === "string" ? configOrNetwork : configOrNetwork.network;
+  const defaults = NETWORK_DEFAULTS[network];
+  const value = defaults?.agentRegistryV2Address ?? defaults?.agentRegistryAddress;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Missing canonical agent registry address for network: ${network}`);
+  }
+  return value;
+}
 
 export const getUsdcAddress = (config: Arc402Config) => NETWORK_DEFAULTS[config.network]?.usdcAddress ?? "";
 

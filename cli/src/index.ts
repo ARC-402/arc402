@@ -27,17 +27,12 @@ function checkUpgrade(): void {
 
 const printMode = process.argv.includes("--print");
 
-// Detect if a subcommand was provided (any arg after the binary that doesn't start with -)
-const knownSubcommands = (() => {
-  try {
-    const prog = createProgram();
-    return new Set(prog.commands.map((cmd) => cmd.name()));
-  } catch {
-    return new Set<string>();
-  }
-})();
+// Treat any user-supplied arg (other than --print) as an explicit CLI invocation.
+// Avoid instantiating the full command tree before parse, because some command modules
+// read config during import/registration and can auto-create config before `config init`
+// gets a chance to prompt intentionally.
 const argv = process.argv.slice(2).filter((a) => a !== "--print");
-const hasSubcommand = argv.some((a) => !a.startsWith("-") && knownSubcommands.has(a));
+const hasSubcommand = argv.length > 0;
 
 if (printMode) {
   // --print mode: skip REPL entirely, suppress ANSI/spinners, run command, exit.

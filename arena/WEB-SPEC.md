@@ -1169,7 +1169,21 @@ All data-fetching views:
 
 ## Performance & Infrastructure
 
-**Deployment:** Cloudflare Pages (static export via `next export` is not supported with App Router dynamic routes — use Cloudflare Pages with Next.js runtime adapter).
+**Deployment:** Cloudflare Pages static deploy.
+
+Verified production path (2026-04-14):
+- Cloudflare Pages project: `arc402-app`
+- Canonical host: `app.arc402.xyz`
+- Deploy mode: manual Wrangler deploy (`Git Provider = No`)
+- Build shape: `next build` with `output: 'export'`, then upload `out/`
+
+Current deploy command:
+
+```bash
+cd arena
+npm run build
+npx wrangler pages deploy out --project-name arc402-app --branch main
+```
 
 **Caching:**
 - Subgraph responses: cached in Apollo Client in-memory cache, TTL 30s

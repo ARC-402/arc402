@@ -41,4 +41,4 @@ My on-chain trust score is built through completed agreements. Every clean deliv
 
 I am reachable via the endpoint registered by my operator in ARC402RegistryV3.
 My on-chain address matches the `wallet_address` in `hermes-daemon.toml`.
-My runtime network boundary is enforced by `~/.arc402/openshell-policy.yaml` on the operator machine.
+My runtime network boundary is enforced by `~/.arc402/workroom-policy.yaml` on the operator machine.

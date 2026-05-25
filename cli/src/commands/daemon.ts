@@ -37,6 +37,14 @@ import {
 
 const CHANNEL_STATES_DIR = path.join(os.homedir(), ".arc402", "channel-states");
 
+function legacyOpenShellRuntimeEnabled(): boolean {
+  return process.env.ARC402_ENABLE_LEGACY_OPENSHELL === "1";
+}
+
+function readLegacyOpenShellConfig() {
+  return legacyOpenShellRuntimeEnabled() ? readOpenShellConfig() : null;
+}
+
 // ─── Harness registry ─────────────────────────────────────────────────────────
 
 const HARNESS_REGISTRY: Record<string, string> = {
@@ -506,10 +514,10 @@ export function registerDaemonCommands(program: Command): void {
         process.exit(1);
       }
 
-      const openShellCfg = forceHost ? undefined : readOpenShellConfig();
+      const openShellCfg = forceHost ? undefined : readLegacyOpenShellConfig();
       const sandboxName = openShellCfg?.sandbox.name;
       if (forceHost) {
-        console.log("Running in host mode (--host). Sandbox bypassed.");
+        console.log("Running daemon on host. Production runtime uses `arc402 workroom start`.");
       }
       let runtimeRemoteRoot = openShellCfg?.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT;
 
@@ -585,7 +593,7 @@ export function registerDaemonCommands(program: Command): void {
     .command("stop")
     .description("Gracefully stop the running daemon (SIGTERM + wait for exit).")
     .action(async () => {
-      const openShellCfg = readOpenShellConfig();
+      const openShellCfg = readLegacyOpenShellConfig();
       if (openShellCfg?.sandbox.name) {
         const remotePid = await readRemotePid(openShellCfg.sandbox.name);
         if (!remotePid) {
@@ -635,7 +643,7 @@ export function registerDaemonCommands(program: Command): void {
         if (fs.existsSync(DAEMON_PID)) fs.unlinkSync(DAEMON_PID);
       }
 
-      const openShellCfg = readOpenShellConfig();
+      const openShellCfg = readLegacyOpenShellConfig();
       let runtimeRemoteRoot = openShellCfg?.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT;
       if (openShellCfg?.sandbox.name) {
         const provisioned = provisionRuntimeToSandbox(openShellCfg.sandbox.name, runtimeRemoteRoot);
@@ -657,7 +665,7 @@ export function registerDaemonCommands(program: Command): void {
     .command("status")
     .description("Show current daemon status via IPC.")
     .action(async () => {
-      const openShellCfg = readOpenShellConfig();
+      const openShellCfg = readLegacyOpenShellConfig();
       if (openShellCfg?.sandbox.name) {
         const remotePid = await readRemotePid(openShellCfg.sandbox.name);
         if (!remotePid) {
@@ -703,7 +711,7 @@ export function registerDaemonCommands(program: Command): void {
       const follow = opts.follow as boolean | undefined;
       const lines = parseInt(opts.lines as string, 10) || 50;
 
-      const openShellCfg = readOpenShellConfig();
+      const openShellCfg = readLegacyOpenShellConfig();
       if (openShellCfg?.sandbox.name) {
         const { configPath, host } = buildOpenShellSshConfig(openShellCfg.sandbox.name);
         const baseCmd = follow

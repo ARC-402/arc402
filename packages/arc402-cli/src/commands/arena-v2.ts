@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import chalk from "chalk";
-import { getBaseRpcPriority, loadConfig } from "../config";
+import { getCanonicalAgentRegistryAddress, getCanonicalNetworkAddress, getUsdcAddress, loadConfig } from "../config";
 import { requireSigner } from "../client";
 import { AGENT_REGISTRY_ABI, TRUST_REGISTRY_ABI } from "../abis";
 import { startSpinner } from "../ui/spinner";
@@ -15,9 +15,8 @@ import { writeTuiLine } from "../tui/render-inline";
 
 // ─── Arena v2 contract addresses ───────────────────────────────────────────
 // Resolved dynamically from ARC402RegistryV3.extensions() at runtime.
-// Fallback to hardcoded values if registry is unreachable (graceful degradation).
+// No hardcoded contract fallbacks: canonical network mapping or fail loudly.
 
-const REGISTRY_V3 = "0x6EafeD4FA103D2De04DDee157e35A8e8df91B6A6";
 const REGISTRY_V3_ABI = ["function extensions(bytes32 key) view returns (address)"];
 
 const ARENA_KEYS = [
@@ -31,54 +30,39 @@ const ARENA_KEYS = [
 
 type ArenaKey = typeof ARENA_KEYS[number];
 
-const ARENA_FALLBACK: Record<ArenaKey, string> = {
-  "arena.statusRegistry":       "0x5367C514C733cc5A8D16DaC35E491d1839a5C244",
-  "arena.researchSquad":        "0xa758d4a9f2EE2b77588E3f24a2B88574E3BF451C",
-  "arena.squadBriefing":        "0x8Df0e3079390E07eCA9799641bda27615eC99a2A",
-  "arena.agentNewsletter":      "0x32Fe9152451a34f2Ba52B6edAeD83f9Ec7203600",
-  "arena.arenaPool":            "0x299f8Aa1D30dE3dCFe689eaEDED7379C32DB8453",
-  "arena.intelligenceRegistry": "0x8d5b4987C74Ad0a09B5682C6d4777bb4230A7b12",
-};
-
 // Module-level cache — resolved once per process, reused across all commands
 let _arenaAddressCache: Record<ArenaKey, string> | null = null;
 
-async function resolveArenaAddresses(rpcUrl?: string): Promise<Record<ArenaKey, string>> {
+async function resolveArenaAddresses(config: ReturnType<typeof loadConfig>): Promise<Record<ArenaKey, string>> {
   if (_arenaAddressCache) return _arenaAddressCache;
 
-  try {
-    const provider = new ethers.JsonRpcProvider(rpcUrl ?? getBaseRpcPriority()[0]);
-    const registry = new ethers.Contract(REGISTRY_V3, REGISTRY_V3_ABI, provider);
+  const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+  const registryV3 = getCanonicalNetworkAddress(config, "arc402RegistryV3Address");
+  const registry = new ethers.Contract(registryV3, REGISTRY_V3_ABI, provider);
 
-    const resolved: Partial<Record<ArenaKey, string>> = {};
-    await Promise.all(
-      ARENA_KEYS.map(async (key) => {
-        const onchain = await (registry["extensions"] as (k: string) => Promise<string>)(
-          ethers.keccak256(ethers.toUtf8Bytes(key))
-        );
-        resolved[key] = (onchain && onchain !== ethers.ZeroAddress)
-          ? onchain
-          : ARENA_FALLBACK[key];
-      })
-    );
+  const resolved: Partial<Record<ArenaKey, string>> = {};
+  await Promise.all(
+    ARENA_KEYS.map(async (key) => {
+      const onchain = await (registry["extensions"] as (k: string) => Promise<string>)(
+        ethers.keccak256(ethers.toUtf8Bytes(key))
+      );
+      if (!onchain || onchain === ethers.ZeroAddress) {
+        throw new Error(`Missing Arena extension address for ${key} on ${config.network}`);
+      }
+      resolved[key] = onchain;
+    })
+  );
 
-    _arenaAddressCache = resolved as Record<ArenaKey, string>;
-  } catch {
-    // Registry unreachable — use fallback silently
-    _arenaAddressCache = { ...ARENA_FALLBACK };
-  }
+  _arenaAddressCache = resolved as Record<ArenaKey, string>;
 
   return _arenaAddressCache;
 }
 
 // Synchronous accessor used by commands that already have addresses resolved
 // Call resolveArenaAddresses() first in any command that needs these.
-let ARENA_ADDRESSES: Record<ArenaKey, string> = { ...ARENA_FALLBACK };
-
-const AGENT_REGISTRY_ADDR = "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865";
-const TRUST_REGISTRY_ADDR = "0x22366D6dabb03062Bc0a5E893EfDff15D8E329b1";
-const USDC_ADDR           = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-const POLICY_ENGINE_ADDR  = "0x9449B15268bE7042C0b473F3f711a41A29220866";
+let ARENA_ADDRESSES: Record<ArenaKey, string> = Object.fromEntries(
+  ARENA_KEYS.map((key) => [key, ""]),
+) as Record<ArenaKey, string>;
 
 // ─── ABIs ──────────────────────────────────────────────────────────────────
 
@@ -221,9 +205,11 @@ export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
 
   // Resolve arena addresses from registry at startup (async, cached)
   const cfg = loadConfig();
-  resolveArenaAddresses(cfg.rpcUrl).then((addrs) => {
+  resolveArenaAddresses(cfg).then((addrs) => {
     ARENA_ADDRESSES = addrs;
-  }).catch(() => { /* fallback already set */ });
+  }).catch((err) => {
+    console.warn(`Failed to resolve Arena extension addresses: ${err instanceof Error ? err.message : String(err)}`);
+  });
 
   // ══════════════════════════════════════════════════════════════════════════
   // IDENTITY
@@ -293,7 +279,7 @@ export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
         let trustScore: string | null = null;
         try {
           const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-          const trustReg = new ethers.Contract(TRUST_REGISTRY_ADDR, TRUST_REGISTRY_ABI as unknown as string[], provider);
+          const trustReg = new ethers.Contract(getCanonicalNetworkAddress(config, "trustRegistryAddress"), TRUST_REGISTRY_ABI as unknown as string[], provider);
           const score = await (trustReg["getTrustScore"] as (a: string) => Promise<bigint>)(target);
           trustScore = score.toString();
         } catch { /* ignore */ }
@@ -931,7 +917,7 @@ export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
         const provider = signer.provider!;
 
         // Pre-flight: check USDC balance
-        const usdc = new ethers.Contract(USDC_ADDR, USDC_ABI, signer);
+        const usdc = new ethers.Contract(getUsdcAddress(config), USDC_ABI, signer);
         const balance = await (usdc["balanceOf"] as (a: string) => Promise<bigint>)(address);
         if (balance < amountMicro) {
           console.error(` ${c.failure} Insufficient USDC balance. Have ${formatUsdc(balance)}, need ${formatUsdc(amountMicro)}`);
@@ -2333,8 +2319,8 @@ export function registerArenaV2Commands(arena: Command, gql: GqlFn): void {
         const { signer, address } = await requireSigner(config);
         const provider = signer.provider!;
 
-        const policyEngine  = new ethers.Contract(POLICY_ENGINE_ADDR, POLICY_ENGINE_ABI, signer);
-        const agentRegistry = new ethers.Contract(AGENT_REGISTRY_ADDR, AGENT_REGISTRY_ABI as unknown as string[], provider);
+        const policyEngine  = new ethers.Contract(getCanonicalNetworkAddress(config, "policyEngineAddress"), POLICY_ENGINE_ABI, signer);
+        const agentRegistry = new ethers.Contract(getCanonicalAgentRegistryAddress(config), AGENT_REGISTRY_ABI as unknown as string[], provider);
 
         console.log();
         console.log(chalk.bold("  Arena Setup Check"));

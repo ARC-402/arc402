@@ -16,7 +16,7 @@ set -euo pipefail
 # ─── log() must be defined first — used throughout ────────────────────────────
 log() { echo "[workroom] $*"; }
 
-readonly POLICY_FILE="/workroom/.arc402/openshell-policy.yaml"
+readonly POLICY_FILE="/workroom/.arc402/workroom-policy.yaml"
 readonly RULES_LOG="/workroom/.arc402/iptables-rules.log"
 readonly ARENA_POLICY="/workroom/.arc402/arena-policy.yaml"
 readonly ARENA_DEFAULT="/workroom/defaults/arena-policy.yaml"

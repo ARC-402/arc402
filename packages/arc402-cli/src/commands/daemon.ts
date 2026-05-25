@@ -40,6 +40,14 @@ import {
 
 const CHANNEL_STATES_DIR = path.join(os.homedir(), ".arc402", "channel-states");
 
+function legacyOpenShellRuntimeEnabled(): boolean {
+  return process.env.ARC402_ENABLE_LEGACY_OPENSHELL === "1";
+}
+
+function readLegacyOpenShellConfig() {
+  return legacyOpenShellRuntimeEnabled() ? readOpenShellConfig() : null;
+}
+
 // ─── Harness registry ─────────────────────────────────────────────────────────
 
 const HARNESS_REGISTRY: Record<string, string> = {
@@ -197,7 +205,7 @@ type IpcResponse = { ok: boolean; data?: unknown; error?: string };
 
 function sendIpcCommand(cmd: Record<string, unknown>): Promise<IpcResponse> {
   if (!fs.existsSync(DAEMON_SOCK)) {
-    console.error("Daemon is not running. Launch path: run `arc402 openshell init` first, then `arc402 daemon start`.");
+    console.error("Daemon is not running. Main path: run `arc402 workroom init`, then `arc402 workroom start`.");
     process.exit(1);
   }
 
@@ -228,7 +236,7 @@ function sendIpcCommand(cmd: Record<string, unknown>): Promise<IpcResponse> {
     socket.on("error", (err) => {
       if ((err as NodeJS.ErrnoException).code === "ENOENT" ||
           (err as NodeJS.ErrnoException).code === "ECONNREFUSED") {
-        console.error("Daemon is not running. Launch path: run `arc402 openshell init` first, then `arc402 daemon start`.");
+        console.error("Daemon is not running. Main path: run `arc402 workroom init`, then `arc402 workroom start`.");
         process.exit(1);
       }
       reject(err);
@@ -385,7 +393,7 @@ async function startDaemonBackground(sandboxName?: string, runtimeRemoteRoot?: s
   child.unref();
 
   // Wait up to 30 seconds for PID file to appear.
-  // OpenShell sandbox starts are slower on first boot because the remote runtime
+  // Workroom sandbox starts are slower on first boot because the remote runtime
   // still has to initialize DB/network/watchers after the container is already up.
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
@@ -393,7 +401,7 @@ async function startDaemonBackground(sandboxName?: string, runtimeRemoteRoot?: s
     if (sandboxName) {
       const remotePid = await readRemotePid(sandboxName);
       if (remotePid) {
-        console.log(` ${c.success} ARC-402 daemon started (OpenShell)`);
+        console.log(` ${c.success} ARC-402 daemon started (Workroom sandbox)`);
         renderTree([
           { label: "PID", value: String(remotePid) },
           { label: "Log", value: REMOTE_DAEMON_LOG, last: true },
@@ -581,19 +589,19 @@ export function registerDaemonCommands(program: Command): void {
   // ── daemon start ────────────────────────────────────────────────────────────
   daemon
     .command("start")
-    .description("Start the ARC-402 runtime. For launch, this is the OpenShell-owned sandboxed runtime path; public ingress remains a separate host-managed concern.")
-    .option("--foreground", "Run in foreground (blocking). Used by systemd/launchd service managers.")
-    .option("--host", "Run on host directly, bypassing the OpenShell sandbox. Use when sandbox RPC proxy is unavailable.")
+    .description("Start the ARC-402 daemon on the host. Main production path: arc402 workroom init && arc402 workroom start.")
+    .option("--foreground", "Run in foreground (blocking). Used by service managers.")
+    .option("--host", "Deprecated compatibility flag. Host mode is now the default for daemon start.")
     .action(async (opts) => {
       const foreground = opts.foreground as boolean | undefined;
       const forceHost = opts.host as boolean | undefined;
 
       validateDaemonStartupReadiness();
 
-      const openShellCfg = forceHost ? undefined : readOpenShellConfig();
+      const openShellCfg = forceHost ? undefined : readLegacyOpenShellConfig();
       const sandboxName = openShellCfg?.sandbox.name;
       if (forceHost) {
-        console.log("Running in host mode (--host). Sandbox bypassed.");
+        console.log("Running daemon on host. Production runtime uses `arc402 workroom start`.");
       }
       let runtimeRemoteRoot = openShellCfg?.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT;
 
@@ -611,7 +619,7 @@ export function registerDaemonCommands(program: Command): void {
             },
           });
         } catch (err) {
-          console.error(`Failed to sync ARC-402 runtime into OpenShell: ${err instanceof Error ? err.message : String(err)}`);
+          console.error(`Failed to sync ARC-402 runtime into the legacy OpenShell sandbox: ${err instanceof Error ? err.message : String(err)}`);
           process.exit(1);
         }
       }
@@ -652,7 +660,7 @@ export function registerDaemonCommands(program: Command): void {
       if (sandboxName) {
         const remotePid = await readRemotePid(sandboxName);
         if (remotePid) {
-          console.log(`Daemon is already running (OpenShell). PID: ${remotePid}`);
+          console.log(`Daemon is already running (legacy OpenShell sandbox). PID: ${remotePid}`);
           process.exit(0);
         }
       } else {
@@ -667,7 +675,7 @@ export function registerDaemonCommands(program: Command): void {
       }
 
       if (sandboxName) {
-        console.log(`Starting ARC-402 daemon inside OpenShell sandbox: ${sandboxName}`);
+        console.log(`Starting ARC-402 daemon inside legacy OpenShell sandbox: ${sandboxName}`);
         console.log(`Using provisioned runtime: ${runtimeRemoteRoot}`);
       }
       await startDaemonBackground(sandboxName, runtimeRemoteRoot);
@@ -678,7 +686,7 @@ export function registerDaemonCommands(program: Command): void {
     .command("stop")
     .description("Gracefully stop the running daemon (SIGTERM + wait for exit).")
     .action(async () => {
-      const openShellCfg = readOpenShellConfig();
+      const openShellCfg = readLegacyOpenShellConfig();
       if (openShellCfg?.sandbox.name) {
         const remotePid = await readRemotePid(openShellCfg.sandbox.name);
         if (!remotePid) {
@@ -686,7 +694,7 @@ export function registerDaemonCommands(program: Command): void {
           process.exit(0);
         }
         const { configPath, host } = buildOpenShellSshConfig(openShellCfg.sandbox.name);
-        const stopSpinnerRemote = startSpinner(`Stopping daemon (OpenShell PID ${remotePid})...`);
+        const stopSpinnerRemote = startSpinner(`Stopping daemon (Workroom sandbox PID ${remotePid})...`);
         runCmd("ssh", ["-F", configPath, host, `kill ${remotePid}`], { timeout: 20000 });
         stopSpinnerRemote.succeed("Stop signal sent");
         return;
@@ -728,7 +736,7 @@ export function registerDaemonCommands(program: Command): void {
         if (fs.existsSync(DAEMON_PID)) fs.unlinkSync(DAEMON_PID);
       }
 
-      const openShellCfg = readOpenShellConfig();
+      const openShellCfg = readLegacyOpenShellConfig();
       let runtimeRemoteRoot = openShellCfg?.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT;
       if (openShellCfg?.sandbox.name) {
         const provisioned = provisionRuntimeToSandbox(openShellCfg.sandbox.name, runtimeRemoteRoot);
@@ -750,18 +758,52 @@ export function registerDaemonCommands(program: Command): void {
     .command("status")
     .description("Show current daemon status via IPC.")
     .action(async () => {
-      const openShellCfg = readOpenShellConfig();
+      const probeLocalRelay = async (): Promise<boolean> => {
+        try {
+          const port = fs.existsSync(DAEMON_TOML)
+            ? (loadDaemonConfig().relay?.listen_port ?? 4402)
+            : 4402;
+          return await new Promise<boolean>((resolve) => {
+            const socket = net.createConnection({ host: "127.0.0.1", port }, () => {
+              socket.destroy();
+              resolve(true);
+            });
+            socket.once("error", () => resolve(false));
+            socket.setTimeout(1500, () => {
+              socket.destroy();
+              resolve(false);
+            });
+          });
+        } catch {
+          return false;
+        }
+      };
+
+      const openShellCfg = readLegacyOpenShellConfig();
       if (openShellCfg?.sandbox.name) {
         const remotePid = await readRemotePid(openShellCfg.sandbox.name);
         if (!remotePid) {
-          console.log("Daemon is not running.");
-          console.log("Launch path: arc402 openshell init, then arc402 daemon start");
-          process.exit(1);
+          const relayReachable = await probeLocalRelay();
+          if (!relayReachable) {
+            console.log("Daemon is not running.");
+            console.log("Main path: arc402 workroom init, then arc402 workroom start");
+            process.exit(1);
+          }
+          console.log(`${c.mark}  ARC-402  Daemon Status`);
+          console.log();
+          renderTree([
+            { label: "State", value: "reachable through Workroom ingress" },
+            { label: "PID", value: "unavailable" },
+            { label: "Sandbox", value: openShellCfg.sandbox.name },
+            { label: "Runtime", value: openShellCfg.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT },
+            { label: "Log", value: REMOTE_DAEMON_LOG, last: true },
+          ]);
+          return;
         }
         console.log(`${c.mark}  ARC-402  Daemon Status`);
         console.log();
         renderTree([
-          { label: "State", value: "running (OpenShell sandbox)" },
+          { label: "State", value: "running (legacy OpenShell sandbox)" },
           { label: "PID", value: String(remotePid) },
           { label: "Sandbox", value: openShellCfg.sandbox.name },
           { label: "Runtime", value: openShellCfg.runtime?.remote_root ?? DEFAULT_RUNTIME_REMOTE_ROOT },
@@ -774,7 +816,7 @@ export function registerDaemonCommands(program: Command): void {
       const pid = readPid();
       if (!pid || !isProcessAlive(pid)) {
         console.log("Daemon is not running.");
-        console.log("Launch path: arc402 openshell init, then arc402 daemon start");
+        console.log("Main path: arc402 workroom init, then arc402 workroom start");
         process.exit(1);
       }
 
@@ -796,7 +838,7 @@ export function registerDaemonCommands(program: Command): void {
       const follow = opts.follow as boolean | undefined;
       const lines = parseInt(opts.lines as string, 10) || 50;
 
-      const openShellCfg = readOpenShellConfig();
+      const openShellCfg = readLegacyOpenShellConfig();
       if (openShellCfg?.sandbox.name) {
         const { configPath, host } = buildOpenShellSshConfig(openShellCfg.sandbox.name);
         const baseCmd = follow
@@ -818,7 +860,7 @@ export function registerDaemonCommands(program: Command): void {
 
       if (!fs.existsSync(DAEMON_LOG)) {
         console.log(`Log file not found: ${DAEMON_LOG}`);
-        console.log("Has the OpenShell-owned runtime been started? Run `arc402 openshell init` first if needed, then `arc402 daemon start`.");
+        console.log("Has the daemon been started? Main path: `arc402 workroom init` then `arc402 workroom start`. Host debug path: `arc402 daemon start`.");
         process.exit(0);
       }
 
@@ -1033,9 +1075,9 @@ export function registerDaemonCommands(program: Command): void {
       console.log("Next steps:");
       console.log("  1. Edit daemon.toml — fill in wallet.contract_address and network.rpc_url");
       console.log("  2. Confirm the CLI config or env exposes your machine key and notifications");
-      console.log("  3. Run arc402 openshell init — it will create/update providers and sync the runtime bundle automatically");
-      console.log("  4. Verify with arc402 openshell status");
-      console.log("  5. Start the OpenShell-owned ARC-402 runtime: arc402 daemon start");
+      console.log("  3. Initialize the Workroom path: arc402 workroom init");
+      console.log("  4. Start the Workroom runtime: arc402 workroom start");
+      console.log("  5. Verify with arc402 workroom status");
     });
 
   // ── daemon notifications ──────────────────────────────────────────────────────

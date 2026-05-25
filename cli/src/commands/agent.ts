@@ -7,7 +7,8 @@ import { requireSigner } from "../client";
 import { formatDate, getTrustTier } from "../utils/format";
 import { AGENT_REGISTRY_ABI } from "../abis";
 import { executeContractWriteViaWallet } from "../wallet-router";
-import { connectPhoneWallet, sendTransactionWithSession } from "../walletconnect";
+import { sendTransactionWithSession } from "../walletconnect";
+import { requestOwnerApproval } from "../approval/broker";
 import { getClient } from "../client";
 import prompts from "prompts";
 import chalk from "chalk";
@@ -63,7 +64,7 @@ export function registerAgentCommands(program: Command): void {
 
       if (opts.endpoint) {
         console.log(chalk.dim(`ℹ Registering public endpoint: ${opts.endpoint}`));
-        console.log(chalk.dim("  This publishes discovery / ingress metadata only. Sandbox outbound access remains controlled separately by OpenShell policy."));
+        console.log(chalk.dim("  This publishes discovery / ingress metadata only. Workroom outbound access remains controlled separately by Workroom policy."));
       }
 
       if (config.walletContractAddress) {
@@ -159,8 +160,8 @@ export function registerAgentCommands(program: Command): void {
         : [];
 
       if (config.walletContractAddress) {
-        // AgentRegistry.update() is a governance operation — requires owner wallet via WalletConnect.
-        // Machine key cannot call this. Route through connectPhoneWallet + sendTransactionWithSession.
+        // AgentRegistry.update() is a governance operation — requires owner approval.
+        // Machine key cannot call this. Route through Approval Broker + WalletConnect transport.
         const iface = new ethers.Interface(AGENT_REGISTRY_ABI);
         const innerData = iface.encodeFunctionData("update", [
           opts.name, capabilities, opts.serviceType, opts.endpoint ?? "", opts.metadataUri ?? "",
@@ -178,17 +179,25 @@ export function registerAgentCommands(program: Command): void {
         }]);
 
         const chainId = config.network === "base-sepolia" ? 84532 : 8453;
-        const telegramOpts = config.telegramBotToken && config.telegramChatId
-          ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-          : undefined;
-
-        const spinner = startSpinner("Connecting owner wallet (WalletConnect)…");
-        const { client: wcClient, session, account } = await connectPhoneWallet(
-          config.walletConnectProjectId ?? "",
+        const spinner = startSpinner("Connecting owner wallet (Approval Broker)…");
+        const approval = await requestOwnerApproval({
+          actionType: "agent_register",
+          signerMode: "owner_wallet",
           chainId,
-          config,
-          { telegramOpts, prompt: `Update agent capabilities: ${capabilities.join(", ")}`, hardware: false },
-        );
+          walletAddress: config.walletContractAddress,
+          txs: [{ to: config.walletContractAddress, data: outerData, value: "0x0" }],
+          ui: {
+            title: "Update agent",
+            summary: `Update agent capabilities: ${capabilities.join(", ")}`,
+            risk: "medium",
+          },
+          metadata: { sourceRuntime: "cli" },
+        }, config);
+        if (approval.status !== "approved" || !approval.session || approval.session.kind !== "walletconnect") {
+          spinner.fail(approval.error ?? "Approval transport failed");
+          process.exit(1);
+        }
+        const { client: wcClient, session, account } = approval.session;
         spinner.succeed(`Connected: ${account.slice(0, 6)}...${account.slice(-4)}`);
 
         const sendSpinner = startSpinner("Sending transaction…");

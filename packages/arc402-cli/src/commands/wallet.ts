@@ -6,13 +6,16 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { spawnSync } from "child_process";
-import { Arc402Config, getConfigPath, getUsdcAddress, loadConfig, NETWORK_DEFAULTS, saveConfig } from "../config";
+import { Arc402Config, getCanonicalAgentRegistryAddress, getCanonicalNetworkAddress, getConfigPath, getUsdcAddress, loadConfig, NETWORK_DEFAULTS, saveConfig } from "../config";
 import { getClient, requireSigner } from "../client";
 import { getTrustTier } from "../utils/format";
 import { AGENT_REGISTRY_ABI, ARC402_WALLET_EXECUTE_ABI, ARC402_WALLET_GUARDIAN_ABI, ARC402_WALLET_MACHINE_KEY_ABI, ARC402_WALLET_OWNER_ABI, ARC402_WALLET_PASSKEY_ABI, ARC402_WALLET_PROTOCOL_ABI, ARC402_WALLET_REGISTRY_ABI, POLICY_ENGINE_GOVERNANCE_ABI, POLICY_ENGINE_LIMITS_ABI, TRUST_REGISTRY_ABI, WALLET_FACTORY_ABI } from "../abis";
 import { warnIfPublicRpc } from "../config";
 import { connectPhoneWallet, sendTransactionWithSession, requestPhoneWalletSignature } from "../walletconnect";
-import { BundlerClient, buildSponsoredUserOp, PaymasterClient, DEFAULT_ENTRY_POINT } from "../bundler";
+import { getApprovalConfig } from "../approval/config";
+import { requestOwnerApproval } from "../approval/broker";
+import type { ApprovalIntent, ApprovalResult, ApprovalTransportSession } from "../approval/types";
+import { BundlerClient, buildSponsoredUserOp, buildUserOp, getUserOperationHash, PaymasterClient, DEFAULT_BUNDLER_URL, DEFAULT_ENTRY_POINT } from "../bundler";
 import { clearWCSession } from "../walletconnect-session";
 import { handleWalletError } from "../wallet-router";
 import { requestCoinbaseSmartWalletSignature } from "../coinbase-smart-wallet";
@@ -24,6 +27,116 @@ import { formatAddress } from "../ui/format";
 import { callWithFallback } from "../ui/rpc-fallback";
 
 const GUARDIAN_KEY_PATH = path.join(os.homedir(), ".arc402", "guardian.key");
+
+function requireApprovedWalletConnectSession(approval: ApprovalResult) {
+  if (approval.status !== "approved" || !approval.session || approval.session.kind !== "walletconnect") {
+    console.error(c.failure + " " + c.red(approval.error ?? "Approval transport failed."));
+    process.exit(1);
+  }
+
+  return approval.session;
+}
+
+async function requestWalletConnectApprovalSession(config: Arc402Config, intent: ApprovalIntent) {
+  return requireApprovedWalletConnectSession(await requestOwnerApproval(intent, config));
+}
+
+type WalletGovernanceExecution =
+  | { kind: "walletconnect"; session: ApprovalTransportSession }
+  | { kind: "passkey"; txHash: string; userOpHash: string };
+
+const PASSKEY_GOVERNANCE_SELECTORS = new Set([
+  ethers.id("unfreeze()").slice(0, 10).toLowerCase(),
+  ethers.id("setGuardian(address)").slice(0, 10).toLowerCase(),
+  ethers.id("proposeRegistryUpdate(address)").slice(0, 10).toLowerCase(),
+  ethers.id("executeRegistryUpdate()").slice(0, 10).toLowerCase(),
+  ethers.id("cancelRegistryUpdate()").slice(0, 10).toLowerCase(),
+  ethers.id("setAuthorizedInterceptor(address)").slice(0, 10).toLowerCase(),
+  ethers.id("setVelocityLimit(uint256)").slice(0, 10).toLowerCase(),
+  ethers.id("authorizeMachineKey(address)").slice(0, 10).toLowerCase(),
+  ethers.id("revokeMachineKey(address)").slice(0, 10).toLowerCase(),
+]);
+
+function canUsePasskeyForWalletGovernance(
+  config: Arc402Config,
+  walletAddress: string,
+  tx: { to: string; data: string; value?: string },
+): boolean {
+  const approval = getApprovalConfig(config);
+  const selector = tx.data.slice(0, 10).toLowerCase();
+  return approval.defaultTransport === "telegram_passkey_link"
+    && tx.to.toLowerCase() === walletAddress.toLowerCase()
+    && PASSKEY_GOVERNANCE_SELECTORS.has(selector);
+}
+
+async function requestWalletGovernanceExecution(
+  config: Arc402Config,
+  intent: ApprovalIntent,
+): Promise<WalletGovernanceExecution> {
+  const walletAddress = intent.walletAddress;
+  const tx = intent.txs[0];
+  if (!walletAddress || !tx || intent.txs.length !== 1) {
+    return {
+      kind: "walletconnect",
+      session: await requestWalletConnectApprovalSession(config, intent),
+    };
+  }
+
+  if (!canUsePasskeyForWalletGovernance(config, walletAddress, tx)) {
+    return {
+      kind: "walletconnect",
+      session: await requestWalletConnectApprovalSession(config, intent),
+    };
+  }
+
+  const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+  const nonceReader = new ethers.Contract(
+    DEFAULT_ENTRY_POINT,
+    ["function getNonce(address sender, uint192 key) external view returns (uint256)"],
+    provider,
+  );
+  const nonce: bigint = await nonceReader.getNonce(walletAddress, 0);
+  const bundler = new BundlerClient(process.env.BUNDLER_URL ?? DEFAULT_BUNDLER_URL, DEFAULT_ENTRY_POINT, intent.chainId);
+  const userOp = await buildUserOp(tx.data, walletAddress, nonce, config);
+
+  try {
+    const estimate = await bundler.estimateUserOperationGas(userOp);
+    userOp.callGasLimit = estimate.callGasLimit;
+    userOp.verificationGasLimit = estimate.verificationGasLimit;
+    userOp.preVerificationGas = estimate.preVerificationGas;
+  } catch {
+    // keep conservative defaults if estimation is unavailable
+  }
+
+  const challenge = getUserOperationHash(userOp, DEFAULT_ENTRY_POINT, intent.chainId);
+  const approval = await requestOwnerApproval({
+    ...intent,
+    signerMode: "passkey",
+    metadata: {
+      ...intent.metadata,
+      passkeyChallenge: challenge,
+    },
+  }, config);
+
+  if (approval.status !== "approved" || !approval.passkeyApproval?.signature) {
+    console.error(c.failure + " " + c.red(approval.error ?? "Passkey approval failed."));
+    process.exit(1);
+  }
+
+  userOp.signature = approval.passkeyApproval.signature;
+  const userOpHash = await bundler.sendUserOperation(userOp);
+  const receipt = await bundler.getUserOperationReceipt(userOpHash);
+  if (!receipt.success) {
+    console.error(c.failure + " " + c.red("UserOperation failed on-chain."));
+    process.exit(1);
+  }
+
+  return {
+    kind: "passkey",
+    userOpHash,
+    txHash: String(receipt.receipt.transactionHash),
+  };
+}
 
 function buildFreshConfigFromDefaults(
   existing: Arc402Config | undefined,
@@ -44,6 +157,7 @@ function buildFreshConfigFromDefaults(
     telegramBotToken: existing?.telegramBotToken,
     telegramChatId: existing?.telegramChatId,
     telegramThreadId: existing?.telegramThreadId,
+    approval: existing?.approval,
     deviceId: existing?.deviceId,
     chat: existing?.chat,
     policyEngineAddress: defaults.policyEngineAddress,
@@ -104,11 +218,7 @@ function parseAmount(raw: string): bigint {
 }
 
 function resolvePolicyEngineAddress(config: Arc402Config): string {
-  return (
-    config.policyEngineAddress ??
-    NETWORK_DEFAULTS[config.network]?.policyEngineAddress ??
-    "0x9449B15268bE7042C0b473F3f711a41A29220866"
-  );
+  return getCanonicalNetworkAddress(config, "policyEngineAddress");
 }
 
 function getWalletAddressFromFactoryLogs(
@@ -137,6 +247,20 @@ function getWalletAddressFromFactoryLogs(
   return null;
 }
 
+async function assertAddressHasCode(
+  provider: ethers.Provider,
+  address: string,
+  label: string,
+): Promise<void> {
+  const code = await provider.getCode(address);
+  if (code !== "0x") return;
+
+  throw new Error(
+    `${label} ${address} has no contract code. ` +
+    `This usually means an owner EOA was saved instead of the deployed ARC402Wallet contract.`,
+  );
+}
+
 // Standard onboarding categories required for a newly deployed wallet.
 // These cover the full ARC-402 flow: spending, hiring, compute, research, protocol ops.
 const ONBOARDING_CATEGORIES = [
@@ -161,7 +285,6 @@ async function runWalletOnboardingCeremony(
   sendTx: (call: { to: string; data: string; value: string }, description: string) => Promise<string>,
 ): Promise<void> {
   const policyAddress = resolvePolicyEngineAddress(config);
-  const executeIface = new ethers.Interface(ARC402_WALLET_EXECUTE_ABI);
   const govIface = new ethers.Interface(POLICY_ENGINE_GOVERNANCE_ABI);
   const limitsIface = new ethers.Interface(POLICY_ENGINE_LIMITS_ABI);
   const policyGov = new ethers.Contract(policyAddress, POLICY_ENGINE_GOVERNANCE_ABI, provider);
@@ -185,15 +308,8 @@ async function runWalletOnboardingCeremony(
   if (!alreadyRegistered) {
     const registerCalldata = govIface.encodeFunctionData("registerWallet", [walletAddress, ownerAddress]);
     await sendTx({
-      to: walletAddress,
-      data: executeIface.encodeFunctionData("executeContractCall", [{
-        target: policyAddress,
-        data: registerCalldata,
-        value: 0n,
-        minReturnValue: 0n,
-        maxApprovalAmount: 0n,
-        approvalToken: ethers.ZeroAddress,
-      }]),
+      to: policyAddress,
+      data: registerCalldata,
       value: "0x0",
     }, "registerWallet on PolicyEngine");
   } else {
@@ -249,13 +365,8 @@ async function runCompleteOnboardingCeremony(
   sendTx: (call: { to: string; data: string; value: string }, description: string) => Promise<string>,
 ): Promise<void> {
   const policyAddress = resolvePolicyEngineAddress(config);
-  const agentRegistryAddress =
-    config.agentRegistryV2Address ??
-    NETWORK_DEFAULTS[config.network]?.agentRegistryV2Address;
-  const handshakeAddress =
-    config.handshakeAddress ??
-    NETWORK_DEFAULTS[config.network]?.handshakeAddress ??
-    "0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3";
+  const agentRegistryAddress = getCanonicalAgentRegistryAddress(config);
+  const handshakeAddress = getCanonicalNetworkAddress(config, "handshakeAddress");
 
   // ── Step 2: Machine Key ────────────────────────────────────────────────────
   console.log("\n" + c.dim("── Step 2: Machine Key ────────────────────────────────────────"));
@@ -512,11 +623,11 @@ async function runCompleteOnboardingCeremony(
       // Whitelist all contracts an agent will need for the full ARC-402 flow.
       const protocolContracts: { address: string; name: string }[] = [
         { address: agentRegistryAddress ?? "", name: "AgentRegistry" },
-        { address: config.serviceAgreementAddress ?? NETWORK_DEFAULTS[config.network]?.serviceAgreementAddress ?? "0xC98B402CAB9156da68A87a69E3B4bf167A3CCcF6", name: "ServiceAgreement" },
-        { address: config.computeAgreementAddress ?? NETWORK_DEFAULTS[config.network]?.computeAgreementAddress ?? "0xf898A8A2cF9900A588B174d9f96349BBA95e57F3", name: "ComputeAgreement" },
-        { address: config.subscriptionAgreementAddress ?? NETWORK_DEFAULTS[config.network]?.subscriptionAgreementAddress ?? "0x809c1D997Eab3531Eb2d01FCD5120Ac786D850D6", name: "SubscriptionAgreement" },
-        { address: config.handshakeAddress ?? NETWORK_DEFAULTS[config.network]?.handshakeAddress ?? "0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3", name: "Handshake" },
-        { address: config.sessionChannelsAddress ?? NETWORK_DEFAULTS[config.network]?.sessionChannelsAddress ?? "0x578f8d1bd82E8D6268E329d664d663B4d985BE61", name: "SessionChannels" },
+        { address: NETWORK_DEFAULTS[config.network]?.serviceAgreementAddress ?? "", name: "ServiceAgreement" },
+        { address: NETWORK_DEFAULTS[config.network]?.computeAgreementAddress ?? "", name: "ComputeAgreement" },
+        { address: NETWORK_DEFAULTS[config.network]?.subscriptionAgreementAddress ?? "", name: "SubscriptionAgreement" },
+        { address: NETWORK_DEFAULTS[config.network]?.handshakeAddress ?? "", name: "Handshake" },
+        { address: NETWORK_DEFAULTS[config.network]?.sessionChannelsAddress ?? "", name: "SessionChannels" },
       ].filter(c => c.address && c.address !== "");
 
       for (const contract of protocolContracts) {
@@ -672,12 +783,7 @@ async function runCompleteOnboardingCeremony(
 }
 
 function printOpenShellHint(): void {
-  const r = spawnSync("which", ["openshell"], { encoding: "utf-8" });
-  if (r.status === 0 && r.stdout.trim()) {
-    console.log("\nOpenShell detected. Run: arc402 openshell init");
-  } else {
-    console.log("\nOptional: install OpenShell for sandboxed execution: arc402 openshell install");
-  }
+  console.log("\nNext runtime step: arc402 workroom init && arc402 workroom start");
 }
 
 export function registerWalletCommands(program: Command): void {
@@ -1041,7 +1147,7 @@ export function registerWalletCommands(program: Command): void {
       }
 
       if (opts.dryRun) {
-        const factoryAddr = config.walletFactoryAddress ?? NETWORK_DEFAULTS[config.network]?.walletFactoryAddress ?? "(not configured)";
+        const factoryAddr = NETWORK_DEFAULTS[config.network]?.walletFactoryAddress ?? "(not configured)";
         const chainId = config.network === "base-mainnet" ? 8453 : 84532;
         console.log();
         console.log(" " + c.dim("── Dry run: wallet deploy ──────────────────────────────────────"));
@@ -1160,6 +1266,7 @@ export function registerWalletCommands(program: Command): void {
           process.exit(1);
         }
 
+        await assertAddressHasCode(provider, senderAddress, "Deployed wallet");
         config.walletContractAddress = senderAddress;
         config.ownerAddress = ownerAddress;
         saveConfig(config);
@@ -1200,6 +1307,7 @@ export function registerWalletCommands(program: Command): void {
           console.error("Could not find WalletDeployed/WalletCreated event in receipt. Check the transaction on-chain.");
           process.exit(1);
         }
+        await assertAddressHasCode(provider, walletAddress, "Deployed wallet");
         config.walletContractAddress = walletAddress;
         config.ownerAddress = account;
         saveConfig(config);
@@ -1305,6 +1413,7 @@ export function registerWalletCommands(program: Command): void {
             console.error("Could not find WalletDeployed/WalletCreated event in receipt. Check the transaction on-chain.");
             process.exit(1);
           }
+          await assertAddressHasCode(provider, deployedWallet, "Deployed wallet");
           walletAddress = deployedWallet;
           // ── Step 1 complete: save wallet + owner immediately ─────────────────
           config.walletContractAddress = walletAddress;
@@ -1345,6 +1454,7 @@ export function registerWalletCommands(program: Command): void {
           deploySpinner.fail("Could not find WalletDeployed/WalletCreated event in receipt. Check the transaction on-chain.");
           process.exit(1);
         }
+        await assertAddressHasCode(provider, walletAddress, "Deployed wallet");
         deploySpinner.succeed("Wallet deployed");
 
         // Generate guardian key (separate from hot key) and call setGuardian
@@ -1418,15 +1528,20 @@ export function registerWalletCommands(program: Command): void {
       const chainId = config.network === "base-mainnet" ? 8453 : 84532;
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
 
+      try {
+        await assertAddressHasCode(provider, walletAddress, "Configured walletContractAddress");
+      } catch (error) {
+        console.error(c.failure + " " + c.red(error instanceof Error ? error.message : String(error)));
+        console.error(c.dim("Tip: use the deployed wallet contract address, not the owner EOA, then rerun onboarding."));
+        process.exit(1);
+      }
+
       // Resolve protocol contracts to whitelist
-      const handshakeAddress =
-        config.handshakeAddress ??
-        NETWORK_DEFAULTS[config.network]?.handshakeAddress ??
-        "0x4F5A38Bb746d7E5d49d8fd26CA6beD141Ec2DDb3";
+      const handshakeAddress = NETWORK_DEFAULTS[config.network]?.handshakeAddress ?? "";
       const protocolContracts: { address: string; name: string }[] = [
-        { address: config.serviceAgreementAddress ?? NETWORK_DEFAULTS[config.network]?.serviceAgreementAddress ?? "", name: "ServiceAgreement" },
-        { address: config.computeAgreementAddress ?? NETWORK_DEFAULTS[config.network]?.computeAgreementAddress ?? "", name: "ComputeAgreement" },
-        { address: config.subscriptionAgreementAddress ?? NETWORK_DEFAULTS[config.network]?.subscriptionAgreementAddress ?? "", name: "SubscriptionAgreement" },
+        { address: NETWORK_DEFAULTS[config.network]?.serviceAgreementAddress ?? "", name: "ServiceAgreement" },
+        { address: NETWORK_DEFAULTS[config.network]?.computeAgreementAddress ?? "", name: "ComputeAgreement" },
+        { address: NETWORK_DEFAULTS[config.network]?.subscriptionAgreementAddress ?? "", name: "SubscriptionAgreement" },
         { address: handshakeAddress, name: "Handshake" },
       ].filter(pc => pc.address && pc.address !== "");
 
@@ -1498,31 +1613,34 @@ export function registerWalletCommands(program: Command): void {
 
       console.log(" " + c.dim(`◈ ${pendingTxCount} transaction(s) pending — your phone will need to approve each.`));
 
-      // Telegram notification before first tx
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
-      // Connect WalletConnect ONCE — reuse session for all txs
-      const { client, session, account } = await connectPhoneWallet(
-        config.walletConnectProjectId,
+      const approval = await requestOwnerApproval({
+        actionType: "wallet_onboard",
+        signerMode: "owner_wallet",
         chainId,
-        config,
-        { telegramOpts, prompt: `Approve ${pendingTxCount} wallet onboarding transaction(s)`, hardware: !!opts.hardware },
-      );
+        walletAddress,
+        txs: Array.from({ length: pendingTxCount }, () => ({ to: walletAddress, data: "0x", value: "0x0" })),
+        ui: {
+          title: "Wallet onboarding",
+          summary: `Approve ${pendingTxCount} wallet onboarding transaction(s)`,
+          risk: "medium",
+        },
+        metadata: {
+          expectedApprovalCount: pendingTxCount,
+          sourceRuntime: "cli",
+          hardware: !!opts.hardware,
+        },
+      }, config);
+
+      if (approval.status !== "approved" || !approval.session || approval.session.kind !== "walletconnect") {
+        console.error(c.failure + " " + c.red(approval.error ?? "Approval transport failed."));
+        process.exit(1);
+      }
+
+      const { client, session, account } = approval.session;
 
       const networkName = chainId === 8453 ? "Base" : "Base Sepolia";
       const shortAddr = `${account.slice(0, 6)}...${account.slice(-5)}`;
       console.log("\n" + c.success + c.white(` Connected: ${shortAddr} on ${networkName}`));
-
-      if (telegramOpts) {
-        await sendTelegramMessage({
-          botToken: telegramOpts.botToken,
-          chatId: telegramOpts.chatId,
-          threadId: telegramOpts.threadId,
-          text: `◈ arc402 wallet onboard: ${pendingTxCount} txs pending for ${shortAddr}`,
-        });
-      }
 
       const sendTx = async (call: { to: string; data: string; value: string }, description: string): Promise<string> => {
         const txSpin = startSpinner(description);
@@ -1532,26 +1650,25 @@ export function registerWalletCommands(program: Command): void {
         return hash;
       };
 
-      const executeIface = new ethers.Interface(ARC402_WALLET_EXECUTE_ABI);
       const govIface = new ethers.Interface(POLICY_ENGINE_GOVERNANCE_ABI);
       const limitsIface = new ethers.Interface(POLICY_ENGINE_LIMITS_ABI);
       const ownerIface = new ethers.Interface(ARC402_WALLET_OWNER_ABI);
+      const walletOwnerReader = new ethers.Contract(walletAddress, ["function owner() external view returns (address)"], provider);
+      const walletOwner: string = await walletOwnerReader.owner().catch(() => account);
+
+      if (walletOwner.toLowerCase() !== account.toLowerCase()) {
+        console.error(c.failure + " " + c.red(`Connected wallet ${account} is not the ARC402Wallet owner ${walletOwner}.`));
+        process.exit(1);
+      }
 
       console.log("\n" + c.dim("── Onboarding ceremony ────────────────────────────────────────"));
 
       // 1. registerWallet
       if (needsRegister) {
-        const registerCalldata = govIface.encodeFunctionData("registerWallet", [walletAddress, account]);
+        const registerCalldata = govIface.encodeFunctionData("registerWallet", [walletAddress, walletOwner]);
         await sendTx({
-          to: walletAddress,
-          data: executeIface.encodeFunctionData("executeContractCall", [{
-            target: policyAddress,
-            data: registerCalldata,
-            value: 0n,
-            minReturnValue: 0n,
-            maxApprovalAmount: 0n,
-            approvalToken: ethers.ZeroAddress,
-          }]),
+          to: policyAddress,
+          data: registerCalldata,
           value: "0x0",
         }, "registerWallet on PolicyEngine");
       } else {
@@ -1682,22 +1799,33 @@ export function registerWalletCommands(program: Command): void {
           process.exit(1);
         }
         const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-        const { txHash } = await requestPhoneWalletSignature(
-          config.walletConnectProjectId,
+        const approval = await requestOwnerApproval({
+          actionType: "spend_limit_set",
+          signerMode: "owner_wallet",
           chainId,
-          (account) => ({
+          walletAddress: walletAddr,
+          txs: [{
             to: policyAddress,
             data: policyInterface.encodeFunctionData("setCategoryLimitFor", [walletAddr, opts.category, amount]),
             value: "0x0",
-          }),
-          `Approve spend limit: ${opts.category} → ${opts.amount} ETH`,
-          config.telegramBotToken && config.telegramChatId ? {
-            botToken: config.telegramBotToken,
-            chatId: config.telegramChatId,
-            threadId: config.telegramThreadId,
-          } : undefined,
-          config
-        );
+          }],
+          ui: {
+            title: "Set spend limit",
+            summary: `Approve spend limit: ${opts.category} → ${opts.amount} ETH`,
+            risk: "medium",
+          },
+          metadata: { sourceRuntime: "cli" },
+        }, config);
+        if (approval.status !== "approved" || !approval.session || approval.session.kind !== "walletconnect") {
+          console.error(c.failure + " " + c.red(approval.error ?? "Approval transport failed."));
+          process.exit(1);
+        }
+        const { client, session, account } = approval.session;
+        const txHash = await sendTransactionWithSession(client, session, account, chainId, {
+          to: policyAddress,
+          data: policyInterface.encodeFunctionData("setCategoryLimitFor", [walletAddr, opts.category, amount]),
+          value: "0x0",
+        });
         console.log(`\nTransaction submitted: ${txHash}`);
         await provider.waitForTransaction(txHash);
         console.log(`Spend limit for ${opts.category} set to ${opts.amount} ETH`);
@@ -1741,22 +1869,33 @@ export function registerWalletCommands(program: Command): void {
       const policyInterface = new ethers.Interface(POLICY_ENGINE_LIMITS_ABI);
       if (config.walletConnectProjectId) {
         const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-        const { txHash } = await requestPhoneWalletSignature(
-          config.walletConnectProjectId,
+        const approval = await requestOwnerApproval({
+          actionType: "policy_update",
+          signerMode: "owner_wallet",
           chainId,
-          () => ({
+          walletAddress: walletAddr,
+          txs: [{
             to: policyAddress,
             data: policyInterface.encodeFunctionData("setDailyLimitFor", [walletAddr, opts.category, amount]),
             value: "0x0",
-          }),
-          `Approve daily limit: ${opts.category} → ${opts.amount} ETH`,
-          config.telegramBotToken && config.telegramChatId ? {
-            botToken: config.telegramBotToken,
-            chatId: config.telegramChatId,
-            threadId: config.telegramThreadId,
-          } : undefined,
-          config
-        );
+          }],
+          ui: {
+            title: "Set daily limit",
+            summary: `Approve daily limit: ${opts.category} → ${opts.amount} ETH`,
+            risk: "medium",
+          },
+          metadata: { sourceRuntime: "cli" },
+        }, config);
+        if (approval.status !== "approved" || !approval.session || approval.session.kind !== "walletconnect") {
+          console.error(c.failure + " " + c.red(approval.error ?? "Approval transport failed."));
+          process.exit(1);
+        }
+        const { client, session, account } = approval.session;
+        const txHash = await sendTransactionWithSession(client, session, account, chainId, {
+          to: policyAddress,
+          data: policyInterface.encodeFunctionData("setDailyLimitFor", [walletAddr, opts.category, amount]),
+          value: "0x0",
+        });
         await provider.waitForTransaction(txHash);
         console.log(`Daily limit for ${opts.category} set to ${opts.amount} ETH (12/24h rolling window)`);
       } else {
@@ -1799,33 +1938,32 @@ export function registerWalletCommands(program: Command): void {
 
       const policyInterface = new ethers.Interface(POLICY_ENGINE_LIMITS_ABI);
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-      const telegramOpts = config.telegramBotToken && config.telegramChatId ? {
-        botToken: config.telegramBotToken,
-        chatId: config.telegramChatId,
-        threadId: config.telegramThreadId,
-      } : undefined;
-
       console.log(c.white("\n◈ Spend limit init — 1 connection, 5 approvals\n"));
       console.log(c.dim("  Connect once — MetaMask will prompt 5 times in sequence."));
 
-      // Connect once, reuse session for all 5 txs
-      const { client, session, account } = await connectPhoneWallet(
-        config.walletConnectProjectId,
+      const approval = await requestOwnerApproval({
+        actionType: "spend_limit_set",
+        signerMode: "owner_wallet",
         chainId,
-        config,
-        { telegramOpts, prompt: "Connect wallet for spend limit setup (5 approvals)" }
-      );
+        walletAddress: walletAddr,
+        txs: categories.map(() => ({ to: policyAddress, data: "0x", value: "0x0" })),
+        ui: {
+          title: "Initialize spend limits",
+          summary: "Connect wallet for spend limit setup (5 approvals)",
+          risk: "medium",
+        },
+        metadata: { expectedApprovalCount: categories.length, sourceRuntime: "cli" },
+      }, config);
+      if (approval.status !== "approved" || !approval.session || approval.session.kind !== "walletconnect") {
+        console.error(c.failure + " " + c.red(approval.error ?? "Approval transport failed."));
+        process.exit(1);
+      }
+      const { client, session, account } = approval.session;
 
       for (const cat of categories) {
         const amount = ethers.parseEther(cat.amount);
         const data = policyInterface.encodeFunctionData("setCategoryLimitFor", [walletAddr, cat.name, amount]);
         console.log(c.dim(`\n  Setting ${cat.name} → ${cat.amount} ETH...`));
-
-        // Send Telegram notification for each
-        if (telegramOpts) {
-          const { sendTelegramMessage: sendTg } = await import("../telegram-notify.js");
-          await sendTg({ ...telegramOpts, text: `Approve spend limit: ${cat.name} → ${cat.amount} ETH` });
-        }
 
         const txHash = await sendTransactionWithSession(client, session, account, chainId, {
           to: policyAddress,
@@ -1876,22 +2014,33 @@ export function registerWalletCommands(program: Command): void {
       console.log(`Current policy: ${currentPolicy}`);
       console.log(`New policy:     ${policyIdHex}`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
-      const { txHash } = await requestPhoneWalletSignature(
-        config.walletConnectProjectId,
+      const approval = await requestOwnerApproval({
+        actionType: "policy_update",
+        signerMode: "owner_wallet",
         chainId,
-        () => ({
+        walletAddress: config.walletContractAddress!,
+        txs: [{
           to: config.walletContractAddress!,
           data: ownerInterface.encodeFunctionData("updatePolicy", [policyIdHex]),
           value: "0x0",
-        }),
-        `Approve: update policy to ${policyIdHex}`,
-        telegramOpts,
-        config
-      );
+        }],
+        ui: {
+          title: "Update active policy",
+          summary: `Approve: update policy to ${policyIdHex}`,
+          risk: "medium",
+        },
+        metadata: { sourceRuntime: "cli" },
+      }, config);
+      if (approval.status !== "approved" || !approval.session || approval.session.kind !== "walletconnect") {
+        console.error(c.failure + " " + c.red(approval.error ?? "Approval transport failed."));
+        process.exit(1);
+      }
+      const { client, session, account } = approval.session;
+      const txHash = await sendTransactionWithSession(client, session, account, chainId, {
+        to: config.walletContractAddress!,
+        data: ownerInterface.encodeFunctionData("updatePolicy", [policyIdHex]),
+        value: "0x0",
+      });
 
       await provider.waitForTransaction(txHash);
       console.log("\n" + c.success + c.white(" Active policy updated"));
@@ -1968,16 +2117,34 @@ export function registerWalletCommands(program: Command): void {
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
       const walletInterface = new ethers.Interface(ARC402_WALLET_GUARDIAN_ABI);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
-      const { client, session, account } = await connectPhoneWallet(
-        config.walletConnectProjectId,
+      const execution = await requestWalletGovernanceExecution(config, {
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        config,
-        { telegramOpts, prompt: "Approve: unfreeze ARC402Wallet", hardware: !!opts.hardware }
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [{
+          to: config.walletContractAddress,
+          data: walletInterface.encodeFunctionData("unfreeze", []),
+          value: "0x0",
+        }],
+        ui: {
+          title: "Unfreeze wallet",
+          summary: "Approve: unfreeze ARC402Wallet",
+          risk: "high",
+        },
+        metadata: { sourceRuntime: "cli", hardware: !!opts.hardware },
+      });
+      if (execution.kind === "passkey") {
+        if (opts.json) {
+          console.log(JSON.stringify({ txHash: execution.txHash, walletAddress: config.walletContractAddress, userOpHash: execution.userOpHash }));
+        } else {
+          console.log("\n" + c.success + c.white(` Wallet ${config.walletContractAddress} unfrozen`));
+          console.log(" " + c.dim("Tx:") + " " + c.white(execution.txHash));
+          console.log(" " + c.dim("UserOp:") + " " + c.white(execution.userOpHash));
+        }
+        return;
+      }
+      const { client, session, account } = execution.session;
 
       const networkName = chainId === 8453 ? "Base" : "Base Sepolia";
       const shortAddr = `${account.slice(0, 6)}...${account.slice(-5)}`;
@@ -2041,16 +2208,36 @@ export function registerWalletCommands(program: Command): void {
       console.log(`\nGuardian address: ${guardianWallet.address}`);
       console.log(`Wallet contract:  ${config.walletContractAddress}`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
-      const { client, session, account } = await connectPhoneWallet(
-        config.walletConnectProjectId,
+      const execution = await requestWalletGovernanceExecution(config, {
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        config,
-        { telegramOpts, prompt: `Approve: set guardian to ${guardianWallet.address}`, hardware: !!opts.hardware }
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [{
+          to: config.walletContractAddress,
+          data: walletInterface.encodeFunctionData("setGuardian", [guardianWallet.address]),
+          value: "0x0",
+        }],
+        ui: {
+          title: "Set guardian",
+          summary: `Approve: set guardian to ${guardianWallet.address}`,
+          risk: "high",
+        },
+        metadata: { sourceRuntime: "cli", hardware: !!opts.hardware },
+      });
+      if (execution.kind === "passkey") {
+        saveGuardianKey(guardianWallet.privateKey);
+        if (config.guardianPrivateKey) delete (config as unknown as Record<string, unknown>).guardianPrivateKey;
+        config.guardianAddress = guardianWallet.address;
+        saveConfig(config);
+        console.log("\n" + c.success + c.white(` Guardian set to: ${guardianWallet.address}`));
+        console.log(" " + c.dim("Tx:") + " " + c.white(execution.txHash));
+        console.log(" " + c.dim("UserOp:") + " " + c.white(execution.userOpHash));
+        console.log(" " + c.dim("Guardian private key saved to ~/.arc402/guardian.key (chmod 400)."));
+        console.log(" " + c.warning + " " + c.yellow("The guardian key can freeze your wallet. Store it separately from your hot key."));
+        return;
+      }
+      const { client, session, account } = execution.session;
 
       const networkName = chainId === 8453 ? "Base" : "Base Sepolia";
       const shortAddr = `${account.slice(0, 6)}...${account.slice(-5)}`;
@@ -2156,16 +2343,38 @@ export function registerWalletCommands(program: Command): void {
         return;
       }
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
-      const { client, session, account } = await connectPhoneWallet(
-        config.walletConnectProjectId!,
+      const execution = await requestWalletGovernanceExecution(config, {
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        config,
-        { telegramOpts, prompt: "Approve registry upgrade proposal on ARC402Wallet", hardware: !!opts.hardware }
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [{ to: config.walletContractAddress, data: calldata, value: "0x0" }],
+        ui: {
+          title: "Propose registry upgrade",
+          summary: "Approve registry upgrade proposal on ARC402Wallet",
+          risk: "high",
+        },
+        metadata: {
+          sourceRuntime: "cli",
+          hardware: !!opts.hardware,
+        },
+      });
+
+      if (execution.kind === "passkey") {
+        const unlockAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+        console.log("\n" + c.success + c.white(" Registry upgrade proposed"));
+        console.log(" " + c.dim("Tx:") + " " + c.white(execution.txHash));
+        console.log(" " + c.dim("UserOp:") + " " + c.white(execution.userOpHash));
+        console.log(" " + c.dim("Unlock at:") + " " + c.white(unlockAt.toISOString()) + c.dim(" (approximately)"));
+        console.log(`\nNext steps:`);
+        console.log(`  Wait 2 days, then run:`);
+        console.log(`  arc402 wallet execute-registry-upgrade`);
+        console.log(`\nTo cancel before execution:`);
+        console.log(`  arc402 wallet cancel-registry-upgrade`);
+        return;
+      }
+
+      const { client, session, account } = execution.session;
 
       const networkName = chainId === 8453 ? "Base" : "Base Sepolia";
       const shortAddr = `${account.slice(0, 6)}...${account.slice(-5)}`;
@@ -2242,23 +2451,38 @@ export function registerWalletCommands(program: Command): void {
       console.log(`Pending registry: ${pendingRegistry}`);
       console.log("Timelock elapsed — proceeding with executeRegistryUpdate()");
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
       const walletInterface = new ethers.Interface(ARC402_WALLET_REGISTRY_ABI);
-      const { txHash } = await requestPhoneWalletSignature(
-        config.walletConnectProjectId,
+      const txData = {
+        to: config.walletContractAddress!,
+        data: walletInterface.encodeFunctionData("executeRegistryUpdate", []),
+        value: "0x0",
+      };
+      const execution = await requestWalletGovernanceExecution(config, {
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        () => ({
-          to: config.walletContractAddress!,
-          data: walletInterface.encodeFunctionData("executeRegistryUpdate", []),
-          value: "0x0",
-        }),
-        "Approve registry upgrade execution on ARC402Wallet",
-        telegramOpts,
-        config
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [txData],
+        ui: {
+          title: "Execute registry upgrade",
+          summary: "Approve registry upgrade execution on ARC402Wallet",
+          risk: "high",
+        },
+        metadata: { sourceRuntime: "cli" },
+      });
+      if (execution.kind === "passkey") {
+        let confirmedRegistry = pendingRegistry;
+        try {
+          confirmedRegistry = await walletContract.registry();
+        } catch { /* use pendingRegistry as fallback */ }
+        console.log("\n" + c.success + c.white(" Registry upgrade executed"));
+        console.log(" " + c.dim("Tx:") + " " + c.white(execution.txHash));
+        console.log(" " + c.dim("UserOp:") + " " + c.white(execution.userOpHash));
+        console.log(" " + c.dim("New registry:") + " " + c.white(confirmedRegistry));
+        return;
+      }
+      const { client, session, account } = execution.session;
+      const txHash = await sendTransactionWithSession(client, session, account, chainId, txData);
 
       // Wait for tx to confirm, then read back the active registry (J6-02)
       await provider.waitForTransaction(txHash);
@@ -2331,27 +2555,35 @@ export function registerWalletCommands(program: Command): void {
       console.log(`PolicyEngine: ${policyAddress}`);
       console.log(`Whitelisting: ${checksumTarget}`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
       const policyIface = new ethers.Interface(peAbi);
+      const txData = {
+        to: policyAddress,
+        data: policyIface.encodeFunctionData("whitelistContract", [
+          config.walletContractAddress!,
+          checksumTarget,
+        ]),
+        value: "0x0",
+      };
 
-      const { txHash } = await requestPhoneWalletSignature(
-        config.walletConnectProjectId,
+      const { client, session, account } = await requestWalletConnectApprovalSession(config, {
+        actionType: "policy_update",
+        signerMode: "owner_wallet",
         chainId,
-        () => ({
-          to: policyAddress,
-          data: policyIface.encodeFunctionData("whitelistContract", [
-            config.walletContractAddress!,
-            checksumTarget,
-          ]),
-          value: "0x0",
-        }),
-        `Approve: whitelist ${checksumTarget} on PolicyEngine for your wallet`,
-        telegramOpts,
-        config
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [txData],
+        ui: {
+          title: "Whitelist contract",
+          summary: `Approve: whitelist ${checksumTarget} on PolicyEngine for your wallet`,
+          risk: "high",
+        },
+        metadata: {
+          category: "policy",
+          sourceRuntime: "cli",
+          hardware: !!opts.hardware,
+        },
+      });
+
+      const txHash = await sendTransactionWithSession(client, session, account, chainId, txData);
 
       await provider.waitForTransaction(txHash);
 
@@ -2404,22 +2636,37 @@ export function registerWalletCommands(program: Command): void {
       console.log(`Current interceptor: ${currentInterceptor}`);
       console.log(`New interceptor:     ${checksumAddress}`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
+      const txData = {
+        to: config.walletContractAddress!,
+        data: ownerInterface.encodeFunctionData("setAuthorizedInterceptor", [checksumAddress]),
+        value: "0x0",
+      };
 
-      const { txHash } = await requestPhoneWalletSignature(
-        config.walletConnectProjectId,
+      const execution = await requestWalletGovernanceExecution(config, {
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        () => ({
-          to: config.walletContractAddress!,
-          data: ownerInterface.encodeFunctionData("setAuthorizedInterceptor", [checksumAddress]),
-          value: "0x0",
-        }),
-        `Approve: set X402 interceptor to ${checksumAddress}`,
-        telegramOpts,
-        config
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [txData],
+        ui: {
+          title: "Set X402 interceptor",
+          summary: `Approve: set X402 interceptor to ${checksumAddress}`,
+          risk: "high",
+        },
+        metadata: { sourceRuntime: "cli" },
+      });
+
+      if (execution.kind === "passkey") {
+        console.log("\n" + c.success + c.white(" X402 interceptor updated"));
+        console.log(" " + c.dim("Tx:") + " " + c.white(execution.txHash));
+        console.log(" " + c.dim("UserOp:") + " " + c.white(execution.userOpHash));
+        console.log(" " + c.dim("Interceptor:") + " " + c.white(checksumAddress));
+        return;
+      }
+
+      const { client, session, account } = execution.session;
+
+      const txHash = await sendTransactionWithSession(client, session, account, chainId, txData);
 
       await provider.waitForTransaction(txHash);
       console.log("\n" + c.success + c.white(" X402 interceptor updated"));
@@ -2469,22 +2716,40 @@ export function registerWalletCommands(program: Command): void {
       console.log(`Current limit:  ${currentLimit}`);
       console.log(`New limit:      ${limitEth} ETH (max ETH per rolling window)`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
+      const txData = {
+        to: config.walletContractAddress!,
+        data: ownerInterface.encodeFunctionData("setVelocityLimit", [limitWei]),
+        value: "0x0",
+      };
 
-      const { txHash } = await requestPhoneWalletSignature(
-        config.walletConnectProjectId,
+      const execution = await requestWalletGovernanceExecution(config, {
+        actionType: "policy_update",
+        signerMode: "owner_wallet",
         chainId,
-        () => ({
-          to: config.walletContractAddress!,
-          data: ownerInterface.encodeFunctionData("setVelocityLimit", [limitWei]),
-          value: "0x0",
-        }),
-        `Approve: set velocity limit to ${limitEth} ETH`,
-        telegramOpts,
-        config
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [txData],
+        ui: {
+          title: "Set velocity limit",
+          summary: `Approve: set velocity limit to ${limitEth} ETH`,
+          risk: "high",
+        },
+        metadata: {
+          category: "policy",
+          sourceRuntime: "cli",
+        },
+      });
+
+      if (execution.kind === "passkey") {
+        console.log("\n" + c.success + c.white(" Velocity limit updated"));
+        console.log(" " + c.dim("Tx:") + " " + c.white(execution.txHash));
+        console.log(" " + c.dim("UserOp:") + " " + c.white(execution.userOpHash));
+        console.log(" " + c.dim("New limit:") + " " + c.white(`${limitEth} ETH per rolling window`));
+        return;
+      }
+
+      const { client, session, account } = execution.session;
+
+      const txHash = await sendTransactionWithSession(client, session, account, chainId, txData);
 
       await provider.waitForTransaction(txHash);
       console.log("\n" + c.success + c.white(" Velocity limit updated"));
@@ -2494,9 +2759,8 @@ export function registerWalletCommands(program: Command): void {
 
   // ─── register-policy ───────────────────────────────────────────────────────
   //
-  // Calls registerWallet(walletAddress, ownerAddress) on PolicyEngine via
-  // executeContractCall on the ARC402Wallet. PolicyEngine requires msg.sender == wallet,
-  // so this must go through the wallet contract — not called directly by the owner key.
+  // Calls registerWallet(walletAddress, ownerAddress) directly on PolicyEngine
+  // from the owner wallet.
 
   wallet.command("register-policy")
     .description("Register this wallet on PolicyEngine (required before spend limits can be set)")
@@ -2538,44 +2802,51 @@ export function registerWalletCommands(program: Command): void {
         }
       }
 
+      const resolvedOwnerAddress = ownerAddress!;
+
       // Encode registerWallet(wallet, owner) calldata — called on PolicyEngine
       const policyInterface = new ethers.Interface([
         "function registerWallet(address wallet, address owner) external",
       ]);
       const registerCalldata = policyInterface.encodeFunctionData("registerWallet", [
         config.walletContractAddress,
-        ownerAddress,
+        resolvedOwnerAddress,
       ]);
-
-      const executeInterface = new ethers.Interface(ARC402_WALLET_EXECUTE_ABI);
 
       console.log(`\nWallet:       ${config.walletContractAddress}`);
       console.log(`PolicyEngine: ${policyAddress}`);
-      console.log(`Owner:        ${ownerAddress}`);
+      console.log(`Owner:        ${resolvedOwnerAddress}`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
+      const txData = {
+        to: policyAddress,
+        data: registerCalldata,
+        value: "0x0",
+      };
 
-      const { txHash } = await requestPhoneWalletSignature(
-        config.walletConnectProjectId,
+      const { client, session, account } = await requestWalletConnectApprovalSession(config, {
+        actionType: "policy_update",
+        signerMode: "owner_wallet",
         chainId,
-        () => ({
-          to: config.walletContractAddress!,
-          data: executeInterface.encodeFunctionData("executeContractCall", [{
-            target: policyAddress,
-            data: registerCalldata,
-            value: 0n,
-            minReturnValue: 0n,
-            maxApprovalAmount: 0n,
-            approvalToken: ethers.ZeroAddress,
-          }]),
-          value: "0x0",
-        }),
-        `Approve: register wallet on PolicyEngine`,
-        telegramOpts,
-        config
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [txData],
+        ui: {
+          title: "Register wallet on PolicyEngine",
+          summary: "Approve: register wallet on PolicyEngine",
+          risk: "high",
+        },
+        metadata: {
+          category: "policy",
+          sourceRuntime: "cli",
+          hardware: !!opts.hardware,
+        },
+      });
+
+      if (account.toLowerCase() !== resolvedOwnerAddress.toLowerCase()) {
+        console.error(`Connected wallet ${account} is not the wallet owner ${resolvedOwnerAddress}.`);
+        process.exit(1);
+      }
+
+      const txHash = await sendTransactionWithSession(client, session, account, chainId, txData);
 
       await provider.waitForTransaction(txHash);
       console.log("\n" + c.success + c.white(" Wallet registered on PolicyEngine"));
@@ -2632,23 +2903,33 @@ export function registerWalletCommands(program: Command): void {
       console.log(`  Timelock:        ${timelockStatus}`);
       console.log(`\nCancelling pending registry upgrade to: ${pendingRegistry}`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
       const walletInterface = new ethers.Interface(ARC402_WALLET_REGISTRY_ABI);
-      const { txHash } = await requestPhoneWalletSignature(
-        config.walletConnectProjectId,
+      const txData = {
+        to: config.walletContractAddress!,
+        data: walletInterface.encodeFunctionData("cancelRegistryUpdate", []),
+        value: "0x0",
+      };
+      const execution = await requestWalletGovernanceExecution(config, {
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        () => ({
-          to: config.walletContractAddress!,
-          data: walletInterface.encodeFunctionData("cancelRegistryUpdate", []),
-          value: "0x0",
-        }),
-        "Approve registry upgrade cancellation on ARC402Wallet",
-        telegramOpts,
-        config
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [txData],
+        ui: {
+          title: "Cancel registry upgrade",
+          summary: "Approve registry upgrade cancellation on ARC402Wallet",
+          risk: "high",
+        },
+        metadata: { sourceRuntime: "cli" },
+      });
+      if (execution.kind === "passkey") {
+        console.log("\n" + c.success + c.white(" Registry upgrade cancelled"));
+        console.log(" " + c.dim("Tx:") + " " + c.white(execution.txHash));
+        console.log(" " + c.dim("UserOp:") + " " + c.white(execution.userOpHash));
+        return;
+      }
+      const { client, session, account } = execution.session;
+      const txHash = await sendTransactionWithSession(client, session, account, chainId, txData);
 
       console.log("\n" + c.success + c.white(" Registry upgrade cancelled"));
       console.log(" " + c.dim("Tx:") + " " + c.white(txHash));
@@ -2779,18 +3060,6 @@ export function registerWalletCommands(program: Command): void {
       if (!confirmed) { console.log("Aborted."); return; }
 
       // ── Step 6: connect WalletConnect once, send all transactions ─────────
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
-      console.log("\nConnecting wallet...");
-      const { client, session, account } = await connectPhoneWallet(
-        config.walletConnectProjectId,
-        chainId,
-        config,
-        { telegramOpts, prompt: "Approve governance setup transactions on ARC402Wallet" }
-      );
-
       const provider = new ethers.JsonRpcProvider(config.rpcUrl);
       const ownerInterface = new ethers.Interface(ARC402_WALLET_OWNER_ABI);
       const guardianInterface = new ethers.Interface(ARC402_WALLET_GUARDIAN_ABI);
@@ -2814,6 +3083,36 @@ export function registerWalletCommands(program: Command): void {
       try {
         govAlreadyDefiEnabled = await policyGovContract.defiAccessEnabled(config.walletContractAddress!);
       } catch { /* assume not enabled */ }
+
+      const expectedApprovalCount =
+        (govAlreadyRegistered ? 0 : 1) +
+        (govAlreadyDefiEnabled ? 0 : 1) +
+        1 +
+        (guardianWallet ? 1 : 0) +
+        categories.length;
+
+      console.log("\nConnecting wallet...");
+      const { client, session, account } = await requestWalletConnectApprovalSession(config, {
+        actionType: "policy_update",
+        signerMode: "owner_wallet",
+        chainId,
+        walletAddress: config.walletContractAddress,
+        txs: Array.from({ length: expectedApprovalCount }, () => ({
+          to: config.walletContractAddress!,
+          data: "0x",
+          value: "0x0",
+        })),
+        ui: {
+          title: "Governance setup",
+          summary: "Approve governance setup transactions on ARC402Wallet",
+          risk: "high",
+        },
+        metadata: {
+          category: "policy",
+          expectedApprovalCount,
+          sourceRuntime: "cli",
+        },
+      });
 
       if (!govAlreadyRegistered) {
         const registerCalldata = govInterface.encodeFunctionData("registerWallet", [config.walletContractAddress!, account]);
@@ -2960,10 +3259,6 @@ export function registerWalletCommands(program: Command): void {
       console.log(`\nWallet:      ${config.walletContractAddress}`);
       console.log(`Machine key: ${checksumKey}`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
       const walletInterface = new ethers.Interface(machineKeyAbi);
       const txData = {
         to: config.walletContractAddress,
@@ -2971,15 +3266,33 @@ export function registerWalletCommands(program: Command): void {
         value: "0x0",
       };
 
-      const { client, session, account } = await connectPhoneWallet(
-        config.walletConnectProjectId,
+      const execution = await requestWalletGovernanceExecution(config, {
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        config,
-        {
-          telegramOpts,
-          prompt: `Authorize machine key ${checksumKey} on ARC402Wallet — allows autonomous protocol ops`,
-        }
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [txData],
+        ui: {
+          title: "Authorize machine key",
+          summary: `Authorize machine key ${checksumKey} on ARC402Wallet — allows autonomous protocol ops`,
+          risk: "high",
+        },
+        metadata: { sourceRuntime: "cli" },
+      });
+
+      if (execution.kind === "passkey") {
+        const confirmed = await walletContract.authorizedMachineKeys(checksumKey);
+        console.log("\n" + c.success + c.white(` Machine key authorized: ${confirmed ? "YES" : "NO"}`));
+        renderTree([
+          { label: "Wallet", value: config.walletContractAddress ?? "" },
+          { label: "Machine key", value: checksumKey },
+          { label: "Tx", value: execution.txHash },
+          { label: "UserOp", value: execution.userOpHash, last: true },
+        ]);
+        return;
+      }
+
+      const { client, session, account } = execution.session;
 
       console.log("\n" + c.success + c.white(` Connected: ${account}`));
       console.log(c.dim("Sending authorizeMachineKey transaction..."));
@@ -3051,26 +3364,44 @@ export function registerWalletCommands(program: Command): void {
       console.log(`\nWallet:      ${config.walletContractAddress}`);
       console.log(`Revoking:    ${checksumKey}`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
       const walletInterface = new ethers.Interface(ARC402_WALLET_MACHINE_KEY_ABI);
-      const { client, session, account } = await connectPhoneWallet(
-        config.walletConnectProjectId,
+      const txData = {
+        to: config.walletContractAddress,
+        data: walletInterface.encodeFunctionData("revokeMachineKey", [checksumKey]),
+        value: "0x0",
+      };
+      const execution = await requestWalletGovernanceExecution(config, {
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        config,
-        { telegramOpts, prompt: `Revoke machine key ${checksumKey} on ARC402Wallet` }
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [txData],
+        ui: {
+          title: "Revoke machine key",
+          summary: `Revoke machine key ${checksumKey} on ARC402Wallet`,
+          risk: "high",
+        },
+        metadata: { sourceRuntime: "cli" },
+      });
+
+      if (execution.kind === "passkey") {
+        const stillAuthorized = await walletContract.authorizedMachineKeys(checksumKey);
+        console.log("\n" + c.success + c.white(` Machine key revoked: ${stillAuthorized ? "NO (still authorized — check tx)" : "YES"}`));
+        renderTree([
+          { label: "Wallet", value: config.walletContractAddress ?? "" },
+          { label: "Machine key", value: checksumKey },
+          { label: "Tx", value: execution.txHash },
+          { label: "UserOp", value: execution.userOpHash, last: true },
+        ]);
+        return;
+      }
+
+      const { client, session, account } = execution.session;
 
       console.log("\n" + c.success + c.white(` Connected: ${account}`));
       console.log(c.dim("Sending revokeMachineKey transaction..."));
 
-      const hash = await sendTransactionWithSession(client, session, account, chainId, {
-        to: config.walletContractAddress,
-        data: walletInterface.encodeFunctionData("revokeMachineKey", [checksumKey]),
-        value: "0x0",
-      });
+      const hash = await sendTransactionWithSession(client, session, account, chainId, txData);
 
       console.log("\n" + c.dim("Transaction submitted:") + " " + c.white(hash));
       console.log(c.dim("Waiting for confirmation..."));
@@ -3631,7 +3962,7 @@ export function registerWalletCommands(program: Command): void {
         console.error("walletConnectProjectId not set. Run `arc402 config set walletConnectProjectId <id>`.");
         process.exit(1);
       }
-      const migrationRegistryAddress = config.migrationRegistryAddress ?? "0x4821D8A590eD4DbEf114fCA3C2d9311e81D576DF";
+      const migrationRegistryAddress = getCanonicalNetworkAddress(config, "migrationRegistryAddress");
 
       let oldWallet: string;
       let newWallet: string;
@@ -3661,18 +3992,21 @@ export function registerWalletCommands(program: Command): void {
       ]);
       const callData = mrIface.encodeFunctionData("registerMigration", [oldWallet, newWallet]);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
-      const { txHash } = await requestPhoneWalletSignature(
-        config.walletConnectProjectId,
+      const txData = { to: migrationRegistryAddress, data: callData, value: "0x0" };
+      const { client, session, account } = await requestWalletConnectApprovalSession(config, {
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        () => ({ to: migrationRegistryAddress, data: callData, value: "0x0" }),
-        `Approve: migrate wallet identity ${oldWallet.slice(0, 10)}... → ${newWallet.slice(0, 10)}...`,
-        telegramOpts,
-        config
-      );
+        txs: [txData],
+        ui: {
+          title: "Register wallet migration",
+          summary: `Approve: migrate wallet identity ${oldWallet.slice(0, 10)}... → ${newWallet.slice(0, 10)}...`,
+          risk: "high",
+        },
+        metadata: { sourceRuntime: "cli" },
+      });
+
+      const txHash = await sendTransactionWithSession(client, session, account, chainId, txData);
 
       await provider.waitForTransaction(txHash);
 
@@ -3927,25 +4261,30 @@ export function registerWalletCommands(program: Command): void {
       console.log(`pubKeyX:  ${pubKeyX}`);
       console.log(`pubKeyY:  ${pubKeyY}`);
 
-      const telegramOpts = config.telegramBotToken && config.telegramChatId
-        ? { botToken: config.telegramBotToken, chatId: config.telegramChatId, threadId: config.telegramThreadId }
-        : undefined;
-
       const txData = {
         to: config.walletContractAddress,
         data: walletInterface.encodeFunctionData("setPasskey", [pubKeyX, pubKeyY]),
         value: "0x0",
       };
 
-      const { client, session, account } = await connectPhoneWallet(
-        config.walletConnectProjectId,
+      const approval = await requestOwnerApproval({
+        actionType: "custom_tx",
+        signerMode: "owner_wallet",
         chainId,
-        config,
-        {
-          telegramOpts,
-          prompt: `Activate passkey (Face ID) on ARC402Wallet — enables P256 governance signing`,
-        }
-      );
+        walletAddress: config.walletContractAddress,
+        txs: [txData],
+        ui: {
+          title: "Activate passkey",
+          summary: "Activate passkey (Face ID) on ARC402Wallet — enables P256 governance signing",
+          risk: "high",
+        },
+        metadata: { sourceRuntime: "cli" },
+      }, config);
+      if (approval.status !== "approved" || !approval.session || approval.session.kind !== "walletconnect") {
+        console.error(c.failure + " " + c.red(approval.error ?? "Approval transport failed."));
+        process.exit(1);
+      }
+      const { client, session, account } = approval.session;
 
       console.log("\n" + c.success + c.white(` Connected: ${account}`));
       console.log(c.dim("Sending setPasskey transaction..."));

@@ -7,7 +7,7 @@ import { execSync, spawn, spawnSync } from "child_process";
 import chalk from "chalk";
 import prompts from "prompts";
 import { ethers } from "ethers";
-import { configExists, loadConfig, saveConfig, getSubdomainApi, NETWORK_DEFAULTS } from "../config";
+import { configExists, getCanonicalAgentRegistryAddress, loadConfig, saveConfig, getSubdomainApi, NETWORK_DEFAULTS } from "../config";
 import { startSpinner } from "../ui/spinner";
 import { c } from "../ui/colors";
 import { AGENT_REGISTRY_ABI } from "../abis";
@@ -395,7 +395,8 @@ export function registerSetupCommands(program: Command): void {
       const onboardCheckSpin = startSpinner("Checking onboarding state…");
       let onboardNeeded = true;
       try {
-        const policyAddress = config.policyEngineAddress ?? "0x9449B15268bE7042C0b473F3f711a41A29220866";
+        const policyAddress = NETWORK_DEFAULTS[config.network]?.policyEngineAddress;
+        if (!policyAddress) throw new Error(`Missing canonical PolicyEngine address for network: ${config.network}`);
         const { provider: onboardProvider } = await getClient(config);
         const peContract = new ethers.Contract(policyAddress, ["function categoryLimits(address,string) view returns (uint256)"], onboardProvider);
         const hireLimit: bigint = await peContract.categoryLimits(config.walletContractAddress, "hire").catch(() => 0n);
@@ -424,14 +425,7 @@ export function registerSetupCommands(program: Command): void {
 
       console.log(c.white("\nPhase 3: Agent Registration"));
 
-      const registryAddress =
-        config.agentRegistryV2Address ??
-        (NETWORK_DEFAULTS[config.network] as unknown as Record<string, string | undefined>)?.agentRegistryV2Address;
-      if (!registryAddress) {
-        console.error(" " + c.failure + " " + c.red("agentRegistryV2Address missing in config."));
-        console.error(c.dim("  Run: arc402 config set agentRegistryV2Address <address>"));
-        process.exit(1);
-      }
+      const registryAddress = getCanonicalAgentRegistryAddress(config);
 
       const { provider: regProvider, signer } = await requireSigner(config);
       const registry = new ethers.Contract(registryAddress, AGENT_REGISTRY_ABI, regProvider);

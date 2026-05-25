@@ -57,7 +57,7 @@ export function generateReceipt(params: {
 
   // Compute policy hash
   let policyHash = "0x0";
-  const policyPath = params.policyFilePath ?? path.join(ARC402_DIR, "openshell-policy.yaml");
+  const policyPath = params.policyFilePath ?? path.join(ARC402_DIR, "workroom-policy.yaml");
   if (fs.existsSync(policyPath)) {
     const content = fs.readFileSync(policyPath, "utf-8");
     policyHash = "0x" + crypto.createHash("sha256").update(content).digest("hex");
@@ -208,7 +208,7 @@ export function cleanJobDirectory(agreementId: string): void {
  * This hash can be registered in AgentRegistry for verifiability.
  */
 export function computePolicyHash(policyFilePath?: string): string {
-  const policyPath = policyFilePath ?? path.join(ARC402_DIR, "openshell-policy.yaml");
+  const policyPath = policyFilePath ?? path.join(ARC402_DIR, "workroom-policy.yaml");
   if (!fs.existsSync(policyPath)) return "0x0";
   const content = fs.readFileSync(policyPath, "utf-8");
   return "0x" + crypto.createHash("sha256").update(content).digest("hex");

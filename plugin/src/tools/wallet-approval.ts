@@ -9,6 +9,7 @@
  */
 import { SignClient } from "@walletconnect/sign-client";
 import { KeyValueStorage } from "@walletconnect/keyvaluestorage";
+import fs from "fs";
 import path from "path";
 import os from "os";
 import type { ToolResult } from "./hire.js";
@@ -23,10 +24,30 @@ process.on("unhandledRejection", (reason: unknown) => {
 
 type SignClientT = Awaited<ReturnType<typeof SignClient.init>>;
 
+function resolveWalletConnectProjectId(): string {
+  if (process.env.ARC402_WALLETCONNECT_PROJECT_ID) return process.env.ARC402_WALLETCONNECT_PROJECT_ID;
+  if (process.env.NEXT_PUBLIC_WC_PROJECT_ID) return process.env.NEXT_PUBLIC_WC_PROJECT_ID;
+
+  try {
+    const cliConfigPath = path.join(os.homedir(), ".arc402", "config.json");
+    if (fs.existsSync(cliConfigPath)) {
+      const raw = JSON.parse(fs.readFileSync(cliConfigPath, "utf8")) as {
+        walletConnectProjectId?: string;
+        approval?: { walletConnectProjectId?: string };
+      };
+      return raw.approval?.walletConnectProjectId ?? raw.walletConnectProjectId ?? WC_PROJECT_ID;
+    }
+  } catch {
+    // fall through to default constant
+  }
+
+  return WC_PROJECT_ID;
+}
+
 async function makeSignClient(): Promise<SignClientT> {
   const storagePath = path.join(os.homedir(), ".arc402", "wc-storage.json");
   return SignClient.init({
-    projectId: WC_PROJECT_ID,
+    projectId: resolveWalletConnectProjectId(),
     metadata: {
       name: "ARC-402 Plugin",
       description: "ARC-402 Protocol Plugin",

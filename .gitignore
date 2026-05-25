@@ -206,3 +206,13 @@ docs/release-prep-*.md
 docs/prerelease-*.md
 docs/phase*-verification.md
 docs/release-readiness-report-*.md
+
+# npm pack artifacts
+*.tgz
+# Internal engineering / release process docs (not public operator surface)
+docs/approval-broker-spec.md
+docs/approval-ux.md
+docs/cloudflare-pages-runbook.md
+docs/feedback-followup-*.md
+docs/spark-feedback-response-*.md
+docs/truth-sync-checklist.md

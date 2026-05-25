@@ -7,8 +7,6 @@ import { ethers } from "ethers";
 import { AGENT_REGISTRY_ABI } from "./abis";
 import * as dns from "dns/promises";
 
-export const DEFAULT_REGISTRY_ADDRESS = "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865";
-
 // ─── SSRF protection ──────────────────────────────────────────────────────────
 
 const RFC1918_RANGES = [
@@ -81,7 +79,7 @@ export async function validateEndpointUrl(endpoint: string): Promise<void> {
 export async function resolveAgentEndpoint(
   address: string,
   provider: ethers.Provider,
-  registryAddress = DEFAULT_REGISTRY_ADDRESS
+  registryAddress: string
 ): Promise<string> {
   const registry = new ethers.Contract(registryAddress, AGENT_REGISTRY_ABI, provider);
   const agentData = await registry.getAgent(address);

@@ -94,7 +94,7 @@ export function resolveConfig(raw: PluginConfig): ResolvedConfig {
   const resolved: ResolvedConfig = {
     ...raw,
     network: raw.network ?? "base-mainnet",
-    rpcUrl: isMainnet ? "https://mainnet.base.org" : "https://sepolia.base.org",
+    rpcUrl: isMainnet ? "https://developer-access-mainnet.base.org" : "https://sepolia.base.org",
     chainId: isMainnet ? 8453 : 84532,
     contracts: {
       serviceAgreement: contracts.serviceAgreement,

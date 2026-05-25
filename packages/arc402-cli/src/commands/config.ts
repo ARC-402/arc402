@@ -50,6 +50,7 @@ export function registerConfigCommands(program: Command): void {
       ...(existing.telegramBotToken ? { telegramBotToken: existing.telegramBotToken } : {}),
       ...(existing.telegramChatId ? { telegramChatId: existing.telegramChatId } : {}),
       ...(existing.telegramThreadId ? { telegramThreadId: existing.telegramThreadId } : {}),
+      ...(existing.approval ? { approval: existing.approval } : {}),
       ...(sameNetwork && existing.walletContractAddress ? { walletContractAddress: existing.walletContractAddress } : {}),
       ...(sameNetwork && existing.ownerAddress ? { ownerAddress: existing.ownerAddress } : {}),
     };

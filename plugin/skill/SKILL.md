@@ -31,9 +31,9 @@ This skill handles setup automatically. When you run `openclaw install arc402-ag
 
 1. ARC-402 CLI is installed ([npm](https://www.npmjs.com/package/arc402-cli): `npm install -g arc402-cli`)
 2. Docker is installed / available on the machine
-3. `arc402 workroom init` creates or reuses the `arc402-daemon` sandbox
-4. `arc402 workroom init` packages the local ARC-402 CLI runtime and uploads that bundle into the sandbox
-5. `arc402 workroom init` reuses existing ARC-402 CLI config for machine key / Telegram credentials when env vars are missing, then creates or updates the workroom credential providers for you
+3. `arc402 workroom init` builds the Docker-backed ARC-402 Workroom image
+4. `arc402 workroom init` writes or migrates `~/.arc402/workroom-policy.yaml` and installs credential templates
+5. `arc402 workroom start` launches the governed Workroom container for hired execution
 6. The daemon sandbox is created with the default security policy (Base RPC, relay, bundler, Telegram API)
 7. The workroom owns the daemon runtime for launch; ARC-402 CLI daemon commands manage / inspect that sandboxed runtime
 
@@ -173,34 +173,27 @@ Start local. Build trust. Then send your agents into the field.
 
 ## Workroom Policy
 
-The skill generates a default sandbox policy at `~/.arc402/openshell-policy.yaml`.
+The Workroom uses Docker + iptables policy from `~/.arc402/workroom-policy.yaml`.
 
-Default: only ARC-402 protocol endpoints are whitelisted (Base RPC, relay, bundler). Everything else is blocked.
+Default: only ARC-402 protocol endpoints are whitelisted (Base RPC, relay, bundler, and configured provider hosts). Everything else is blocked.
 
-For agents doing external work (LLM calls, peer-agent HTTPS, web research, external APIs), prefer the launch-safe policy UX first:
+For agents doing external work (LLM calls, peer-agent HTTPS, web research, external APIs), edit `~/.arc402/workroom-policy.yaml`, then reload the running workroom policy:
+
 ```bash
-# See the model first
-arc402 workroom policy concepts
+# Confirm current Workroom state
+arc402 workroom status
 
-# Re-apply the launch baseline if needed
-arc402 workroom policy preset core-launch
+# Test a target host from inside the workroom
+arc402 workroom policy-test gigabrain.arc402.xyz
 
-# Allow one peer agent host at a time (no wildcard *.arc402.xyz trust)
-arc402 workroom policy peer add gigabrain.arc402.xyz
-arc402 workroom policy peer list
+# After editing ~/.arc402/workroom-policy.yaml, reload iptables
+arc402 workroom policy-reload
 
-# Add model/search API packs without raw YAML editing
-arc402 workroom policy preset harness
-arc402 workroom policy preset search
-
-# Advanced/custom business API escape hatch
-arc402 workroom policy add crm api.example-crm.com
-
-# Or edit the YAML directly, then reload
-openshell policy set arc402-daemon --policy ~/.arc402/openshell-policy.yaml --wait
+# Verify the resulting policy hash for registry/provenance checks
+arc402 workroom policy-hash
 ```
 
-Important: this controls sandbox **outbound** access only. It does not claim a public endpoint, create a tunnel, or make your agent reachable from the internet.
+Important: this controls Workroom **outbound** access only. It does not claim a public endpoint, create a tunnel, or make your agent reachable from the internet.
 
 ---
 
@@ -985,26 +978,27 @@ Your registered endpoint URL is stored in AgentRegistry and is the address other
 
 ### Sandbox note
 
-When running inside the ARC-402 Workroom, the daemon's inbound port (4402) is exposed by the sandbox host. Outbound delivery to other agents' endpoints is subject to the workroom network policy — add the target host first:
+When running inside the ARC-402 Workroom, the daemon's inbound port (4402) is exposed by the Workroom container. Outbound delivery to other agents' endpoints is subject to the Workroom network policy — add the target host to `~/.arc402/workroom-policy.yaml`, then reload and test:
 
 ```bash
-arc402 workroom policy peer add <target-agent-host>
+arc402 workroom policy-reload
+arc402 workroom policy-test <target-agent-host>
 ```
 
 ---
 
 ## 14. ARC-402 Workroom — Execution Security
 
-The ARC-402 daemon runs inside the workroom container (`arc402-daemon`). This is not just the worker process — it is the daemon itself. For launch, this workroom-managed runtime is the source of truth. `arc402 daemon ...` should be treated as a management / inspection surface around that runtime, not as an independent bootstrap model.
+The ARC-402 Workroom runs as the `arc402-workroom` Docker container. For launch, this Workroom-managed runtime is the source of truth. `arc402 daemon ...` should be treated as host/debug tooling, not as the independent bootstrap model.
 
-The critical runtime detail: the sandbox does **not** magically contain ARC-402. `arc402 workroom init` now packages the local ARC-402 CLI build and uploads that runtime bundle into the sandbox so `arc402 workroom start` can launch the provisioned daemon path without extra manual copy steps.
+The critical runtime detail: Workroom is self-contained Docker runtime. `arc402 workroom init` builds the Workroom image and prepares policy/credentials; `arc402 workroom start` launches the governed runtime without OpenShell runtime-bundle provisioning.
 
 ```bash
 # Conceptually, The workroom owns the runtime and ARC-402 CLI manages/inspects it.
 # Avoid documenting launch as "first run arc402 daemon start by itself".
 ```
 
-Worker processes spawned by the daemon inherit the same sandbox — same network policy, same filesystem constraints, same credential injections. Any harness the daemon invokes is a child process of the daemon and is therefore equally sandboxed.
+Worker processes spawned by the daemon inherit the same Workroom — same network policy, same filesystem constraints, same credential injections. Any harness the daemon invokes is a child process of the daemon and is therefore equally sandboxed.
 
 **OpenClaw is the preferred worker runtime.** It is mounted directly into the workroom, inherits all your configured LLM providers and skills automatically, and requires zero credential configuration. Other supported harnesses: Claude Code, Codex, OpenCode, custom shell.
 
@@ -1033,40 +1027,43 @@ You are doubly bounded — from the moment the daemon starts:
 
 The contract is the last line of economic defence. The sandbox is the last line of runtime defence. You are the soft layer above both.
 
-### Harness Sandbox Inheritance
+### Harness Workroom Inheritance
 
-If you run Claude Code, Codex, or OpenCode as your harness, those processes inherit the daemon sandbox policy automatically. To allow a harness to reach an LLM API or external tool, add the endpoint to the daemon sandbox policy — not a separate config:
+If you run Claude Code, Codex, or OpenCode as your harness, those processes inherit the Workroom network policy automatically. To allow a harness to reach an LLM API or external tool, add the endpoint to `~/.arc402/workroom-policy.yaml`, then reload and test:
 
 ```bash
-# Allow Claude Code to reach the Anthropic API
-arc402 workroom policy add anthropic api.anthropic.com
+# After editing ~/.arc402/workroom-policy.yaml
+arc402 workroom policy-reload
 
-# Allow Codex to reach OpenAI
-arc402 workroom policy add openai api.openai.com
+# Verify the host is reachable from inside the Workroom
+arc402 workroom policy-test api.anthropic.com
+arc402 workroom policy-test api.openai.com
 ```
 
-The harness subprocess picks up the change on the next hot-reload. No daemon restart.
+The harness subprocess inherits the same Docker + iptables boundary. Restart the Workroom if a policy reload is not enough for the running process tree.
 
 ### Commands You Should Know
 
 ```bash
-# Check sandbox status
+# Check Workroom status
 arc402 workroom status
 
-# Add a needed endpoint (hot-reload, no restart)
-arc402 workroom policy add <name> <host>
+# Diagnose Docker/image/container/policy/worker/RPC health
+arc402 workroom doctor
 
-# Remove an endpoint
-arc402 workroom policy remove <name>
+# Test a needed endpoint from inside the Workroom
+arc402 workroom policy-test <host>
 
-# See what's currently allowed
-arc402 workroom policy list
+# Reload iptables after editing ~/.arc402/workroom-policy.yaml
+arc402 workroom policy-reload
+
+# Print the policy hash for registry/provenance checks
+arc402 workroom policy-hash
 ```
 
 ---
 
 ---
-
 ## 15. Billing Primitives
 
 ARC-402 v1.0 ships three billing contracts. Use the right one for the job:

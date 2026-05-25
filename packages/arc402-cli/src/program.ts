@@ -44,6 +44,7 @@ import { registerStatusCommand } from "./commands/status";
 import { registerAuthCommand } from "./commands/auth";
 import { registerSecurityCommand } from "./commands/security";
 import { registerLifecycleCommand } from "./commands/lifecycle";
+import { registerApprovalCommands } from "./commands/approvals";
 import { registerTelegramCommands } from "./commands/telegram";
 import reputation from "./commands/reputation.js";
 import policy from "./commands/policy.js";
@@ -61,6 +62,7 @@ export function createProgram(): Command {
   registerStatusCommand(program);
   registerAuthCommand(program);
   registerLifecycleCommand(program);
+  registerApprovalCommands(program);
   registerConfigCommands(program);
   registerHandshakeCommand(program);
   registerAgentCommands(program);
@@ -78,7 +80,21 @@ export function createProgram(): Command {
   registerChannelCommands(program);
   registerRelayCommands(program);
   registerDaemonCommands(program);
-  registerOpenShellCommands(program);
+  if (process.env.ARC402_ENABLE_LEGACY_OPENSHELL === "1") {
+    registerOpenShellCommands(program);
+  } else {
+    program
+      .command("openshell [args...]", { hidden: true })
+      .allowUnknownOption(true)
+      .allowExcessArguments(true)
+      .description("Legacy OpenShell integration is disabled by default. Use Workroom.")
+      .action(() => {
+        console.error("OpenShell is no longer part of the default ARC-402 operator path.");
+        console.error("Use: arc402 workroom init && arc402 workroom start && arc402 workroom doctor");
+        console.error("Legacy escape hatch: ARC402_ENABLE_LEGACY_OPENSHELL=1 arc402 openshell ...");
+        process.exit(1);
+      });
+  }
   registerWorkroomCommands(program);
   registerArenaHandshakeCommands(program);
   registerTrustCommand(program);
