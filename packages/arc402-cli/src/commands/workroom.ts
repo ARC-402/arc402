@@ -159,7 +159,7 @@ function buildImage(useGpu = false): boolean {
   // Pass current CLI version as build arg — installs matching arc402-cli inside the Linux container.
   // Also stamp the version as a label so imageVersionMatches() can detect stale images on future runs.
   const version = getCliVersion();
-  const daemonVersion = "0.9.1";
+  const daemonVersion = "0.9.5";
   console.log(`Building ARC-402 Workroom image (${dockerfile}, arc402-cli@${version}, @arc402/daemon@${daemonVersion})...`);
   const result = spawnSync("docker", [
     "build",

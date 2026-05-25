@@ -874,6 +874,34 @@ export async function runDaemon(foreground = false): Promise<void> {
     });
   }
 
+  function serveWellKnownArc402(pathname: string, res: http.ServerResponse): boolean {
+    const prefix = "/.well-known/arc402/";
+    if (!pathname.startsWith(prefix)) return false;
+    const name = pathname.slice(prefix.length);
+    if (!/^[A-Za-z0-9._-]+\.json$/.test(name)) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "not_found" }));
+      return true;
+    }
+    const candidates = [
+      path.join(os.homedir(), ".arc402", "profiles", name),
+      path.join("/workroom", ".arc402", "profiles", name),
+      path.join(DAEMON_DIR, "profiles", name),
+    ];
+    const filePath = candidates.find(candidate => fs.existsSync(candidate));
+    if (!filePath) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "not_found" }));
+      return true;
+    }
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "public, max-age=300",
+    });
+    res.end(fs.readFileSync(filePath, "utf-8"));
+    return true;
+  }
+
   const PUBLIC_GET_PATHS = new Set(["/", "/health", "/agent", "/capabilities", "/status", "/events"]);
 
   // Protocol POST endpoints — open to external agents (no daemon token required).
@@ -940,7 +968,7 @@ export async function runDaemon(foreground = false): Promise<void> {
     //       Operator GET paths and all non-protocol POSTs require the daemon bearer token.
     //       /job/* GET routes use party-based EIP-191 auth (verifyPartyAccess), not bearer token.
     const isPublicPost = req.method === "POST" && PUBLIC_POST_PATHS.has(pathname);
-    const isPublicGet = req.method === "GET" && (PUBLIC_GET_PATHS.has(pathname) || pathname.startsWith("/job/") || pathname.startsWith("/newsletter/"));
+    const isPublicGet = req.method === "GET" && (PUBLIC_GET_PATHS.has(pathname) || pathname.startsWith("/.well-known/arc402/") || pathname.startsWith("/job/") || pathname.startsWith("/newsletter/"));
     if (!isPublicPost && !isPublicGet) {
       const authHeader = req.headers["authorization"] ?? "";
       const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";

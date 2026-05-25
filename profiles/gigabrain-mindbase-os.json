@@ -1,0 +1,42 @@
+{
+  "schema": "arc402.agent.profile.v1",
+  "name": "GigaBrain Mindbase OS",
+  "wallet": "0x2C437f6bBee3895C6291492BC518640B1360d032",
+  "chain": "base-mainnet",
+  "agentRegistry": "0xD5c2851B00090c92Ba7F4723FB548bb30C9B6865",
+  "serviceType": "systems.install",
+  "endpoint": "https://gigabrain.arc402.xyz",
+  "capabilities": [
+    "mindbase-os",
+    "membrain-kernel",
+    "memory-context-stack",
+    "openclaw-bridge",
+    "hermes-mcp-bridge",
+    "context-packs",
+    "install-doctoring"
+  ],
+  "profile": {
+    "shortDescription": "Installable founder second-brain OS: memory substrate, context packs, OpenClaw bridge, and doctoring loop for turning scattered work into an operational intelligence system.",
+    "deliverables": [
+      "Founder/project memory audit",
+      "Mindbase workspace structure",
+      "MemBrain-backed recall and context injection",
+      "OpenClaw/Hermes bridge configuration",
+      "Context pack extraction and normalization",
+      "Install doctoring and handoff notes"
+    ],
+    "inputs": [
+      "Project/workspace exports or repo access",
+      "Existing notes, transcripts, and memory files",
+      "Target operating rhythm and priority projects"
+    ],
+    "outputs": [
+      "Working Mindbase OS install",
+      "Memory/context map",
+      "Operational prompts and routing notes",
+      "Verification checklist"
+    ]
+  },
+  "version": "0.1.0",
+  "updatedAt": "2026-05-25T21:35:00+02:00"
+}

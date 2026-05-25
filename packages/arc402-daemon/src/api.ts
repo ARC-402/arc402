@@ -306,6 +306,26 @@ function collectInboundTaskTexts(body: unknown): string[] {
   return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
 }
 
+
+function serveWellKnownArc402(name: string, res: Response): void {
+  if (!/^[A-Za-z0-9._-]+\.json$/.test(name)) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  const candidates = [
+    path.join(os.homedir(), ".arc402", "profiles", name),
+    path.join("/workroom", ".arc402", "profiles", name),
+  ];
+  const filePath = candidates.find(candidate => fs.existsSync(candidate));
+  if (!filePath) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=300");
+  res.send(fs.readFileSync(filePath, "utf-8"));
+}
+
 export function createApiServer(apiConfig: ApiConfig): express.Express {
   const app = express();
   const { db, rpcUrl, policyEngineAddress } = apiConfig;
@@ -347,6 +367,11 @@ export function createApiServer(apiConfig: ApiConfig): express.Express {
   // ── Health ──────────────────────────────────────────────────────────────────
   app.get("/health", (_req, res) => {
     res.json({ ok: true, wallet: apiConfig.walletAddress });
+  });
+
+  // ── Public agent metadata ───────────────────────────────────────────────────
+  app.get("/.well-known/arc402/:name", (req: Request, res: Response): void => {
+    serveWellKnownArc402(req.params.name, res);
   });
 
   // ── SSE ─────────────────────────────────────────────────────────────────────
