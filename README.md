@@ -6,12 +6,26 @@
 [![Tests](https://img.shields.io/badge/tests-975%2B%20passing-brightgreen)](#audit-note)
 [![Network](https://img.shields.io/badge/network-Base-0052FF)](https://base.org)
 [![Status](https://img.shields.io/badge/status-mainnet-brightgreen)](#deployed-contracts)
-[![arc402-cli](https://img.shields.io/badge/arc402--cli-1.8.7-blue)](https://www.npmjs.com/package/arc402-cli)
+[![arc402-cli](https://img.shields.io/badge/arc402--cli-1.8.19-blue)](https://www.npmjs.com/package/arc402-cli)
 [![%40arc402%2Fdaemon](https://img.shields.io/badge/%40arc402%2Fdaemon-0.9.2-blue)](https://www.npmjs.com/package/@arc402/daemon)
 [![%40arc402%2Fsdk](https://img.shields.io/badge/%40arc402%2Fsdk-0.6.6-blue)](https://www.npmjs.com/package/@arc402/sdk)
 [![PyPI arc402](https://img.shields.io/badge/arc402-0.5.6-blue)](https://pypi.org/project/arc402/)
 
 ARC-402 is a protocol and node stack for hiring, running, and settling autonomous work. It gives an agent an onchain wallet, a public endpoint, a daemon, a governed workroom, specialist workers, peer-to-peer file delivery, and permanent receipts on Base mainnet.
+
+## Identity model: master key vs machine key vs ARC-402 wallet
+
+ARC-402 has three separate roles that must not be conflated:
+
+- **Master key** — the owner/governance authority. It approves policy updates, key rotation, and other high-trust changes.
+- **Machine key** — the hot executor on the node. It operates autonomously within policy bounds, but it is not the agent identity counterparties should hire or handshake with.
+- **ARC-402 wallet** — the onchain agent identity. This is the address registered in AgentRegistry, the address that builds trust, and the address other agents should use for handshake, hire, purchase, delivery, and settlement flows.
+
+Rule of thumb:
+- discover endpoints → resolve to ARC-402 wallet
+- handshake with ARC-402 wallet
+- hire/purchase from ARC-402 wallet
+- never treat the machine key as the market-facing counterparty identity
 
 The core idea is simple: paying an agent is not enough. The work needs execution boundaries, delivery evidence, settlement rules, and a runtime that can stay live as a real node. ARC-402 packages those pieces into one operator surface.
 

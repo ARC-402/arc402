@@ -132,13 +132,29 @@ export function getEffectiveSender(config: Arc402Config): SenderInfo {
 
 export function printSenderInfo(config: Arc402Config): void {
   if (config.walletContractAddress) {
-    console.log(`Using ARC402Wallet: ${config.walletContractAddress}`);
+    console.log(`Using ARC402 wallet identity: ${config.walletContractAddress}`);
+    console.log(`Machine key acts only as executor — counterparties should use your ARC-402 wallet address, not the machine key`);
     console.log(`Policy enforcement active — transaction subject to configured limits`);
   } else {
     const wallet = new ethers.Wallet(config.privateKey!);
-    console.log(`Using EOA wallet: ${wallet.address}`);
-    console.log(`Tip: run \`arc402 wallet deploy\` to enable spending limits and policy enforcement`);
+    console.log(`Using direct EOA / machine key mode: ${wallet.address}`);
+    console.log(`Warning: this bypasses ARC-402 wallet identity and policy protections`);
+    console.log(`Tip: run \`arc402 wallet deploy\` to enable governed ARC-402 wallet operation`);
   }
+}
+
+export function assertEoaBypassAllowed(config: Arc402Config, useEoa: boolean, commandName: string): void {
+  if (!useEoa || !config.walletContractAddress) return;
+  if (process.env.ARC402_ALLOW_EOA_BYPASS === "1") {
+    console.warn(`WARNING: ${commandName} is running in legacy EOA bypass mode.`);
+    console.warn("Counterparties should still treat the ARC-402 wallet as the real protocol identity.");
+    return;
+  }
+
+  throw new Error(
+    `${commandName}: --use-eoa is disabled by default when an ARC-402 wallet is configured. ` +
+    `Use the wallet path instead, or set ARC402_ALLOW_EOA_BYPASS=1 for temporary compatibility-only bypass mode.`
+  );
 }
 
 /**

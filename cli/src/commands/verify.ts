@@ -3,7 +3,7 @@ import { ServiceAgreementClient } from "@arc402/sdk";
 import { ethers } from "ethers";
 import { loadConfig } from "../config";
 import { getClient, requireSigner } from "../client";
-import { printSenderInfo, executeContractWriteViaWallet } from "../wallet-router";
+import { printSenderInfo, executeContractWriteViaWallet, assertEoaBypassAllowed } from "../wallet-router";
 import { SERVICE_AGREEMENT_ABI } from "../abis";
 import { c } from '../ui/colors';
 import { startSpinner } from '../ui/spinner';
@@ -23,14 +23,15 @@ const AGREEMENT_STATUS_NAMES: Record<number, string> = {
 export function registerVerifyCommand(program: Command): void {
   program
     .command("verify <id>")
-    .description("Client verifies delivered work and releases escrow")
+    .description("Client verifies delivered work and releases escrow using the ARC-402 wallet as the client identity")
     .option("--auto", "Call autoRelease instead (for when verify window has elapsed and client is silent)")
-    .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
+    .option("--use-eoa", "Compatibility mode only: sign directly with machine key EOA, bypassing ARC-402 wallet identity and policy enforcement")
     .option("--skip-status-check", "Skip the PENDING_VERIFICATION pre-flight check")
     .option("--json")
     .action(async (id, opts) => {
       const config = loadConfig();
       if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
+      assertEoaBypassAllowed(config, !!opts.useEoa, "arc402 verify");
       const { signer } = await requireSigner(config);
       printSenderInfo(config);
       const spinner = startSpinner('Submitting…');

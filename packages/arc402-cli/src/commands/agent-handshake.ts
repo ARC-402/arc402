@@ -5,8 +5,9 @@ import { requireSigner } from "../client";
 import { c } from "../ui/colors";
 import { renderTree } from "../ui/tree";
 
-// Challenge-response: both agents sign a shared nonce with their agent key
-// and verify each other against AgentRegistry
+// Challenge-response: both agents authenticate as ARC-402 wallet identities.
+// The machine key signs as an authorized executor, but the identity verified
+// against AgentRegistry is the ARC-402 wallet, not the machine key.
 
 const AGENT_REGISTRY_ABI = [
   "function isRegistered(address wallet) view returns (bool)",
@@ -16,12 +17,12 @@ const AGENT_REGISTRY_ABI = [
 export function registerHandshakeCommand(program: Command): void {
   program
     .command("handshake <agentAddress>")
-    .description("Mutual challenge-response authentication with another ARC-402 agent. Verifies both parties are registered before any negotiation begins.")
+    .description("Mutual challenge-response authentication with another ARC-402 agent wallet. Verifies ARC-402 wallet identities before negotiation begins.")
     .option("--json", "Output as machine-parseable JSON")
     .action(async (agentAddress: string, opts) => {
       const config = loadConfig();
       const { signer, provider } = await requireSigner(config);
-      const myAddress = await signer.getAddress();
+      const myAddress = config.walletContractAddress ?? await signer.getAddress();
 
       // Generate shared challenge nonce
       const challengeNonce = ethers.hexlify(ethers.randomBytes(32));
@@ -39,7 +40,10 @@ export function registerHandshakeCommand(program: Command): void {
       const registry = new ethers.Contract(config.agentRegistryAddress, AGENT_REGISTRY_ABI, provider);
 
       const myRegistered = await registry.isRegistered(myAddress);
-      if (!myRegistered) throw new Error(`Your wallet ${myAddress} is not registered in AgentRegistry`);
+      if (!myRegistered) throw new Error(`Your ARC-402 wallet ${myAddress} is not registered in AgentRegistry`);
+
+      const theirRegistered = await registry.isRegistered(agentAddress);
+      if (!theirRegistered) throw new Error(`Target ${agentAddress} is not registered in AgentRegistry. Handshake targets must be ARC-402 wallet identities, not machine keys.`);
 
       const theirAgent = await registry.getAgent(agentAddress);
       if (!theirAgent.active) throw new Error(`Agent ${agentAddress} is not active in AgentRegistry`);

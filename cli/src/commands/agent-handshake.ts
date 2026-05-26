@@ -21,7 +21,7 @@ export function registerHandshakeCommand(program: Command): void {
     .action(async (agentAddress: string, opts) => {
       const config = loadConfig();
       const { signer, provider } = await requireSigner(config);
-      const myAddress = await signer.getAddress();
+      const myAddress = config.walletContractAddress ?? await signer.getAddress();
 
       // Generate shared challenge nonce
       const challengeNonce = ethers.hexlify(ethers.randomBytes(32));
@@ -39,7 +39,10 @@ export function registerHandshakeCommand(program: Command): void {
       const registry = new ethers.Contract(config.agentRegistryAddress, AGENT_REGISTRY_ABI, provider);
 
       const myRegistered = await registry.isRegistered(myAddress);
-      if (!myRegistered) throw new Error(`Your wallet ${myAddress} is not registered in AgentRegistry`);
+      if (!myRegistered) throw new Error(`Your ARC-402 wallet ${myAddress} is not registered in AgentRegistry`);
+
+      const theirRegistered = await registry.isRegistered(agentAddress);
+      if (!theirRegistered) throw new Error(`Target ${agentAddress} is not registered in AgentRegistry. Handshake targets must be ARC-402 wallet identities, not machine keys.`);
 
       const theirAgent = await registry.getAgent(agentAddress);
       if (!theirAgent.active) throw new Error(`Agent ${agentAddress} is not active in AgentRegistry`);

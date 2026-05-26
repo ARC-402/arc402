@@ -4,7 +4,7 @@ import { ethers } from "ethers";
 import { getCanonicalAgentRegistryAddress, loadConfig } from "../config";
 import { getClient, requireSigner } from "../client";
 import { hashFile, hashString } from "../utils/hash";
-import { printSenderInfo, executeContractWriteViaWallet } from "../wallet-router";
+import { printSenderInfo, executeContractWriteViaWallet, assertEoaBypassAllowed } from "../wallet-router";
 import { SERVICE_AGREEMENT_ABI } from "../abis";
 import { readFile } from "fs/promises";
 import prompts from "prompts";
@@ -16,15 +16,16 @@ import { renderTree } from '../ui/tree';
 export function registerDeliverCommand(program: Command): void {
   program
     .command("deliver <id>")
-    .description("Provider commits a deliverable for verification; legacy fulfill mode is compatibility-only")
+    .description("Provider commits a deliverable for verification using the ARC-402 wallet as the provider identity; legacy fulfill mode is compatibility-only")
     .option("--output <filepath>")
     .option("--message <text>")
     .option("--fulfill", "Use legacy trusted-only fulfill() instead of commitDeliverable()", false)
     .option("--encrypt", "Encrypt the deliverable before uploading to IPFS (prompts for recipient public key)", false)
-    .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
+    .option("--use-eoa", "Compatibility mode only: sign directly with machine key EOA, bypassing ARC-402 wallet identity and policy enforcement")
     .action(async (id, opts) => {
       const config = loadConfig();
       if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
+      assertEoaBypassAllowed(config, !!opts.useEoa, "arc402 deliver");
       const { signer, address: signerAddress } = await requireSigner(config);
       printSenderInfo(config);
 

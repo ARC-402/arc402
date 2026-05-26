@@ -2,7 +2,9 @@ import { Command } from "commander";
 import { ethers } from "ethers";
 import { getCanonicalAgentRegistryAddress, getCanonicalNetworkAddress, getUsdcAddress, loadConfig } from "../config";
 import { requireSigner } from "../client";
-import { AGENT_REGISTRY_ABI } from "../abis";
+import { AGENT_REGISTRY_ABI, ARC402_WALLET_EXECUTE_ABI } from "../abis";
+import { requestOwnerApproval } from "../approval/broker";
+import { sendTransactionWithSession } from "../walletconnect";
 import { startSpinner } from "../ui/spinner";
 import { renderTree } from "../ui/tree";
 import { c } from "../ui/colors";
@@ -61,7 +63,7 @@ const HANDSHAKE_TYPES: Record<string, number> = {
 // ─── Auto-Whitelist ──────────────────────────────────────────────────────────
 
 async function ensureWhitelisted(
-  signer: ethers.Signer,
+  config: ReturnType<typeof loadConfig>,
   provider: ethers.Provider,
   walletAddress: string,
   policyEngineAddress: string,
@@ -72,14 +74,80 @@ async function ensureWhitelisted(
 
   if (!isWhitelisted) {
     console.log("Handshake contract not yet whitelisted on your wallet.");
-    console.log("Whitelisting now (one-time setup)...");
+    console.log("Whitelisting now (one-time setup via owner approval)...");
 
-    const peSigner = new ethers.Contract(policyEngineAddress, POLICY_ENGINE_ABI, signer);
-    const tx = await peSigner.whitelistContract(walletAddress, handshakeAddress);
-    console.log(`  tx: ${tx.hash}`);
-    await tx.wait();
+    if (!config.walletContractAddress || config.walletContractAddress.toLowerCase() !== walletAddress.toLowerCase()) {
+      throw new Error("Handshake whitelist requires walletContractAddress config to match the ARC-402 wallet identity.");
+    }
+
+    const chainId = config.network === "base-mainnet" ? 8453 : 84532;
+    const policyIface = new ethers.Interface(POLICY_ENGINE_ABI);
+    const txData = {
+      to: policyEngineAddress,
+      data: policyIface.encodeFunctionData("whitelistContract", [walletAddress, handshakeAddress]),
+      value: "0x0",
+    };
+
+    const approval = await requestOwnerApproval({
+      actionType: "policy_update",
+      signerMode: "owner_wallet",
+      chainId,
+      walletAddress,
+      txs: [txData],
+      ui: {
+        title: "Whitelist handshake contract",
+        summary: "Approve: whitelist Handshake on PolicyEngine for your ARC-402 wallet",
+        risk: "high",
+      },
+      metadata: {
+        category: "policy",
+        sourceRuntime: "cli",
+      },
+    }, config);
+
+    if (approval.status !== "approved" || !approval.session || approval.session.kind !== "walletconnect") {
+      throw new Error(approval.error ?? "Owner approval transport failed");
+    }
+
+    const { client, session, account } = approval.session;
+    const txHash = await sendTransactionWithSession(client, session, account, chainId, txData);
+    await provider.waitForTransaction(txHash);
+    console.log(`  tx: ${txHash}`);
     console.log("  ✓ Handshake contract whitelisted\n");
   }
+}
+
+async function sendHandshakeViaWallet(
+  signer: ethers.Signer,
+  walletAddress: string,
+  handshakeAddress: string,
+  agentAddress: string,
+  hsType: number,
+  note: string,
+  opts: { tip?: string; usdc?: string },
+  usdcAddress: string,
+): Promise<ethers.ContractTransactionResponse> {
+  const handshakeIface = new ethers.Interface(HANDSHAKE_ABI);
+  let data: string;
+  let value = 0n;
+
+  if (opts.usdc) {
+    const amount = ethers.parseUnits(opts.usdc, 6);
+    data = handshakeIface.encodeFunctionData("sendHandshakeWithToken", [agentAddress, hsType, note, usdcAddress, amount]);
+  } else {
+    value = opts.tip ? ethers.parseEther(opts.tip) : 0n;
+    data = handshakeIface.encodeFunctionData("sendHandshake", [agentAddress, hsType, note]);
+  }
+
+  const wallet = new ethers.Contract(walletAddress, ARC402_WALLET_EXECUTE_ABI, signer);
+  return await wallet.executeContractCall({
+    target: handshakeAddress,
+    data,
+    value,
+    minReturnValue: 0n,
+    maxApprovalAmount: 0n,
+    approvalToken: ethers.ZeroAddress,
+  });
 }
 
 // ─── Commands ────────────────────────────────────────────────────────────────
@@ -100,13 +168,26 @@ export function registerArenaHandshakeCommands(program: Command): void {
     .action(async (agentAddress: string, opts) => {
       const config = loadConfig();
       const { signer, provider } = await requireSigner(config);
-      const myAddress = await signer.getAddress();
+      const signerAddress = await signer.getAddress();
+      const walletAddress = config.walletContractAddress ?? signerAddress;
+      const myAddress = walletAddress;
 
       const handshakeAddress = getCanonicalNetworkAddress(config, "handshakeAddress");
       const policyEngineAddress = getCanonicalNetworkAddress(config, "policyEngineAddress");
+      const registryAddress = getCanonicalAgentRegistryAddress(config);
+
+      const registry = new ethers.Contract(registryAddress, AGENT_REGISTRY_ABI, provider);
+      const theirRegistered = await registry.isRegistered(agentAddress);
+      if (!theirRegistered) {
+        throw new Error(`Target ${agentAddress} is not registered in AgentRegistry. Handshake targets must be ARC-402 wallet identities, not machine keys.`);
+      }
+      const theirAgent = await registry.getAgent(agentAddress);
+      if (!theirAgent.active) {
+        throw new Error(`Agent ${agentAddress} is not active in AgentRegistry`);
+      }
 
       // Auto-whitelist check
-      await ensureWhitelisted(signer, provider, myAddress, policyEngineAddress, handshakeAddress);
+      await ensureWhitelisted(config, provider, walletAddress, policyEngineAddress, handshakeAddress);
 
       const hsType = HANDSHAKE_TYPES[opts.type.toLowerCase()];
       if (hsType === undefined) {
@@ -115,24 +196,24 @@ export function registerArenaHandshakeCommands(program: Command): void {
         process.exit(1);
       }
 
-      const handshake = new ethers.Contract(handshakeAddress, HANDSHAKE_ABI, signer);
-
       const hsSpinner = startSpinner(`Sending ${opts.type} handshake...`);
       let tx;
-      if (opts.usdc) {
-        // USDC handshake
-        const usdcAddress = getUsdcAddress(config);
-        const amount = ethers.parseUnits(opts.usdc, 6);
-        tx = await handshake.sendHandshakeWithToken(agentAddress, hsType, opts.note, usdcAddress, amount);
+      const usdcAddress = getUsdcAddress(config);
+      if (config.walletContractAddress) {
+        tx = await sendHandshakeViaWallet(signer, config.walletContractAddress, handshakeAddress, agentAddress, hsType, opts.note, opts, usdcAddress);
       } else {
-        // ETH handshake (with optional tip)
-        const value = opts.tip ? ethers.parseEther(opts.tip) : 0n;
-        tx = await handshake.sendHandshake(agentAddress, hsType, opts.note, { value });
+        const handshake = new ethers.Contract(handshakeAddress, HANDSHAKE_ABI, signer);
+        if (opts.usdc) {
+          const amount = ethers.parseUnits(opts.usdc, 6);
+          tx = await handshake.sendHandshakeWithToken(agentAddress, hsType, opts.note, usdcAddress, amount);
+        } else {
+          const value = opts.tip ? ethers.parseEther(opts.tip) : 0n;
+          tx = await handshake.sendHandshake(agentAddress, hsType, opts.note, { value });
+        }
       }
       hsSpinner.succeed("Handshake sent");
 
       // Notify recipient's HTTP endpoint (non-blocking)
-      const registryAddress = getCanonicalAgentRegistryAddress(config);
       try {
         await pingHandshakeEndpoint(
           agentAddress,
@@ -169,12 +250,23 @@ export function registerArenaHandshakeCommands(program: Command): void {
     .action(async (agents: string[], opts) => {
       const config = loadConfig();
       const { signer, provider } = await requireSigner(config);
-      const myAddress = await signer.getAddress();
+      const signerAddress = await signer.getAddress();
+      const walletAddress = config.walletContractAddress ?? signerAddress;
+      const myAddress = walletAddress;
 
       const handshakeAddress = getCanonicalNetworkAddress(config, "handshakeAddress");
       const policyEngineAddress = getCanonicalNetworkAddress(config, "policyEngineAddress");
+      const registryAddress = getCanonicalAgentRegistryAddress(config);
 
-      await ensureWhitelisted(signer, provider, myAddress, policyEngineAddress, handshakeAddress);
+      const registry = new ethers.Contract(registryAddress, AGENT_REGISTRY_ABI, provider);
+      for (const agent of agents) {
+        const isRegistered = await registry.isRegistered(agent);
+        if (!isRegistered) {
+          throw new Error(`Target ${agent} is not registered in AgentRegistry. Batch handshake targets must be ARC-402 wallet identities, not machine keys.`);
+        }
+      }
+
+      await ensureWhitelisted(config, provider, walletAddress, policyEngineAddress, handshakeAddress);
 
       const hsType = HANDSHAKE_TYPES[opts.type.toLowerCase()];
       if (hsType === undefined) {
@@ -187,11 +279,26 @@ export function registerArenaHandshakeCommands(program: Command): void {
         process.exit(1);
       }
 
-      const handshake = new ethers.Contract(handshakeAddress, HANDSHAKE_ABI, signer);
       const types = agents.map(() => hsType);
       const notes = agents.map(() => opts.note);
 
-      const tx = await handshake.sendBatch(agents, types, notes);
+      let tx;
+      if (config.walletContractAddress) {
+        const handshakeIface = new ethers.Interface(HANDSHAKE_ABI);
+        const data = handshakeIface.encodeFunctionData("sendBatch", [agents, types, notes]);
+        const wallet = new ethers.Contract(config.walletContractAddress, ARC402_WALLET_EXECUTE_ABI, signer);
+        tx = await wallet.executeContractCall({
+          target: handshakeAddress,
+          data,
+          value: 0n,
+          minReturnValue: 0n,
+          maxApprovalAmount: 0n,
+          approvalToken: ethers.ZeroAddress,
+        });
+      } else {
+        const handshake = new ethers.Contract(handshakeAddress, HANDSHAKE_ABI, signer);
+        tx = await handshake.sendBatch(agents, types, notes);
+      }
       console.log(`✓ Batch handshake sent to ${agents.length} agents`);
       agents.forEach(a => console.log(`  → ${a}`));
       console.log(`  tx: ${tx.hash}`);

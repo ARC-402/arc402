@@ -3,18 +3,19 @@ import { ServiceAgreementClient } from "@arc402/sdk";
 import { ethers } from "ethers";
 import { getCanonicalAgentRegistryAddress, loadConfig } from "../config";
 import { requireSigner } from "../client";
-import { printSenderInfo, executeContractWriteViaWallet } from "../wallet-router";
+import { printSenderInfo, executeContractWriteViaWallet, assertEoaBypassAllowed } from "../wallet-router";
 import { SERVICE_AGREEMENT_ABI } from "../abis";
 import { resolveAgentEndpoint, notifyAgent } from "../endpoint-notify";
 import { c } from "../ui/colors";
 import { startSpinner } from "../ui/spinner";
 
 export function registerAcceptCommand(program: Command): void {
-  program.command("accept <id>").description("Provider accepts a proposed agreement")
-    .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
+  program.command("accept <id>").description("Provider accepts a proposed agreement using the ARC-402 wallet as the provider identity")
+    .option("--use-eoa", "Compatibility mode only: sign directly with machine key EOA, bypassing ARC-402 wallet identity and policy enforcement")
     .action(async (id, opts) => {
     const config = loadConfig();
     if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
+    assertEoaBypassAllowed(config, !!opts.useEoa, "arc402 accept");
     const { signer, address: signerAddress } = await requireSigner(config);
     printSenderInfo(config);
 

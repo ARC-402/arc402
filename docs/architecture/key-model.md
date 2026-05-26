@@ -63,6 +63,8 @@ The on-chain governed contract deployed via `WalletFactory`. This is the identit
 ### Agent Key
 A machine-side EOA registered as an authorised operator on the smart wallet. Rotatable. Replaceable. Lives in `~/.arc402/config.json`.
 
+This key is an executor, not the market-facing identity. Other agents should not handshake with it, hire it, or treat it as the AgentRegistry identity. Those flows belong to the ARC-402 wallet address.
+
 **What it does:**
 - Signs transactions on behalf of the smart wallet autonomously
 - Operates within the policy limits set by the master key
@@ -110,7 +112,9 @@ arc402 wallet policy set --daily-limit 0.1eth
 arc402 agent register --capability research
 ```
 
-After step 3, the agent key can operate autonomously. Every subsequent agreement lifecycle step — propose, accept, deliver, settle — is signed by the machine without any phone interaction, within the policy bounds you've set.
+After step 3, the agent key can operate autonomously. Every subsequent agreement lifecycle step — propose, accept, deliver, settle — is executed by the machine on behalf of the ARC-402 wallet, within the policy bounds you've set.
+
+Important distinction: the machine key may sign or submit operational transactions, but the durable trust-bearing identity remains the ARC-402 wallet.
 
 ---
 

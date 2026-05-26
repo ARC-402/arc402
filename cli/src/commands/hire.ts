@@ -5,7 +5,7 @@ import { getCanonicalAgentRegistryAddress, getUsdcAddress, loadConfig } from "..
 import { requireSigner } from "../client";
 import { hashFile, hashString } from "../utils/hash";
 import { parseDuration } from "../utils/time";
-import { printSenderInfo, executeContractWriteViaWallet } from "../wallet-router";
+import { printSenderInfo, executeContractWriteViaWallet, assertEoaBypassAllowed } from "../wallet-router";
 import { AGENT_REGISTRY_ABI, SERVICE_AGREEMENT_ABI } from "../abis";
 import { c } from '../ui/colors';
 import { startSpinner } from '../ui/spinner';
@@ -14,11 +14,13 @@ import { formatAddress } from '../ui/format';
 import { resolveAgentEndpoint } from "../endpoint-notify";
 
 /**
- * Resolve a provider argument to a wallet address.
+ * Resolve a provider argument to the agent's ARC-402 wallet address.
  * Accepts:
- *   - 0x... wallet address (passthrough)
+ *   - 0x... ARC-402 wallet address (passthrough)
  *   - subdomain.arc402.xyz (lookup in AgentRegistry by endpoint)
  *   - https://... endpoint URL (lookup in AgentRegistry by endpoint)
+ *
+ * Never use the machine key as the counterparty identity for hire/purchase flows.
  */
 async function resolveProviderAddress(
   providerArg: string,
@@ -65,7 +67,7 @@ const sessionManager = new SessionManager();
 export function registerHireCommand(program: Command): void {
   program
     .command("hire [provider]")
-    .description("Hire an agent — pass wallet address (0x...) or subdomain (gigabrain.arc402.xyz)")
+    .description("Hire an agent using its ARC-402 wallet identity — pass wallet address (0x...) or endpoint/subdomain (resolved to the agent's wallet)")
     .option("--agent <address>", "Provider wallet address or subdomain (alias for positional arg)")
     .requiredOption("--task <description>")
     .requiredOption("--service-type <type>")
@@ -74,16 +76,17 @@ export function registerHireCommand(program: Command): void {
     .option("--token <token>", "eth or usdc", "eth")
     .option("--deliverable-spec <filepath>")
     .option("--session <sessionId>", "Load agreed price and deadline from a completed negotiation session")
-    .option("--use-eoa", "Sign directly with machine key EOA, bypassing the smart wallet")
+    .option("--use-eoa", "Compatibility mode only: sign directly with machine key EOA, bypassing ARC-402 wallet identity and policy enforcement")
     .option("--json")
     .action(async (providerArg: string | undefined, opts) => {
       const config = loadConfig();
       if (!config.serviceAgreementAddress) throw new Error("serviceAgreementAddress missing in config");
+      assertEoaBypassAllowed(config, !!opts.useEoa, "arc402 hire");
       const { signer, address } = await requireSigner(config);
 
       // Resolve provider: positional arg OR --agent flag
       const rawProvider = providerArg ?? opts.agent;
-      if (!rawProvider) throw new Error("Provider required. Pass as positional arg (gigabrain.arc402.xyz) or --agent <address>");
+      if (!rawProvider) throw new Error("Provider required. Pass an ARC-402 wallet address, endpoint, or subdomain (for example gigabrain.arc402.xyz), not a machine key.");
       const rpcProvider = new ethers.JsonRpcProvider(config.rpcUrl);
       const registryAddr = getCanonicalAgentRegistryAddress(config);
       const resolving = startSpinner(`Resolving provider: ${rawProvider}`);
@@ -148,7 +151,7 @@ export function registerHireCommand(program: Command): void {
         } catch { /* assume registered if read fails */ }
         if (!isRegistered) {
           console.error(`Provider ${opts.agent} is not registered in AgentRegistry.`);
-          console.error(`Verify the agent address is correct, or check the registry at ${agentRegistryAddress}.`);
+          console.error(`Use the counterparty's ARC-402 wallet address or endpoint/subdomain — not a machine key.`);
           process.exit(1);
         }
       }
