@@ -1,6 +1,6 @@
 {
   "name": "@arc402/daemon",
-  "version": "0.9.5",
+  "version": "0.9.6",
   "description": "ARC-402 daemon \u2014 always-on governed commerce node",
   "main": "dist/index.js",
   "files": [

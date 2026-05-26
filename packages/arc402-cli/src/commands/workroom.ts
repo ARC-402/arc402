@@ -837,6 +837,45 @@ network_policies:
 
       const checks: Array<{ label: string; pass: boolean; detail: string }> = [];
 
+      async function checkProtocolSurface(): Promise<void> {
+        try {
+          const [healthRes, agentRes, handshakeRes] = await Promise.all([
+            fetch("http://127.0.0.1:4402/health", { signal: AbortSignal.timeout(2000) }),
+            fetch("http://127.0.0.1:4402/agent", { signal: AbortSignal.timeout(2000) }),
+            fetch("http://127.0.0.1:4402/handshake", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ from: "0x0000000000000000000000000000000000000001", type: "doctor", note: "protocol-surface-check" }),
+              signal: AbortSignal.timeout(2000),
+            }),
+          ]);
+
+          checks.push({
+            label: "Protocol /agent route",
+            pass: agentRes.ok,
+            detail: agentRes.ok ? "public agent route responding" : `returned HTTP ${agentRes.status}`,
+          });
+          checks.push({
+            label: "Protocol /handshake route",
+            pass: handshakeRes.ok,
+            detail: handshakeRes.ok ? "public handshake route responding" : `returned HTTP ${handshakeRes.status}`,
+          });
+          checks.push({
+            label: "Protocol-ready health",
+            pass: healthRes.ok && agentRes.ok && handshakeRes.ok,
+            detail: healthRes.ok && agentRes.ok && handshakeRes.ok
+              ? "health + public protocol surface responding"
+              : "container may be up, but ARC-402 protocol surface is incomplete",
+          });
+        } catch (err) {
+          checks.push({
+            label: "Protocol-ready health",
+            pass: false,
+            detail: `failed to probe protocol surface (${err instanceof Error ? err.message : String(err)})`,
+          });
+        }
+      }
+
       // Docker
       const docker = dockerAvailable();
       checks.push({ label: "Docker", pass: docker, detail: docker ? "available" : "not available — install Docker Desktop" });
@@ -891,6 +930,7 @@ network_policies:
         const rpcTest = runCmd("docker", ["exec", WORKROOM_CONTAINER, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", "https://developer-access-mainnet.base.org"]);
         const rpcOk = rpcTest.ok && rpcTest.stdout.trim() !== "000";
         checks.push({ label: "Base RPC from workroom", pass: rpcOk, detail: rpcOk ? `HTTP ${rpcTest.stdout.trim()}` : "FAILED — network policy may be blocking RPC" });
+        await checkProtocolSurface();
       }
 
       // Print results

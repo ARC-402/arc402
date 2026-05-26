@@ -717,21 +717,24 @@ export function registerSetupCommands(program: Command): void {
           process.exit(1);
         }
 
-        // Wait for daemon health (up to 30s)
-        workroomSpin.update("Waiting for daemon to become healthy on :4402…");
+        // Wait for daemon protocol surface (up to 30s)
+        workroomSpin.update("Waiting for ARC-402 protocol surface on :4402…");
         let healthy = false;
         for (let i = 0; i < 15; i++) {
           await sleep(2000);
           try {
-            const hr = await fetch("http://localhost:4402/health", { signal: AbortSignal.timeout(2000) });
-            if (hr.ok) { healthy = true; break; }
+            const [hr, ar] = await Promise.all([
+              fetch("http://localhost:4402/health", { signal: AbortSignal.timeout(2000) }),
+              fetch("http://localhost:4402/agent", { signal: AbortSignal.timeout(2000) }),
+            ]);
+            if (hr.ok && ar.ok) { healthy = true; break; }
           } catch { /* not ready yet */ }
         }
 
         if (healthy) {
-          workroomSpin.succeed("Workroom daemon healthy on port 4402");
+          workroomSpin.succeed("Workroom daemon protocol surface ready on port 4402");
         } else {
-          workroomSpin.fail("Daemon did not become healthy in time");
+          workroomSpin.fail("Daemon did not expose ARC-402 protocol routes in time");
           console.error(c.dim("  Check logs: docker logs arc402-workroom"));
           process.exit(1);
         }

@@ -366,7 +366,46 @@ export function createApiServer(apiConfig: ApiConfig): express.Express {
 
   // ── Health ──────────────────────────────────────────────────────────────────
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, wallet: apiConfig.walletAddress });
+    res.json({ ok: true, wallet: apiConfig.walletAddress, protocolReady: true });
+  });
+
+  // ── Public ARC-402 protocol surface ─────────────────────────────────────────
+  app.get("/agent", (_req, res) => {
+    res.json({
+      wallet: apiConfig.walletAddress,
+      chainId: apiConfig.chainId,
+      daemonId: apiConfig.daemonId,
+      protocol: "arc-402",
+      protocolReady: true,
+    });
+  });
+
+  app.get("/capabilities", (_req, res) => {
+    res.json({
+      wallet: apiConfig.walletAddress,
+      capabilities: [],
+      protocolReady: true,
+    });
+  });
+
+  app.get("/status", (_req, res) => {
+    res.json({
+      ok: true,
+      wallet: apiConfig.walletAddress,
+      daemonId: apiConfig.daemonId,
+      chainId: apiConfig.chainId,
+      protocolReady: true,
+    });
+  });
+
+  app.post("/handshake", (req: Request, res: Response): void => {
+    const msg = (req.body ?? {}) as Record<string, unknown>;
+    broadcast("handshake_received", {
+      from: String(msg.from ?? ""),
+      type: String(msg.type ?? ""),
+      note: String(msg.note ?? ""),
+    });
+    res.json({ received: true, agent: apiConfig.walletAddress });
   });
 
   // ── Public agent metadata ───────────────────────────────────────────────────
