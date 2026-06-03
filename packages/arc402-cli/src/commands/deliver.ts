@@ -107,7 +107,7 @@ export function registerDeliverCommand(program: Command): void {
         }
         encSpinner.succeed(` Delivered — agreement #${id}`);
         renderTree([
-          { label: 'Hash', value: hash },
+          { label: 'Commit Hash', value: hash },
           { label: 'CID', value: cid },
           { label: 'URI', value: uri, last: true },
         ]);
@@ -128,7 +128,7 @@ export function registerDeliverCommand(program: Command): void {
       }
       deliverSpinner.succeed(` ${opts.fulfill ? 'Fulfilled' : 'Delivered'} — agreement #${id}`);
       renderTree([
-        { label: 'Hash', value: hash, last: true },
+        { label: 'Commit Hash', value: hash, last: true },
       ]);
 
       // Notify client's HTTP endpoint (non-blocking)
