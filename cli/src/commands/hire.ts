@@ -197,6 +197,7 @@ export function registerHireCommand(program: Command): void {
       printSenderInfo(config);
 
       let agreementId: bigint;
+      let txHash: string;
 
       const hireSpinner = startSpinner('Submitting agreement...');
 
@@ -214,6 +215,7 @@ export function registerHireCommand(program: Command): void {
           useUsdc ? price : 0n,   // maxApprovalAmount for USDC
         );
         const receipt = await tx.wait();
+        txHash = receipt!.hash;
         const saInterface = new ethers.Interface(SERVICE_AGREEMENT_ABI);
         let found = false;
         for (const log of receipt!.logs) {
@@ -251,6 +253,7 @@ export function registerHireCommand(program: Command): void {
           deliverablesHash,
         });
         agreementId = result.agreementId;
+        txHash = result.receipt.hash;
       }
 
       hireSpinner.succeed('Agreement proposed');
@@ -288,18 +291,23 @@ export function registerHireCommand(program: Command): void {
       }
 
       if (opts.json) {
-        const output: Record<string, unknown> = { agreementId: agreementId!.toString(), deliverablesHash };
+        const output: Record<string, unknown> = { agreementId: agreementId!.toString(), deliverablesHash, txHash };
         if (transcriptHash) output.transcriptHash = transcriptHash;
         if (opts.session) output.sessionId = opts.session;
         return console.log(JSON.stringify(output, null, 2));
       }
 
       console.log(' ' + c.success + c.white(` Agreement #${agreementId!} proposed`));
+      // Tree labels: "Spec Hash" is the deliverables hash the client commits at propose time
+      // (keccak256 of task / deliverable spec). It is NOT a UserOp hash and NOT the on-chain
+      // tx hash — see "Tx" below for that. The on-chain Agreement struct stores this in
+      // `deliverablesHash`; the provider's later commit lands in `committedHash` (see `arc402 agreement <id>`).
       const hireTreeItems: TreeItem[] = [
         { label: 'Agent', value: formatAddress(opts.agent) },
         { label: 'Task', value: opts.task.slice(0, 60) + (opts.task.length > 60 ? '...' : '') },
         { label: 'Service', value: opts.serviceType },
-        { label: 'Hash', value: String(deliverablesHash), last: !transcriptHash },
+        { label: 'Spec Hash', value: String(deliverablesHash) },
+        { label: 'Tx', value: txHash, last: !transcriptHash },
       ];
       if (transcriptHash) hireTreeItems.push({ label: 'Transcript', value: transcriptHash, last: true });
       renderTree(hireTreeItems);

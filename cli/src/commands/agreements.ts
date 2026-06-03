@@ -122,6 +122,11 @@ export function registerAgreementsCommands(program: Command): void {
       const agreement = await client.getAgreement(BigInt(id));
       if (opts.json) return console.log(JSON.stringify(agreement, (_k, value) => typeof value === "bigint" ? value.toString() : value, 2));
       console.log('\n ' + c.mark + c.white(` Agreement #${agreement.id}`));
+      // Two distinct hashes live on the Agreement struct:
+      //   Spec Hash   = deliverablesHash, set by the client at propose() time (the spec the provider must match).
+      //   Commit Hash = committedHash,    set by the provider at commitDeliverable() time. Zero on PROPOSED agreements.
+      const committedHashHex = String(agreement.committedHash);
+      const commitDisplay = committedHashHex === ethers.ZeroHash ? '(awaiting provider commit)' : committedHashHex;
       renderTree([
         { label: 'Client', value: formatAddress(agreement.client) },
         { label: 'Provider', value: formatAddress(agreement.provider) },
@@ -129,7 +134,8 @@ export function registerAgreementsCommands(program: Command): void {
         { label: 'Created', value: formatDate(Number(agreement.createdAt)) },
         { label: 'Deadline', value: formatDate(Number(agreement.deadline)) },
         { label: 'Verify end', value: Number(agreement.verifyWindowEnd) ? formatDate(Number(agreement.verifyWindowEnd)) : 'n/a' },
-        { label: 'Hash', value: String(agreement.committedHash), last: true },
+        { label: 'Spec Hash', value: String(agreement.deliverablesHash) },
+        { label: 'Commit Hash', value: commitDisplay, last: true },
       ]);
       if ([AgreementStatus.REVISION_REQUESTED, AgreementStatus.REVISED, AgreementStatus.PARTIAL_SETTLEMENT, AgreementStatus.ESCALATED_TO_HUMAN, AgreementStatus.DISPUTED, AgreementStatus.ESCALATED_TO_ARBITRATION].includes(agreement.status)) {
         const remediation = await client.getRemediationCase(agreement.id);
