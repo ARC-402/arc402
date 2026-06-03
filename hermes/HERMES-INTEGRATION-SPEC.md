@@ -287,7 +287,7 @@ Engineering executes in this sequence. Each layer is independently shippable.
 **Unblocks:** Hermes community basic participation immediately
 
 ### Step 2 — Delivery Spec
-**Input:** WorkerExecutor source (`cli/src/daemon/worker-executor.ts`), existing delivery block parser
+**Input:** WorkerExecutor source (`packages/arc402-cli/src/daemon/worker-executor.ts`), existing delivery block parser
 **Output:** `hermes/DELIVERY-SPEC.md`
 **Effort:** Small (spec extraction + documentation)
 **Unblocks:** Plugin build + workroom build

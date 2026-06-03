@@ -4,7 +4,7 @@
  * Usage: npx hardhat run scripts/deployWalletFactoryMainnet.ts --network baseMainnet
  *
  * After deploy, update the factory address in:
- *   - cli/src/config.ts
+ *   - packages/arc402-cli/src/config.ts
  *   - reference/sdk/src/types.ts
  *   - python-sdk/arc402/types.py
  */
@@ -61,10 +61,10 @@ async function main() {
   console.log("WalletFactory v2:", factoryAddr);
   console.log("────────────────────────────────────────────────────────");
   console.log("\nNext — update these 3 files with the address above:");
-  console.log("  cli/src/config.ts          line ~80");
+  console.log("  packages/arc402-cli/src/config.ts          line ~80");
   console.log("  reference/sdk/src/types.ts line ~89");
   console.log("  python-sdk/arc402/types.py line ~35");
-  console.log("\nThen rebuild CLI: cd cli && npm run build");
+  console.log("\nThen rebuild CLI: cd packages/arc402-cli && npm run build");
   console.log("Then deploy your wallet: npx hardhat run scripts/deployWallet.ts --network baseMainnet");
 }
 

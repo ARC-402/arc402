@@ -122,9 +122,8 @@ docs/launch-implementation-roadmap.md
 docs/launch-readiness-prd.md
 docs/macbook-validation-runbook.md
 docs/post-audit-launch-checklist.md
-cli/scripts/
-cli/src/drain-v4.ts
-cli/test/
+cli/*
+!cli/README.md
 DEPLOY-HANDSHAKE.md
 TODO.md
 brand/
@@ -145,10 +144,6 @@ medusa.json
 internal-specs/
 products/arc402/
 skills/
-cli/INK6-UX-SPEC.md
-cli/MIGRATION-SPEC.md
-cli/TUI-SPEC.md
-cli/workroom/
 
 # Launch surface — local dev only (root-anchored so arena/ subdirs are not caught)
 /test/

@@ -1,4 +1,4 @@
-"""ERC-4337 BundlerClient — mirrors cli/src/bundler.ts."""
+"""ERC-4337 BundlerClient — mirrors packages/arc402-cli/src/bundler.ts."""
 
 import time
 from dataclasses import dataclass, field

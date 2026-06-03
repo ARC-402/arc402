@@ -221,7 +221,7 @@ async function main() {
   }
 
   console.log("\n⚠️  Post-deploy checklist:");
-  console.log("  1. Update cli/src/config.ts base-sepolia with new addresses");
+  console.log("  1. Update packages/arc402-cli/src/config.ts base-sepolia with new addresses");
   console.log("  2. Call SA.setProtocolTreasury(treasury) if not already set");
   console.log("  3. Call DA.setTokenUsdRate(USDC_ADDRESS, rate) for each payment token");
   console.log("  4. Transfer SA ownership to ARC402Governance (F-06)");

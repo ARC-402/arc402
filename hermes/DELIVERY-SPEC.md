@@ -1,6 +1,6 @@
 # ARC-402 Delivery Block Spec
 *Version: 1.0*
-*Source of truth: `cli/src/daemon/worker-executor.ts` — `runViaGateway()` and `buildTask()`*
+*Source of truth: `packages/arc402-cli/src/daemon/worker-executor.ts` — `runViaGateway()` and `buildTask()`*
 
 ---
 
