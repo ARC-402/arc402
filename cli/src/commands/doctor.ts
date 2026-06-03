@@ -29,6 +29,37 @@ function warn(label: string, detail?: string): void {
   );
 }
 
+/**
+ * Distinguish "the RPC didn't answer" from "the contract reverted".
+ *
+ * An overloaded or unreachable RPC surfaces in several ways, none of which mean
+ * the machine key is unauthorized:
+ *   - a JSON-RPC server error (e.g. code -32016 "over rate limit", or HTTP 429);
+ *   - a throttled/empty body returned in place of an `eth_call` result, which
+ *     ethers decodes as a CALL_EXCEPTION with `data=null` ("missing revert
+ *     data") — for a function we know exists, that means "no answer", not
+ *     "false";
+ *   - a timeout (the call simply never came back in time).
+ * Treating any of these as a hard failure makes a flaky/throttled public RPC
+ * look like a broken wallet or de-authorized key, which sends operators chasing
+ * a phantom auth problem. Report them as inconclusive and point at a real RPC.
+ */
+function looksLikeRpcProblem(err: unknown): boolean {
+  const e = err as {
+    code?: string;
+    shortMessage?: string;
+    error?: { code?: number; message?: string };
+    info?: { error?: { code?: number; message?: string } };
+  };
+  const rpcError = e?.error ?? e?.info?.error;
+  if (rpcError?.code === -32016 || rpcError?.code === 429) return true;
+  const text = `${e?.shortMessage ?? ""} ${err instanceof Error ? err.message : String(err)} ${rpcError?.message ?? ""}`.toLowerCase();
+  if (/rate limit|too many requests|\b429\b|timeout|timed out|econnreset|etimedout|enotfound|failed to detect network/.test(text)) return true;
+  // Empty/garbled response decoded as a non-revert CALL_EXCEPTION.
+  if (e?.code === "CALL_EXCEPTION" && /missing revert data/.test(text)) return true;
+  return false;
+}
+
 async function fetchJson(url: string, timeoutMs = 4000): Promise<unknown> {
   const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
   return res.json();
@@ -104,8 +135,12 @@ export function registerDoctorCommand(program: Command): void {
       if (config.privateKey && config.walletContractAddress) {
         try {
           const { ethers } = await import("ethers");
+          const { getClient } = await import("../client");
           const machineKey = new ethers.Wallet(config.privateKey);
-          const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+          // getClient pins the chain via staticNetwork, which skips the extra
+          // eth_chainId network-detection round-trip a fresh JsonRpcProvider
+          // would otherwise make — one fewer request against rate-limited RPCs.
+          const { provider } = await getClient(config);
           const iface = new ethers.Interface(["function authorizedMachineKeys(address) external view returns (bool)"]);
           const data = iface.encodeFunctionData("authorizedMachineKeys", [machineKey.address]);
           const result = await Promise.race([
@@ -119,7 +154,14 @@ export function registerDoctorCommand(program: Command): void {
             fail("Machine key not authorized", machineKey.address + " — run: arc402 wallet onboard");
           }
         } catch (err) {
-          warn("Machine key check failed", err instanceof Error ? err.message : String(err));
+          if (looksLikeRpcProblem(err)) {
+            warn(
+              "Machine key check inconclusive",
+              "RPC unavailable (rate-limited, timed out, or empty response) — not an auth failure. Try a dedicated RPC: arc402 config set rpcUrl <url>"
+            );
+          } else {
+            warn("Machine key check failed", err instanceof Error ? err.message : String(err));
+          }
         }
       } else if (!config.privateKey) {
         warn("Machine key not configured", "No privateKey in config");
